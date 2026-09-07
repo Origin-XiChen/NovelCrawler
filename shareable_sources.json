@@ -1,0 +1,91 @@
+[
+  {
+    "name": "笔趣阁365",
+    "base": "https://www.biquge365.net",
+    "charset": "gbk",
+    "verify_ssl": true,
+    "search_interval": 20,
+    "search": {
+      "method": "POST",
+      "path": "/s.php",
+      "param": "s",
+      "extra": {
+        "type": "articlename"
+      }
+    },
+    "book": {
+      "href_pattern": "/book/\\d+/"
+    },
+    "toc": {
+      "chapter_pattern": "/chapter/\\d+/",
+      "reverse": true
+    }
+  },
+  {
+    "name": "笔趣阁345",
+    "base": "https://www.biquge345.com",
+    "charset": "gbk",
+    "verify_ssl": true,
+    "search_interval": 20,
+    "search": {
+      "method": "POST",
+      "path": "/s.php",
+      "param": "s",
+      "extra": {
+        "type": "articlename"
+      }
+    },
+    "book": {
+      "href_pattern": "/book/\\d+/"
+    },
+    "toc": {
+      "chapter_pattern": "/chapter/\\d+/",
+      "reverse": true
+    }
+  },
+  {
+    "name": "经典书库",
+    "base": "https://www.jingdianbook.com",
+    "charset": "utf-8",
+    "verify_ssl": true,
+    "search_interval": 0,
+    "search": {
+      "method": "GET",
+      "path": "/search/",
+      "param": "keywords"
+    },
+    "book": {
+      "href_pattern": "/book_\\d+/"
+    },
+    "toc": {
+      "chapter_pattern": "/book_\\d+/\\d+\\.html"
+    },
+    "content": {
+      "selector": "div#content"
+    }
+  },
+  {
+    "name": "神话之后",
+    "base": "https://www.shenhuazhihou.com",
+    "charset": "utf-8",
+    "verify_ssl": true,
+    "search_interval": 0,
+    "search": {
+      "method": "POST",
+      "path": "/e/search/index.php",
+      "param": "keyboard",
+      "extra": {
+        "tbname": "bookname",
+        "show": "title,writer",
+        "tempid": "1"
+      }
+    },
+    "book": {
+      "href_pattern": "/book/\\d+/"
+    },
+    "toc": {
+      "chapter_pattern": "/book/\\d+/\\d+\\.html",
+      "reverse": true
+    }
+  }
+]

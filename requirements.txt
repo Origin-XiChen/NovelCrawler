@@ -1,0 +1,13 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+pywebview>=5.0
+qrcode>=7.4
+pypinyin>=0.50.0
+img2pdf>=0.5.0
+pypdf>=4.0.0
+# 可选:远程直连(WebRTC 扫码,未装则设置页该功能显示降级提示)
+aiortc>=1.6.0
+opencv-python-headless>=4.8.0
+# 可选:个别站点的 JS 渲染兜底(体量大;未装时代码自动降级)
+# playwright>=1.40.0

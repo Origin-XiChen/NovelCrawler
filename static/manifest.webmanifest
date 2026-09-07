@@ -1,0 +1,13 @@
+{
+  "name": "小说管家",
+  "short_name": "小说管家",
+  "description": "多源小说聚合搜索与阅读工具",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f5f7",
+  "theme_color": "#007AFF",
+  "icons": [
+    {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}

@@ -1,0 +1,1352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>阅读器 · 漫画+小说</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --secondary: #f2f2f6;
+    --border: #d2d2d7;
+    --text: #1d1d1f;
+    --muted: #6e6e73;  /* 原 #86868b 对白底对比度约 3.8:1,小号文字不达 WCAG AA(4.5:1),加深为 4.6:1 */
+    --primary: #007AFF;
+    --primary-dark: #0066d6;
+    --primary-50: #e8f1ff;
+    --success: #34C759;
+    --success-50: #e7f8ec;
+    --danger: #FF3B30;
+    --warn: #FF9500;
+    /* ---- 语义扩展令牌(P0 色彩统一) ---- */
+    --surface-1: #ffffff;
+    --surface-2: #f2f2f6;
+    --surface-3: #e9e9ee;
+    --text-1: #1d1d1f;
+    --text-2: #6e6e73;
+    --text-3: #aeaeb2;
+    --danger-50: #fdecea;
+    --warn-50: #fff4e5;
+    --info-50: #e6f1fb;
+    --purple-50: #eeedfe;
+    /* ---- 字号阶(8 档,替代原 18 档) ---- */
+    --fs-caption: 11px;
+    --fs-aux: 12px;
+    --fs-body2: 13px;
+    --fs-body: 14px;
+    --fs-sub: 15px;
+    --fs-title: 17px;
+    --fs-head: 20px;
+    --fs-display: 24px;
+    /* ---- 圆角阶 ---- */
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-xl: 22px;
+    /* ---- 间距阶(4pt) ---- */
+    --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px;
+    /* ---- 层级(替代 5~99999 混乱值;保持原有上下关系) ---- */
+    --z-header: 20;   /* 顶栏/门户 */
+    --z-drawer: 30;   /* 下载浮条 */
+    --z-bubble: 35;   /* 搜索面板等浮层 */
+    --z-overlay: 50;  /* modal 遮罩 */
+    --z-panel: 60;    /* 任务面板/PDF 阅读器 */
+    --z-settings: 75; /* 设置页 */
+    --z-fab: 78;      /* 任务气泡(高于设置页) */
+    --z-notify: 82;   /* toast/通知/字体选择 */
+    --z-top: 85;      /* winCtl/comicBase */
+    --z-confirm: 86;  /* 确认框(高于 comicBase) */
+    --z-devtip: 90;   /* 开发警示/教程 */
+    --z-topbar: 95;   /* 顶部加载条 */
+    --z-boot: 100;    /* 启动遮罩 */
+    /* ---- 统一缓动 ---- */
+    --ease: cubic-bezier(.22,1,.36,1);
+    --radius: 18px;
+    --radius-md: 12px;
+    --shadow: 0 1px 2px rgba(0,0,0,.03), 0 8px 24px rgba(0,0,0,.05);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,.14);
+    color-scheme: light;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  /* ================== 启动门户(漫画/小说 平级双卡) ================== */
+  #launcher {
+    position:fixed; inset:0; z-index:var(--z-header); display:flex; flex-direction:column;
+    overflow:hidden;  /* 门户页永不出现滚动条:内容超高时由下方媒体查询压缩适配 */
+    background:
+      radial-gradient(1200px 600px at 20% -10%, rgba(255,149,0,.10), transparent 60%),
+      radial-gradient(1000px 500px at 85% 110%, rgba(52,199,89,.12), transparent 60%),
+      var(--bg);
+    transition:opacity .35s, visibility .35s;
+  }
+  #launcher.hide { opacity:0; visibility:hidden; pointer-events:none; }
+  /* 主页顶栏:logo + 品牌 + 设置/版本 */
+  #launcher .l-top {
+    display:flex; align-items:center; gap:12px;
+    padding:18px 26px; -webkit-backdrop-filter:blur(18px); backdrop-filter:blur(18px);
+  }
+  #launcher .l-top .l-icon {
+    width:44px; height:44px; border-radius:12px; object-fit:cover;
+    box-shadow:0 4px 14px rgba(0,0,0,.14);
+  }
+  #launcher .l-brand { display:flex; flex-direction:column; line-height:1.3; }
+  #launcher .l-brand .l-title { font-size:18px; font-weight:700; letter-spacing:.5px; color:var(--text); }
+  #launcher .l-brand .l-sub { font-size:12px; color:var(--muted); letter-spacing:.5px; }
+  #launcher .l-actions { margin-left:auto; display:flex; gap:10px; align-items:center; }
+  #launcher .l-version { font-size:12px; color:var(--muted); }
+  /* 中部:双卡平级 */
+  #launcher .l-mid { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:28px; padding:60px 20px 20px; }
+  /* 首页封面品牌头(替代被删除的 .l-top) */
+  .l-hero { display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .l-hero-icon { width:96px; height:96px; border-radius:24px; object-fit:cover; box-shadow:0 14px 36px rgba(0,0,0,.16), 0 0 0 1px rgba(0,0,0,.04); }
+  .l-hero-title { font-size:24px; font-weight:700; letter-spacing:.5px; color:var(--text); margin-top:4px; }
+  .l-hero-sub { font-size:12px; color:var(--muted); letter-spacing:.5px; }
+  #launcher .l-cards { display:flex; gap:26px; }
+  .l-btn {
+    position:relative; overflow:hidden;
+    display:flex; flex-direction:column; align-items:flex-start; gap:10px;
+    width:300px; padding:34px 30px; border:none; border-radius:24px; cursor:pointer;
+    font-family:inherit; color:#fff; transition:transform .22s var(--ease), box-shadow .22s var(--ease);
+    box-shadow:0 10px 30px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.35);
+  }
+  .l-btn:hover { transform:translateY(-4px); box-shadow:0 16px 40px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.4); }
+  .l-btn:active { transform:translateY(0) scale(.98); }
+  /* 斜向高光扫过(hover 时) */
+  .l-btn::after {
+    content:''; position:absolute; top:0; bottom:0; left:-70%; width:45%;
+    background:linear-gradient(100deg, transparent, rgba(255,255,255,.28), transparent);
+    transform:skewX(-18deg); transition:none; pointer-events:none;
+  }
+  .l-btn:hover::after { left:130%; transition:left .7s var(--ease); }
+  .l-btn .lb-emoji { line-height:1; opacity:.96; }
+  .l-btn .lb-name { font-size:20px; font-weight:700; letter-spacing:.5px; }
+  .l-btn .lb-desc { font-size:12px; opacity:.88; line-height:1.6; }
+  .l-btn .lb-stat { font-size:11px; opacity:.75; line-height:1.4; min-height:15px; }
+  .l-btn .lb-key { position:absolute; top:12px; right:14px; font-size:10px; padding:2px 8px; border-radius:999px;
+    background:rgba(255,255,255,.22); border:0.5px solid rgba(255,255,255,.35); letter-spacing:.5px; }
+  .l-btn.comic { background:linear-gradient(160deg,#3fd06a,#1FA84D); }
+  .l-btn.book { background:linear-gradient(160deg,#FFAB2E,#FF7A00); }
+  /* 底部:开发状态角标(红黑警示,点击强制重弹主程序警示框) */
+  #launcher .l-dev { text-align:center; padding:16px; font-size:12px; color:var(--muted); letter-spacing:.3px; }
+  #launcher .l-dev .dev-badge {
+    display:inline-block; padding:3px 12px; border-radius:999px; cursor:pointer;
+    background: repeating-linear-gradient(-45deg, #ff3b30 0 12px, #161616 12px 24px);
+    color:#fff; font-size:11px; font-weight:700; letter-spacing:.5px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.25); user-select:none; -webkit-user-select:none;
+  }
+  /* 矮窗口(<=760px 高)时门户页自动压缩,保证完整容纳、无滚动条 */
+  @media (max-height: 760px) {
+    #launcher .l-mid { gap:14px; padding:18px 20px 10px; }
+    #launcher .l-cards { gap:18px; }
+    .l-hero-icon { width:64px; height:64px; border-radius:16px; }
+    .l-hero-title { font-size:18px; margin-top:0; }
+    .l-hero-sub { font-size:11px; }
+    .l-btn { padding:20px 24px; gap:6px; width:270px; }
+    .l-btn .lb-emoji { font-size:30px; }
+    .l-btn .lb-name { font-size:17px; }
+    .l-btn .lb-desc { font-size:12px; }
+    #launcher .l-dev { padding:8px; }
+  }
+
+  /* ================== 双模式容器 ================== */
+  #comicRoot { display:none; }
+  /* 漫画区固定视口:顶栏+侧边栏常驻,只在搜索结果卡片内滚动(滚动作用域正确) */
+  body.mode-comic #comicRoot { display:flex; flex-direction:column; height:100vh; min-width:1020px; }
+  body.mode-comic .app, body.mode-comic .top-search-wrap, body.mode-comic header { display:none; }
+  /* 顶栏常驻顶部(flex 自然顺序)+ 强模糊背景 */
+  body.mode-comic #comicRoot header.comic-hd { position: relative; z-index: 5; flex-shrink:0; }
+  /* 主体布局:侧边栏常驻,搜索结果卡片内可滚 */
+  body.mode-comic #comicRoot .comic-body { flex:1; min-height:0; }
+  body.mode-comic #comicRoot .comic-main { overflow:hidden; min-height:0; }
+  /* 模式切换按钮 */
+  .mode-switch-btn {
+    border:0.5px solid var(--border); background:var(--card); color:var(--text);
+    border-radius:9px; padding:6px 12px; font-size:12px; cursor:pointer; font-family:inherit;
+    transition:.15s; white-space:nowrap;
+  }
+  .mode-switch-btn:hover { border-color:var(--primary); color:var(--primary); }
+  .mode-switch-btn::before { content:"⇄ "; }
+
+  /* ================== 漫画模式布局(与书籍模式 UI 统一) ================== */
+  #comicRoot header.comic-hd {
+    display:flex; align-items:center; gap:14px; padding:10px 142px 10px 22px;
+    background: rgba(255,255,255,.82); backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border:0.5px solid rgba(0,0,0,.06);
+    border-radius:16px; box-shadow:0 4px 16px rgba(0,0,0,.05);
+    margin:14px 22px 0;  /* 顶部留位悬浮窗口按钮 + 卡片化 */
+    position: relative; z-index: 5; flex-shrink:0;
+  }
+  body.desktop #comicRoot header.comic-hd { padding-right: 142px; }  /* 桌面让位右上角悬浮按钮 */
+  [data-theme="dark"] #comicRoot header.comic-hd { background: rgba(44,44,46,.78); border-bottom-color: rgba(255,255,255,.08); }
+  .comic-body { flex:1; display:flex; min-height:0; padding:18px 22px 22px; gap:16px; align-items:flex-start; }
+  .comic-side {
+    width:158px; flex-shrink:0; padding:8px; background:var(--card); border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    position:sticky; top:0; max-height:calc(100vh - 36px); overflow-y:auto;
+  }
+  .comic-main { flex:1; min-width:0; min-height:0; overflow:hidden; }
+  .cview { display:none; }
+  .cview.active { display:block; max-height:calc(100vh - 110px); overflow-y:auto; animation:viewFadeIn .25s ease; }
+  /* 搜索视图:滚动作用域收敛到结果卡片内部(顶栏/侧边栏/卡片头常驻) */
+  body.mode-comic #cview-search,
+  body.mode-book #view-search { height:100%; box-sizing:border-box; }
+  body.mode-comic #cview-search > .card,
+  body.mode-book #view-search > .card:not(#searchProgWrap) { display:flex; flex-direction:column; height:100%; box-sizing:border-box; }
+  body.mode-comic #cview-search > .card .card-hd,
+  body.mode-book #view-search > .card:not(#searchProgWrap) .card-hd { flex-shrink:0; }
+  /* 结果列表容器:卡片体内部滚动 */
+  body.mode-comic #comicResultList { flex:1; min-height:0; overflow-y:auto; padding:14px 18px; }
+  body.mode-book #resultList { flex:1; min-height:0; overflow-y:auto; }
+  /* 漫画结果卡片(与书籍 result-item 同风格:封面+信息+操作) */
+  .comic-row {
+    display:flex; align-items:center; gap:12px; padding:11px 13px; border-radius:12px;
+    background:var(--card); border:0.5px solid rgba(0,0,0,.05); margin-bottom:8px; transition:.15s;
+  }
+  .comic-row:hover { background:var(--surface-2); border-color:var(--border); transform:translateX(2px); }
+  [data-theme="dark"] .comic-row:hover { background:#333336; }
+  .comic-row .c-title { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .comic-row .c-meta { font-size:12px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:520px; }
+  .comic-row .c-ops { margin-left:auto; display:flex; gap:6px; flex-shrink:0; }
+  /* 漫画网格卡(P0 合并版:搜索/收藏/已下载共用;原 L673 重复定义已删除) */
+  .mcard-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:14px; padding:12px 16px 18px; }
+  .mcard {
+    position:relative; border-radius:var(--r-md); overflow:hidden; cursor:pointer;
+    background:var(--card); border:0.5px solid var(--border);
+    transition:box-shadow .2s, transform .2s;
+  }
+  .mcard:hover { box-shadow:var(--shadow-lg); transform:translateY(-2px); }
+  /* 封面:div 容器(含 coverBlock 占位)与 <img> 直填两种用法 */
+  .mcard-cover { display:flex; justify-content:center; align-items:flex-start; background:var(--secondary); }
+  img.mcard-cover { width:100%; aspect-ratio:3/4; object-fit:cover; display:block; background:#222; }
+  .mcard-body { padding:9px 11px 11px; }
+  .mcard-bd { padding:8px 10px 10px; }
+  .mcard-title {
+    font-size:13px; font-weight:600; color:var(--text); line-height:1.45;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:2.9em;
+  }
+  .mcard-name { font-size:13px; font-weight:600; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .mcard-meta { font-size:11px; color:var(--muted); margin-top:5px; display:flex; gap:6px; align-items:center; }
+  .mcard .src-tag { font-size:11px; border:0.5px solid var(--border); border-radius:6px; padding:0 5px; }
+  .mcard-ops {
+    position:absolute; left:0; right:0; bottom:0; display:flex; gap:6px; padding:10px;
+    background:linear-gradient(transparent, rgba(0,0,0,.6)); opacity:0; transition:opacity .2s;
+  }
+  .mcard:hover .mcard-ops { opacity:1; }
+  .mcard-ops .btn-sm { color:#fff; border-color:rgba(255,255,255,.45); background:rgba(0,0,0,.35); }
+  .mcard-ops .btn-sm:hover { background:rgba(0,0,0,.55); }
+  /* 已下载卡片的 PDF 展开条 */
+  .mcard-pdfs { border-top:0.5px solid var(--border); padding:6px 10px; display:none; gap:6px; flex-wrap:wrap; }
+  .mcard.open .mcard-pdfs { display:flex; }
+  .mcard-pdf { font-size:12px; padding:3px 10px; border-radius:999px; border:0.5px solid var(--border); cursor:pointer; background:var(--card); color:var(--text); }
+  .mcard-pdf:hover { border-color:var(--primary); color:var(--primary); }
+  .mcard-pdf.cur { border-color:var(--primary); background:var(--primary); color:#fff; }
+  /* 漫画详情页 */
+  .cd-cover { border-radius:12px; box-shadow:var(--shadow); }
+  .cd-title { font-size:20px; font-weight:700; line-height:1.4; }
+  .cd-meta { font-size:12px; color:var(--muted); margin:6px 0 10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .cd-desc { font-size:13px; color:var(--text); line-height:1.9; max-height:110px; overflow:hidden; position:relative; }
+  .cd-desc.expanded { max-height:none; }
+  .cd-desc-more { position:absolute; right:0; bottom:0; padding:2px 6px; font-size:11px; color:var(--primary); background:linear-gradient(transparent, var(--card)); cursor:pointer; }
+  /* 漫画章节/话列表 */
+  .comic-chap {
+    display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:9px;
+    background:var(--card); border:0.5px solid var(--border); margin-bottom:7px; font-size:13px;
+  }
+  .comic-chap .ch-t { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* ================== 漫画独立阅读页(沉浸式, body.comic-reading) ================== */
+  body.comic-reading #comicRoot header.comic-hd { display:none; }
+  body.comic-reading .comic-side { display:none; }
+  body.comic-reading .comic-body { padding:0; }
+  body.comic-reading .comic-main { flex:1; }
+  /* 阅读器 cview 不参与通用滚动约束(否则多滚动条+高度裁剪):自身撑满 comic-main,仅 creader-body 滚 */
+  body.comic-reading .cview.active { max-height:none !important; overflow:hidden !important; height:100% !important; }
+  body.comic-reading .reader-page { height:100% !important; }
+  /* ================== 小说全屏阅读(沉浸式, body.novel-reading) ================== */
+  /* 仿漫画阅读的隐藏策略:隐藏顶栏 + 侧边栏,只留阅读器 modal */
+  body.novel-reading header.book { display:none !important; }
+  body.novel-reading .app > aside { display:none !important; }
+  body.novel-reading .app { padding:0 !important; margin:0 !important; min-width:auto !important; }
+  body.novel-reading #readerMask { background:var(--bg) !important; padding:0 !important; overflow:hidden !important; }
+  /* 全屏 modal:撑满整窗,无圆角/卡片感,flex 纵向;关闭自身滚动(正文区单独滚,避免双滚动条) */
+  body.novel-reading #readerMask .modal.reader-modal {
+    width:100% !important; max-width:none !important; height:100% !important;
+    max-height:none !important; border-radius:0 !important;
+    background:transparent !important; box-shadow:none !important;
+    backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+    overflow:hidden !important;
+    display:flex; flex-direction:column; position:relative;
+  }
+  /* 顶部 slim bar:毛玻璃浮条(仅 ☰ 目录 + 书名 + 进度 + 关闭) */
+  body.novel-reading #readerMask .reader-hd {
+    background:rgba(255,255,255,.72); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+    border-bottom:0.5px solid var(--border); padding:8px 16px; flex-shrink:0; z-index:8;
+  }
+  [data-theme="dark"] body.novel-reading #readerMask .reader-hd { background:rgba(28,28,30,.85); }
+  /* 正文滚动区:reader-main 整屏滚动,纸面内容居中 */
+  body.novel-reading .reader-main { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; padding:0 24px; }
+  /* 底部浮动工具栏:毛玻璃胶囊,悬浮于底部居中 */
+  body.novel-reading #readerMask .reader-bar {
+    position:absolute; left:50%; top:auto; bottom:18px; transform:translateX(-50%);
+    display:flex; align-items:center; gap:2px; padding:7px 10px; max-width:96vw;
+    background:rgba(255,255,255,.8); -webkit-backdrop-filter:blur(18px); backdrop-filter:blur(18px);
+    border:0.5px solid var(--border); border-radius:999px; box-shadow:var(--shadow-lg);
+    z-index:8; transition:transform .3s, opacity .25s;
+  }
+  [data-theme="dark"] body.novel-reading #readerMask .reader-bar { background:rgba(44,44,46,.9); }
+  body.novel-reading #readerMask .reader-bar button {
+    border:none; background:transparent; color:var(--text); border-radius:999px;
+    font-size:13px; padding:7px 11px; cursor:pointer; transition:.15s; white-space:nowrap;
+  }
+  body.novel-reading #readerMask .reader-bar button:hover { background:var(--secondary); }
+  body.novel-reading #readerMask .reader-bar button:disabled { opacity:.35; cursor:not-allowed; }
+  body.novel-reading #readerMask .reader-bar .bar-sep { width:1px; height:18px; background:var(--border); margin:0 4px; flex-shrink:0; }
+  /* 目录抽屉:左侧滑出,不占阅读宽度 */
+  body.novel-reading #readerMask .reader-toc {
+    position:absolute; left:0; top:0; bottom:0; width:300px; max-width:82vw; z-index:10;
+    background:var(--card); border-right:0.5px solid var(--border); padding:10px;
+    overflow-y:auto; transform:translateX(calc(-100% - 24px)); transition:transform .28s; box-shadow:var(--shadow-lg);
+  }
+  body.novel-reading #readerMask .reader-toc.show { transform:translateX(0); }
+  body.novel-reading #readerMask .reader-toc-mask { position:absolute; inset:0; background:rgba(0,0,0,.35); z-index:9; display:none; }
+  body.novel-reading #readerMask .reader-toc-mask.show { display:block; }
+  /* 仿漫画阅读:默认隐藏 顶栏/底部工具栏/目录,点击正文切换显隐(沉浸感更强) */
+  body.novel-reading #readerMask .reader-hd,
+  body.novel-reading #readerMask .reader-bar,
+  body.novel-reading #readerMask .reader-toc { transition: transform .3s, opacity .25s; }
+  body.novel-reading.ui-hidden #readerMask .reader-hd { transform: translateY(-100%); opacity:0; pointer-events:none; }
+  body.novel-reading.ui-hidden #readerMask .reader-bar { transform: translate(-50%, calc(100% + 24px)); opacity:0; pointer-events:none; }
+  body.novel-reading.ui-hidden #readerMask .reader-toc { transform: translateX(calc(-100% - 24px)); opacity:0; pointer-events:none; }
+  /* 出现提示:首次点击会浮出小提示(自动消失) */
+  body.novel-reading.ui-hidden #readerMask::after {
+    content: '点击屏幕唤起工具栏';
+    position: absolute; left: 50%; top: 30%; transform: translateX(-50%);
+    background: rgba(0,0,0,.55); color: #fff; font-size:13px;
+    padding: 6px 14px; border-radius: 999px; pointer-events: none;
+    opacity: 0; transition: opacity .4s;
+  }
+  body.novel-reading.ui-hint #readerMask::after { opacity: 1; }
+  /* 全屏时隐藏任务按钮(除非有后台下载任务) */
+  body.novel-reading:not(.has-bg-task) #taskFab { display:none !important; }
+  body.novel-reading:not(.has-bg-task) #taskPreview { display:none !important; }
+  .reader-page { position:relative; display:flex; flex-direction:column; height:100vh; }
+  body.desktop .reader-page { height:calc(100vh - 40px); }  /* 避让自绘标题栏 */
+  .reader-bar {
+    display:flex; align-items:center; gap:8px; padding:10px 16px; flex-shrink:0;
+    background:rgba(255,255,255,.75); -webkit-backdrop-filter:blur(18px); backdrop-filter:blur(18px);
+    border-bottom:0.5px solid var(--border); position:sticky; top:0; z-index:5;
+  }
+  [data-theme="dark"] .reader-bar { background:rgba(44,44,46,.8); }
+  .reader-bar .rt { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:14px; }
+  .reader-bar .rpos { font-size:12px; color:var(--muted); white-space:nowrap; }
+  .creader-body { flex:1; overflow:auto; padding:0; }  /* 无缝:去 padding,图片紧贴连续;zoom>1 时可横向滚动查看细节 */
+  .creader-body img {
+    display:block; width:calc(100% * var(--czoom, 1)); height:auto;  /* 满宽显示 * 图片级缩放(--czoom 只作用图片,工具条恒定) */
+    border-radius:0; background:#eee; cursor:zoom-in;
+  }
+  [data-theme="dark"] .creader-body img { background:#3a3a3c; }
+  /* 双页模式(增强,宽窗口) */
+  .creader-body.two-page { display:flex; flex-wrap:wrap; justify-content:center; gap:2px; }
+  .creader-body.two-page img { width:calc(50% * var(--czoom, 1) - 1px); max-width:640px; margin:0; }
+  @media (max-width:1399px) { .creader-body.two-page img { width:100%; max-width:100%; } }  /* 窄窗自动回退单列 */
+  /* 翻页淡入(P2):换话时 120ms 淡入,替代直切 */
+  .creader-body.ep-fade { animation: epFade .12s ease-out; }
+  @keyframes epFade { from { opacity:0; } to { opacity:1; } }
+  /* 整页适应(P2):单图高度受限于可视区,宽度自适应居中;--cfit 由 JS 按缩放折算 */
+  .creader-body.fit-page { text-align:center; }
+  .creader-body.fit-page img { width:auto; max-width:100%; max-height:var(--cfit, 90vh); margin:0 auto; }
+  /* 夜读(P2):阅读页纯黑背景,图片更聚焦;类只在阅读时挂在 body 上 */
+  body.comic-reading.comic-dark, body.comic-reading.comic-dark .reader-page { background:#000; }
+  body.comic-reading.comic-dark .creader-body { background:#000; }
+  body.comic-reading.comic-dark .creader-body img { background:#1c1c1e; }
+  /* 工具条按钮选中态(适宽/整页/夜读共用) */
+  .reader-bar .btn-sm.on { background:var(--primary-50); border-color:var(--primary); color:var(--primary); font-weight:600; }
+  /* 目录抽屉(左上按钮唤出,不占常驻宽度) */
+  .reader-drawer {
+    position:absolute; top:54px; right:16px; width:300px; max-height:70vh; z-index:6;
+    background:var(--card); border:0.5px solid var(--border); border-radius:14px;
+    box-shadow:var(--shadow-lg); display:none; overflow:hidden;
+  }
+  .reader-drawer.show { display:block; }
+  .reader-drawer .rd-hd { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:0.5px solid var(--border); font-weight:600; font-size:13px; }
+  .reader-drawer .rd-hd button { margin-left:auto; }
+  .reader-drawer #comicRToc { max-height:calc(70vh - 40px); overflow-y:auto; padding:8px 10px 14px; }
+  /* 目录行:标题 + 缩略图展开 */
+  .rd-chap { display:flex; align-items:center; gap:6px; padding:7px 8px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .rd-chap:hover { background:var(--secondary); }
+  .rd-chap.active { background:var(--primary-50); color:var(--primary); font-weight:600; }
+  .rd-chap .ct { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rd-chap .tb { font-size:11px; opacity:.75; flex-shrink:0; }
+  .rd-thumbs { display:grid; grid-template-columns:repeat(auto-fill, minmax(64px, 1fr)); gap:6px; padding:4px 8px 10px 22px; }
+  /* 单页加载失败占位(点击重试,不再留空缺导致"页数不连续") */
+  .cimg-fail { user-select:none; }
+  .rd-thumbs img { width:100%; aspect-ratio:3/4; object-fit:cover; border-radius:4px; cursor:pointer; background:var(--secondary); }
+  /* 漫画统计卡(与书籍书架 stats 一致) */
+  .comic-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+
+
+
+  button, .mode-btn, .toc-item, .result-item, .src-chip, .nav-item, .switch,
+  .fav-btn, .book-row, .file-row .fopen, .tag-btn, a { cursor: pointer; }
+  /* ---------- 深色模式 ---------- */
+  [data-theme="dark"] {
+    --bg: #1d1d1f;
+    --card: #2c2c2e;
+    --secondary: #3a3a3c;
+    --border: #3a3a3c;
+    --text: #f5f5f7;
+    --muted: #a1a1a6;
+    --primary: #0A84FF;
+    --primary-dark: #0a6dc9;
+    --primary-50: #16324f;
+    --success: #30d158;
+    --success-50: #143525;
+    --danger: #ff453a;
+    --warn: #ff9f0a;
+    --surface-1: #2c2c2e;
+    --surface-2: #3a3a3c;
+    --surface-3: #48484a;
+    --text-1: #f5f5f7;
+    --text-2: #a1a1a6;
+    --text-3: #636366;
+    --danger-50: #3a2224;
+    --warn-50: #38301a;
+    --info-50: #16324f;
+    --purple-50: #2a2742;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.5);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+  [data-theme="dark"] header { background: rgba(30,30,32,.8); border-bottom:0.5px solid rgba(255,255,255,.08); }
+  [data-theme="dark"] input, [data-theme="dark"] select, [data-theme="dark"] textarea { background:#3a3a3c; border-color:#48484a; color:var(--text); }
+  [data-theme="dark"] .btn-ghost { background:#3a3a3c; border-color:#48484a; }
+  [data-theme="dark"] .btn-ghost:hover { background:#444446; }
+  [data-theme="dark"] .progress-bar, [data-theme="dark"] .mini-bar { background:#3a3a3c; }
+  [data-theme="dark"] .src-chip { background:#3a3a3c; border-color:#48484a; }
+  [data-theme="dark"] .src-chip.on { background:var(--primary-50); }
+  [data-theme="dark"] .result-item:hover, [data-theme="dark"] .file-card:hover, [data-theme="dark"] .shelf-row:hover { background:#333336; }
+  [data-theme="dark"] .btn-sm, [data-theme="dark"] .reader-hd .rtools button { background:#3a3a3c; border-color:#48484a; color:var(--text); }
+  [data-theme="dark"] .btn-sm:hover, [data-theme="dark"] .reader-hd .rtools button:hover { background:#444446; }
+  [data-theme="dark"] .nav-item .badge { background:#fff; color:var(--primary); }
+  [data-theme="dark"] .book-card .cover, [data-theme="dark"] .file-card .fico { filter:brightness(.85); }
+  [data-theme="dark"] .dl-float { background: rgba(44,44,46,.95); }
+  [data-theme="dark"] .searchBubble2, [data-theme="dark"] #searchBubble > div { background:#2c2c2e; }
+  [data-theme="dark"] #searchPanel { background:var(--card); }
+  [data-theme="dark"] .log-box { background:#0d0d0f; }
+  [data-theme="dark"] #bubbleTask { background:rgba(44,44,46,.95); color:var(--muted); }
+  [data-theme="dark"] .group-detail { background:#262628; }
+  [data-theme="dark"] .state-badge { filter:brightness(.9); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* 双区模式:body 不滚动,滚动只发生在各自内容卡片内部(滚动作用域正确) */
+  body.mode-book, body.mode-comic { overflow:hidden; height:100vh; }
+  /* 小说区:header.book(顶栏)常驻顶部,.app 占据剩余空间,.main 内滚 */
+  body.mode-book { display:flex; flex-direction:column; }
+  body.mode-book > header.book { flex-shrink:0; }
+  body.mode-book > .app { flex:1; min-height:0; height:auto; padding-bottom:26px; }
+  .btn {
+    border:none; cursor:pointer; border-radius:12px; font-size:13px; font-weight:600;
+    padding:9px 18px; transition:.2s; font-family:inherit; flex-shrink:0;
+  }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .btn-primary { background:var(--primary); color:#fff; }
+  .btn-primary:hover:not(:disabled) { background:var(--primary-dark); }
+  .btn-danger { background:var(--danger); color:#fff; }
+  .btn-danger:hover:not(:disabled) { background:#d63027; }
+  .btn-ghost { background:var(--card); color:var(--text); border:0.5px solid var(--border); }
+  .btn-ghost:hover { background:var(--surface-2); }
+  .btn-sm { padding:6px 13px; font-size:12px; border-radius:9px; border:0.5px solid var(--border); background:var(--surface-1); }
+  .btn-sm:hover { background:var(--surface-2); }
+  .btn-sm.primary { background:var(--primary); color:#fff; border-color:transparent; }
+  .btn-sm.primary:hover { background:var(--primary-dark); box-shadow:0 2px 8px rgba(0,122,255,.25); transform:translateY(-1px); }
+  .btn-sm:hover { transform:translateY(-1px); }
+  .btn-sm.danger { color:var(--danger); border-color:rgba(255,59,48,.35); }
+  .btn-sm.danger:hover { background:#fff0f0; }
+  input, select, textarea {
+    font-family:inherit; border:1px solid var(--border); border-radius:10px; padding:8px 12px;
+    font-size:13px; outline:none; background:var(--surface-1); color:var(--text); transition:.2s;
+  }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { border-color:var(--primary); box-shadow:0 0 0 3px rgba(0,122,255,.12); }
+  button:focus-visible, .nav-item:focus-visible, .set-nav:focus-visible, .l-btn:focus-visible, .src-chip:focus-visible, .mcard:focus-visible {
+    outline:2px solid var(--primary); outline-offset:2px;
+  }
+  input:focus, select:focus, textarea:focus { border-color:var(--primary); background:#fff; box-shadow:0 0 0 3px rgba(0,122,255,.12); }
+  /* ---------- 顶栏(毛玻璃) ---------- */
+  header {
+    background: rgba(255,255,255,.72);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 0.5px solid rgba(0,0,0,.06);
+    padding: 10px 22px; display: none; align-items: center; gap: 14px;
+    position: sticky; top: 0; z-index: var(--z-header);
+  }
+  /* 双区显示各自顶栏(launcher 时不显示小说/漫画搜索栏) */
+  body.mode-book header.book, body.mode-comic header.comic-hd { display: flex; }
+  body.desktop header { top:0; }
+  body.desktop header.book,
+  body.desktop header.comic-hd { -webkit-app-region: drag; padding-right: 14px !important; }
+  /* 顶栏内交互元素必须排除拖拽区(app-region 会吞掉点击/聚焦):搜索框、右侧按钮组 */
+  body.desktop header .top-search,
+  body.desktop header .header-right,
+  body.desktop .tb-btn { -webkit-app-region: no-drag; }
+  /* 设置页顶栏 / launcher 也可拖动整窗(桌面模式);按钮、输入框排除 */
+  body.desktop .settings-hd { -webkit-app-region: drag; }
+  /* launcher:仅顶部品牌区可拖动(整页 drag 会吞掉按钮点击,胶囊/设置/卡片会点不动) */
+  body.desktop #launcher { -webkit-app-region: no-drag; }
+  body.desktop #launcher .l-hero { -webkit-app-region: drag; }
+  body.desktop .settings-hd button,
+  body.desktop .settings-hd input,
+  body.desktop #launcher button,
+  body.desktop #launcher .l-hero * { -webkit-app-region: no-drag; }
+  /* 全局浮动窗口按钮胶囊:仅 launcher / 设置页显示;书籍/漫画模式顶栏内已有,不再重复 */
+  #winCtl { display:none; position:fixed; top:10px; right:14px; z-index:var(--z-top); margin-left:0;
+    gap:2px; padding:3px; border-radius:9px;
+    -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+    background:rgba(255,255,255,.55); box-shadow:0 2px 8px rgba(0,0,0,.06);
+    vertical-align:middle; align-self:center;
+  }
+  body.desktop:not(.mode-book):not(.mode-comic) #winCtl,
+  body.desktop.settings-open #winCtl { display:inline-flex !important; }
+  /* 顶栏内窗口按钮胶囊样式(不包含 #winCtl,避免共享规则覆盖 #winCtl 的 display:none) */
+  .header-right .tb-btns {
+    display:inline-flex; gap:2px; padding:3px;
+    border-radius:9px; -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+    background:rgba(255,255,255,.55); margin-left:8px;
+    box-shadow:0 2px 8px rgba(0,0,0,.06);
+    vertical-align:middle; align-self:center;
+  }
+  [data-theme="dark"] .header-right .tb-btns, [data-theme="dark"] #winCtl { background:rgba(44,44,46,.7); }
+  .tb-btns { gap:2px; }
+  .tb-btn { width:32px; height:28px; border:none; background:transparent; color:var(--muted);
+    font-size:12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; justify-content:center; -webkit-app-region: no-drag; }
+  .tb-btn:hover { background:rgba(0,0,0,.08); color:var(--text); }
+  [data-theme="dark"] .tb-btn:hover { background:rgba(255,255,255,.12); }
+  /* 设置页顶栏右侧避让浮动窗口按钮胶囊(不限 desktop,浏览器模式同样避让) */
+  body.settings-open .settings-hd { padding-right: 150px; }
+  /* 设置页打开时顶栏窗口按钮组隐藏:只保留 #winCtl 浮动胶囊,避免两组按钮右上角重叠 */
+  body.settings-open header .tb-btns { display:none !important; }
+  .logo { display:flex; align-items:center; gap:9px; flex-shrink:0; }
+  .logo .icon {
+    width: 32px; height: 32px; border-radius: 9px; flex-shrink:0;
+    object-fit:cover; display:block;
+    box-shadow: 0 0 0 1px rgba(0,122,255,.15), 0 2px 6px rgba(0,122,255,.12);
+  }
+  .logo h1 { font-size: 15px; font-weight: 700; letter-spacing:.3px; white-space:nowrap; }
+  .logo small { display:block; font-size:11px; color:var(--muted); font-weight:400; }
+  .top-search { flex:1; display:flex; gap:8px; min-width:200px; }
+  .top-search input { flex:1; height:36px; font-size:14px; }
+  .top-search .btn { height:36px; padding:0 20px; }
+  .seg { display:flex; flex-shrink:0; background:var(--secondary); border:0.5px solid var(--border); border-radius:10px; padding:3px; gap:2px; }
+  .mode-btn { border:none; background:transparent; padding:0 13px; font-size:13px; cursor:pointer; color:var(--muted); font-family:inherit; transition:.15s; white-space:nowrap; height:30px; border-radius:8px; }
+  .mode-btn:hover { color:var(--text); }
+  .mode-btn.active { background:var(--card); color:var(--text); font-weight:500; box-shadow:0 1px 4px rgba(0,0,0,.10); }
+  .header-right { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+  .src-chip {
+    display:inline-flex; align-items:center; gap:6px; padding:4px 11px;
+    border-radius:999px; border:0.5px solid rgba(0,0,0,.08); background:#fff;
+    font-size:12px; color:var(--text); cursor:pointer; user-select:none; transition:.2s;
+  }
+  .src-chip .dot { width:7px; height:7px; border-radius:50%; background:#c7c7cc; }
+  .src-chip.on { background:var(--primary-50); border-color:rgba(0,122,255,.3); }
+  .src-chip.on .dot { background: var(--success); }
+  /* ---------- 布局 ----------
+     最小安全宽度 1020px = 侧栏 158 + 间距 16 + 主区最低可用 ~800 + 左右 padding 44。
+     与 window2.py 的 MIN_W=1020 对齐:窗口无法缩到布局阈值以下;
+     浏览器模式视口更小时由 body 默认横向滚动兜底。 */
+  /* 书籍顶栏(与漫画顶栏一致:毛玻璃圆角矩形卡片,顶部留位悬浮按钮)
+     默认隐藏(display 由 body.mode-book 启用),避免门户页被顶栏+100vh 内容撑出滚动条 */
+  header.book {
+    align-items:center; gap:14px; padding:10px 22px;
+    background: rgba(255,255,255,.82); backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border:0.5px solid rgba(0,0,0,.06);
+    border-radius:16px; box-shadow:0 4px 16px rgba(0,0,0,.05);
+    margin:14px 22px 0; position: relative; z-index: 5; flex-shrink:0;
+  }
+  [data-theme="dark"] header.book { background: rgba(44,44,46,.78); border-color: rgba(255,255,255,.08); }
+  /* .app 通栏铺满(与漫画区 .comic-body 一致):不加 margin:0 auto,否则 flex 交叉轴不拉伸,
+     窗口宽时主区始终只有 min-width 1020px 居中,明显比漫画区窄 */
+  .app { display:flex; padding:22px 22px 26px; gap:16px; align-items:flex-start; min-width:1020px; height:100vh; box-sizing:border-box; }
+  .sidebar {
+    width:158px; flex-shrink:0; background:var(--card); border-radius:var(--radius);
+    padding:8px; box-shadow:var(--shadow);
+    position:sticky; top:0; max-height:calc(100vh - 36px); overflow-y:auto;
+  }
+  .nav-item {
+    display:flex; align-items:center; gap:6px;
+    padding:9px 12px; border-radius:10px; font-size:13px; cursor:pointer; color:var(--text);
+    transition:.15s; font-weight:500; white-space:nowrap; overflow:hidden;
+    position:relative;
+  }
+  .nav-item:hover { background:var(--surface-2); }
+  .nav-item.active { background:var(--primary-50); color:var(--primary); }
+  /* active 左侧高亮条 */
+  .nav-item.active::before { content:''; position:absolute; left:0; top:8px; bottom:8px; width:3px; background:var(--primary); border-radius:0 3px 3px 0; }
+  .nav-item .badge {
+    font-size:11px; padding:1px 8px; border-radius:999px; background:var(--surface-2); color:var(--muted);
+    font-weight:600; white-space:nowrap; flex-shrink:0; margin-left:auto; min-width:20px; text-align:center;
+  }
+  .nav-item.active .badge { background:#fff; color:var(--primary); }
+  .nav-item .badge.warn { background:#fff0f0; color:#FF3B30; }
+  .main { flex:1; min-width:0; min-height:0; overflow-y:auto; }
+  .view { display:none; }
+  .view.active { display:block; animation:viewFadeIn .25s ease; }
+  @keyframes viewFadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+  /* ---------- 通用卡片 ---------- */
+  .card { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); }
+  /* 深色模式卡片层次(P2):阴影在暗底上不明显,补一条半透明白描边区分卡片边界 */
+  [data-theme="dark"] .card { border:0.5px solid rgba(255,255,255,.08); }
+  .card-hd { padding:16px 24px; border-bottom:0.5px solid rgba(0,0,0,.05); display:flex; align-items:center; gap:10px; }
+  .card-hd h2 { font-size:14px; font-weight:600; }
+  .card-hd .count { font-size:12px; color:var(--muted); }
+  .card-bd { padding:16px 20px; }
+  .empty { padding: 40px 20px; text-align:center; color:var(--muted); font-size:13px; }
+  /* ---------- 统计卡片 ---------- */
+  .stats { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:16px; margin-bottom:16px; }
+  .stat-card {
+    background:var(--card); border-radius:var(--radius-md); padding:14px 18px;
+    box-shadow:var(--shadow); transition:transform .15s, box-shadow .15s;
+  }
+  .stat-card:hover { transform:translateY(-2px); box-shadow:0 2px 4px rgba(0,0,0,.06), 0 12px 32px rgba(0,0,0,.08); }
+  .stat-card .k { font-size:12px; color:var(--muted); }
+  .stat-card .v { font-size:24px; font-weight:600; margin-top:1px; }
+  .stat-card .v.warn { color:var(--warn); }
+  /* ---------- 搜索结果 ---------- */
+  .result-list { max-height: calc(100vh - 190px); overflow-y:auto; padding: 14px 16px; }
+  .result-item {
+    padding: 14px 18px; border-radius: 12px; cursor: pointer;
+    display:flex; align-items:center; gap: 12px; transition:background .12s, transform .15s;
+    border:1px solid transparent;
+  }
+  .result-item:hover { background:var(--surface-2); border-color:var(--border); transform:translateX(2px); }
+  .result-item.active { background:var(--primary-50); border-color:var(--primary); }
+  .result-item .idx {
+    width: 26px; height: 26px; border-radius: 8px; background:var(--surface-2); color:var(--muted);
+    font-size:12px; font-weight:600; display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .result-item.active .idx { background:var(--primary); color:#fff; }
+  .result-item .info { flex:1; min-width:0; }
+  .result-item .title { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .result-item .meta { font-size:12px; color:var(--muted); margin-top:1px; }
+  .result-item .src-tag { font-size:11px; padding:2px 9px; border-radius:999px; background:var(--surface-2); color:var(--text-2); flex-shrink:0; }
+  .result-item .src-tag.ok { background:var(--success-50); color:#248a3d; }
+  .result-item .src-tag.direct { background:var(--warn-50); color:#b25e00; }
+  .fav-btn { background:none; border:none; font-size:16px; cursor:pointer; color:var(--text-3); padding:2px 6px; border-radius:6px; transition:.15s; line-height:1; flex-shrink:0; }
+  .fav-btn:hover { background:var(--surface-2); }
+  .fav-btn.on { color:var(--warn); }
+  /* ---------- 详情面板 ---------- */
+  .detail-panel { position:sticky; top: 70px; }
+  .detail-body { padding: 16px; }
+  .detail-title { font-size:15px; font-weight:700; margin-bottom:2px; }
+  .detail-sub { font-size:12px; color:var(--muted); margin-bottom:12px; word-break:break-all; }
+  .kv { display:flex; justify-content:space-between; font-size:13px; padding:5px 0; border-bottom:1px dashed var(--border); }
+  .kv:last-child { border-bottom:none; }
+  .kv .k { color:var(--muted); }
+  .kv .v { font-weight:600; }
+  .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
+  .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .field input, .field select { width:100%; }
+  .field.full { grid-column: 1 / -1; }
+  .download-btn { width:100%; margin-top:14px; padding:11px; font-size:14px; border-radius:10px; }
+  /* ---------- 进度 ---------- */
+  .progress-wrap { margin-top: 14px; display:none; }
+  .progress-wrap.show { display:block; }
+  .progress-bar { height: 8px; background:var(--surface-2); border-radius:999px; overflow:hidden; }
+  .progress-fill { height:100%; width:0%; border-radius:999px; background:var(--primary); transition: width .4s ease; }
+  .progress-text { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-top:6px; }
+  .log-box {
+    margin-top:10px; background:#1c1c1e; color:#d4d4d8; border-radius:var(--r-md);
+    padding:11px; font-family:"Cascadia Code","Consolas",monospace; font-size:12px;
+    max-height: 150px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; display:none;
+  }
+  .log-box.show { display:block; }
+  .log-box .ok { color:#4ade80; }
+  .log-box .err { color:#f87171; }
+  .state-badge { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; padding:4px 12px; border-radius:999px; margin-top:10px; }
+  .state-badge.running { background:var(--warn-50); color:#92400e; }
+  .state-badge.done { background:var(--success-50); color:#166534; }
+  .state-badge.error { background:var(--danger-50); color:#991b1b; }
+  /* ---------- 书架卡片网格 ---------- */
+  .grid3 { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:16px; }
+  .book-card { background:var(--card); border-radius:var(--radius); overflow:hidden; display:flex; flex-direction:row; box-shadow:var(--shadow); position:relative; }
+  .book-card .bcover { padding:10px 0 10px 10px; flex-shrink:0; }
+  .book-card .cover {
+    width:64px; height:88px; border-radius:6px; display:flex; align-items:center; justify-content:center;
+    font-weight:600; font-size:26px; color:#fff; flex-shrink:0; overflow:hidden; box-shadow:var(--shadow);
+  }
+  .book-card .cover img { width:100%; height:100%; object-fit:cover; display:block; }
+  .book-card .bc-body { padding:10px 13px 11px; flex:1; display:flex; flex-direction:column; min-width:0; }
+  .book-card .bc-title { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .book-card .bc-meta { font-size:12px; color:var(--muted); margin:2px 0 8px; }
+  .book-card .mini-bar { height:6px; border-radius:3px; background:var(--surface-2); overflow:hidden; margin-bottom:9px; }
+  .book-card .mini-bar .fill { height:100%; background:var(--success); }
+  .book-card .bc-ops { display:flex; gap:6px; margin-top:auto; }
+  .book-card .bc-ops .btn-sm { flex:1; }
+  .book-card .bc-ops .btn-sm.xs { flex:0 0 auto; }
+  .badge-tag { font-size:11px; padding:2px 8px; border-radius:20px; display:inline-block; margin-bottom:9px; }
+  .badge-tag.dead { background:var(--danger-50); color:#A32D2D; }
+  .badge-tag.warn { background:var(--warn-50); color:#854F0B; }
+  /* ---------- 已下载 ---------- */
+  .file-card { background:var(--card); border-radius:var(--radius-md); padding:12px 15px; display:flex; align-items:center; gap:12px; margin-bottom:9px; box-shadow:var(--shadow); }
+  .file-card .fico { width:38px; height:48px; border-radius:7px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--text-2); flex-shrink:0; font-weight:600; }
+  .file-card .fname { flex:1; font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .file-card .fsize { font-size:12px; color:var(--muted); flex-shrink:0; }
+  .file-card .fops { display:flex; gap:6px; flex-shrink:0; }
+  /* ---------- 书源管理 ---------- */
+  .src-row {
+    display:flex; align-items:center; gap:12px; padding: 12px 15px; background: var(--card);
+    border-radius: var(--radius-md); margin-bottom: 9px; box-shadow: var(--shadow);
+  }
+  .src-row .sname { font-weight:600; font-size:13px; min-width: 86px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .src-row .sdom { font-size:12px; color:var(--muted); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .src-row .badge { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--surface-2); color:var(--text-2); flex-shrink:0; }
+  .src-row .badge.b-search { background:var(--success-50); color:#0F6E56; }
+  .src-row .badge.b-custom { background:var(--warn-50); color:#854F0B; }
+  .src-row .badge.b-off { color:#A32D2D; background:var(--danger-50); }
+  .src-row .badge.b-api { background:var(--purple-50); color:#534AB7; }
+  .src-row .badge.b-render { background:var(--info-50); color:#185FA5; }
+  .src-row .tag-btn { font-size:12px; padding:5px 11px; border-radius:8px; border:1px solid var(--border); background:#fff; color:var(--text); cursor:pointer; transition:.15s; flex-shrink:0; }
+  .src-row .tag-btn:hover { background:var(--surface-2); }
+  .src-row .tag-btn.danger { color:var(--danger); border-color:#fecaca; }
+  .switch { position:relative; width:36px; height:20px; flex-shrink:0; cursor:pointer; }
+  .switch input { opacity:0; width:0; height:0; }
+  .switch .sl { position:absolute; inset:0; background:var(--text-3); border-radius:999px; transition:.2s; }
+  .switch .sl::before { content:""; position:absolute; width:16px; height:16px; border-radius:50%; background:#fff; top:2px; left:2px; transition:.2s; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+  .switch input:checked + .sl { background: var(--success); }
+  .switch input:checked + .sl::before { transform: translateX(16px); }
+  .test-report { margin-top: 6px; font-size: 12px; color:var(--muted); line-height:1.7; }
+  .form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap: 12px; }
+  .src-add-hint { font-size:12px; color:var(--muted); margin: 10px 0 14px; line-height:1.7; }
+  code { background:var(--surface-2); padding:1px 6px; border-radius:5px; font-size:12px; color:var(--text); }
+  /* ---------- 订阅 ---------- */
+  .shelf-row { display:flex; align-items:center; gap:12px; padding:12px 15px; background:var(--card); border-radius:var(--radius-md); margin-bottom:8px; box-shadow:var(--shadow); }
+  .shelf-row .sinfo { flex:1; min-width:0; }
+  .shelf-row .stitle { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .shelf-row .smeta { font-size:12px; color:var(--muted); margin-top:1px; }
+  .shelf-row .sstat { font-size:12px; color:var(--muted); flex-shrink:0; }
+  .shelf-row .sstat b { color:var(--success); }
+  .shelf-row .sops { display:flex; gap:6px; flex-shrink:0; }
+  .cand-check { width:16px; height:16px; flex-shrink:0; accent-color:var(--primary); }
+  /* ---------- 下载浮窗 ---------- */
+  .dl-float {
+    position: fixed; left: 22px; right: 22px; bottom: 14px; z-index: var(--z-drawer);
+    display:none; align-items:center; gap:10px;
+    background: rgba(29,29,31,.92); color:#f5f5f7; border-radius:14px; padding:10px 16px;
+    box-shadow: var(--shadow-lg); font-size:13px; backdrop-filter: blur(20px);
+  }
+  /* 左下角模式警示胶囊已移除(门户角标保留) */
+  .chk { display:inline-flex; align-items:center; gap:5px; cursor:pointer; user-select:none; }
+  .chk input { accent-color: var(--primary); }
+  /* 本地 PDF 阅读器 */
+  #cview-pdfreader { display:flex; flex-direction:column; }
+  .reader-bar .rb {
+    border:none; background:transparent; cursor:pointer; color:var(--text);
+    font-size:13px; padding:4px 10px; border-radius:6px; white-space:nowrap;
+  }
+  .reader-bar .rb:hover { background:rgba(0,0,0,.06); }
+  [data-theme="dark"] .reader-bar .rb:hover { background:rgba(255,255,255,.08); }
+  .reader-bar .rb.on { background:rgba(59,130,246,.14); color:var(--primary); font-weight:600; }
+  .reader-bar .rb-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:14px; text-align:center; }
+  .reader-bar .rb-info { font-size:12px; color:var(--muted); white-space:nowrap; }
+  .reader-bar .rb-sep { width:1px; height:18px; background:var(--border); flex-shrink:0; }
+  #pdfReaderBody { flex:1; min-height:0; overflow:auto; background:#3a3a3a; padding:16px; box-sizing:border-box; }
+  #pdfTocWrap { position:absolute; top:54px; right:16px; z-index:6; }  /* 右上抽屉(此前无定位,块级排到左下) */
+  #pdfTocWrap .reader-toc { width:300px; max-width:92%; background:var(--card); border:0.5px solid var(--border); border-radius:12px; padding:8px; max-height:60vh; overflow-y:auto; box-shadow:var(--shadow-lg); }
+  #pdfReaderBody .pdf-page-wrap { position:relative; margin:0 auto 14px; background:#fff; box-shadow:0 4px 18px rgba(0,0,0,.45); max-width:100%; cursor:pointer; }
+  #pdfReaderBody .pdf-page-wrap .pdf-page { display:block; margin:0 auto; background:#fff; max-width:100%; }
+  #pdfReaderBody .pdf-page-no { position:absolute; bottom:6px; right:10px; background:rgba(0,0,0,.55); color:#fff;
+    font-size:12px; padding:2px 10px; border-radius:999px; pointer-events:none; font-variant-numeric:tabular-nums; }
+  #pdfReaderBody .pdf-page-wrap.cur { outline:3px solid var(--primary); outline-offset:-3px; }
+  #pdfReaderBody.two-page { display:flex; gap:12px; justify-content:center; align-items:flex-start; }
+  #pdfReaderBody.two-page .pdf-page-wrap { margin:0; flex-shrink:0; }
+  /* 全局任务按钮:矩形态(默认,常驻)↔圆形态(有任务)。固定右下角悬浮,
+     令牌化层级(--z-fab):无论 launcher/双区/设置页/任何弹窗都置顶可见(悬浮气泡性质)。
+     浅色主题白色按钮(与卡片风格统一),深色主题深底白字 */
+  #taskFab {
+    position: fixed; right: 24px; bottom: 24px; z-index: var(--z-fab); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    background: #fff; color: #1d1d1f; border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.10);
+    font-size:13px; font-weight: 600; padding: 10px 16px;
+    transition: all .3s ease; user-select: none; white-space: nowrap;
+    touch-action: none; /* 拖拽记忆位置:禁用浏览器默认手势 */
+  }
+  #taskFab:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.14); }
+  [data-theme="dark"] #taskFab { background: rgba(44,44,46,.95); color:#f5f5f7; border-color: #48484a; }
+  /* 任务统合:原 #bubbleStack 任务气泡列表隐藏,统一由 taskFab + taskPanel 展示所有任务 */
+  #bubbleStack { display: none !important; }
+  #taskFab.fab-circle { width: 48px; height: 48px; padding: 0; border-radius: 50%; font-size: 14px; }
+  [data-theme="dark"] #taskFab { background: rgba(44,44,46,.95); }
+  /* 有活跃任务时:气泡外圈进度环(conic-gradient 按总进度填充,mask 挖空成环)。
+     无百分比数据(--ring-pct 为 0)时加 .ring-spin 旋转表示进行中 */
+  #taskFab.fab-circle.ring-on::before {
+    content:''; position:absolute; inset:-4px; border-radius:50%;
+    background: conic-gradient(var(--primary) var(--ring-pct, 0%), var(--surface-3) 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+    opacity:.95; pointer-events:none;
+  }
+  #taskFab.fab-circle.ring-on.ring-spin::before { animation: fabSpin 2.4s linear infinite; }
+  @keyframes fabSpin { to { transform: rotate(360deg); } }
+  /* 任务按钮三级展开:右侧矩形预览(taskFab 上方) */
+  .task-preview {
+    position:fixed; right:24px; bottom:90px; width:280px; max-height:340px; overflow-y:auto;
+    background:rgba(255,255,255,.82); -webkit-backdrop-filter:saturate(180%) blur(20px); backdrop-filter:saturate(180%) blur(20px);
+    border:0.5px solid rgba(0,0,0,.06); border-radius:14px; box-shadow:0 10px 32px rgba(0,0,0,.12);
+    z-index:var(--z-panel); display:none; flex-direction:column;
+  }
+  .task-preview.show { display:flex; }
+  [data-theme="dark"] .task-preview { background:rgba(44,44,46,.85); border-color:rgba(255,255,255,.08); }
+  .tp-header { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:0.5px solid var(--border); font-weight:600; font-size:13px; }
+  .tp-header .tp-close { margin-left:auto; border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:14px; padding:0 6px; border-radius:4px; }
+  .tp-header .tp-close:hover { background:rgba(0,0,0,.06); color:var(--text); }
+  .tp-body { padding:6px 12px 10px; font-size:13px; }
+  .tp-task { padding:8px 0; border-bottom:0.5px solid var(--border); }
+  .tp-task:last-child { border-bottom:none; }
+  /* 终止按钮 ⏹ hover 变红(与 ✕ 同款反馈) */
+  .stop-btn:hover, button.stop-btn:hover { background:var(--danger) !important; color:#fff !important; }
+  .stop-btn { transition: background .18s, color .18s; }
+  .tp-task-title { font-weight:600; margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tp-task-bar { height:5px; background:var(--secondary); border-radius:3px; overflow:hidden; }
+  .tp-task-bar .fill { height:100%; background:var(--primary); border-radius:3px; transition:width .3s; }
+  .tp-task-meta { font-size:11px; color:var(--muted); margin-top:4px; display:flex; justify-content:space-between; }
+  .tp-empty { color:var(--muted); padding:14px 0; text-align:center; }
+  body.desktop .task-preview { }  /* 桌面模式保留默认 right:24px/bottom:90px 定位;若需自定义位置后续再做 */
+  body.desktop #taskFab { z-index:var(--z-fab); }
+  /* 设置页(多页面) */
+  #page-settings { position: fixed; inset: 0; z-index: var(--z-settings); background: var(--bg); display: flex; flex-direction: column; }
+  .settings-hd { display:flex; align-items:center; gap:12px; padding: 12px 20px; background: var(--card); border-bottom:1px solid var(--border); }
+  .settings-hd h2 { font-size:16px; margin:0; }
+  .settings-body { display:flex; flex:1; min-height:0; }
+  .settings-side { width:150px; flex-shrink:0; padding:14px 10px; background:var(--card); border-right:1px solid var(--border); display:flex; flex-direction:column; gap:4px; }
+  .set-nav { padding:9px 14px; border-radius:9px; cursor:pointer; font-size:13px; color:var(--text); font-weight:500; }
+  .set-nav:hover { background:rgba(0,0,0,.05); }
+  [data-theme="dark"] .set-nav:hover { background:rgba(255,255,255,.08); }
+  .set-nav.active { background:var(--primary); color:#fff; font-weight:600; }
+  .settings-main { flex:1; min-width:0; overflow-y:auto; padding:20px 26px; }
+  .settings-main h3 { font-size:15px; font-weight:700; color:var(--text); }
+  .setcat { display:none; }
+  .setcat.active { display:block; }
+  /* 设置页卡片化统一风格(与全局 .card 一致) */
+  #page-settings .field label { font-size:13px; font-weight:600; color:var(--text); }
+  /* 设置页入口按钮:填充式(白底+边框+hover 浅蓝),与全局按钮风格统一 */
+  #page-settings .btn-ghost { text-align:left; justify-content:flex-start; padding:11px 14px; font-size:13px; background:#fff; border:1px solid var(--border); color:var(--text); font-weight:500; box-shadow:0 1px 2px rgba(0,0,0,.03); }
+  #page-settings .btn-ghost:hover { background:var(--primary-50); border-color:var(--primary); color:var(--primary); }
+  /* 设置页内 tab(书源/OPDS/同步/验证;漫画:源管理/订阅/验证)激活态 */
+  #setcat-book .btn-sm.active, #setcat-comic .btn-sm.active { background:var(--primary); border-color:var(--primary); color:#fff; }
+  .dl-float.show { display:flex; }
+  .dl-float .dot { width:8px; height:8px; border-radius:50%; background:#0A84FF; flex-shrink:0; }
+  .dl-float .nm { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+  .dl-float .bar { flex:1; height:7px; border-radius:4px; background:#3a3a3c; overflow:hidden; }
+  .dl-float .bar .fill { height:100%; background:#0A84FF; transition:width .4s; }
+  .dl-float .pct { color:#98989d; white-space:nowrap; }
+  .dl-float button { background:#2c2c2e; color:#f5f5f7; border:0.5px solid #48484a; border-radius:8px; font-size:12px; padding:4px 11px; cursor:pointer; }
+  .dl-float button:hover { background:#3a3a3c; }
+  /* ---------- Modal ---------- */
+  .modal-mask { position: fixed; inset:0; background: rgba(15,23,42,.45); z-index: var(--z-overlay); display:none; align-items:center; justify-content:center; padding: 24px 16px; overflow-y:auto; backdrop-filter: blur(2px); }
+  .modal-mask.show { display:flex; }
+  /* 开发警示:黄黑警示条纹(危险/注意视觉) */
+  .hazard-stripes { background: repeating-linear-gradient(-45deg, #ffc400 0 16px, #161616 16px 32px); }
+  /* 红黑警示条纹:高风险区(漫画区源少且不稳定) */
+  .hazard-stripes.red { background: repeating-linear-gradient(-45deg, #ff3b30 0 16px, #161616 16px 32px); }
+  /* 桌面(WebView2):关闭模态遮罩毛玻璃——backdrop-filter 会在 WebView2 合成层
+     触发表面重组,打开 modal/切换视图时可能伴随 native 空白窗一闪;浏览器模式保留 blur */
+  body.desktop .modal-mask { backdrop-filter:none; -webkit-backdrop-filter:none; background:rgba(15,23,42,.55); }
+  .modal { background: var(--bg); border-radius: 16px; width: 760px; max-width: 100%;
+    max-height: calc(100vh - 48px); overflow-y:auto; box-shadow: var(--shadow-lg); }
+  /* 弹窗尺寸规范:sm=轻量(源管理/确认) md=警示/表单 lg=列表(默认) xl=阅读器 */
+  .modal-sm { width: 440px; max-width: 94vw; }
+  .modal-md { width: 500px; max-width: 94vw; }
+  .modal-lg { width: 760px; max-width: 94vw; }
+  .modal::-webkit-scrollbar { width:6px; }
+  /* 开发状态警示:黄黑工业警示条纹(提示当前处于早期开发阶段) */
+  .warn-stripes {
+    background: repeating-linear-gradient(-45deg, #111 0px, #111 12px, #ffc400 12px, #ffc400 24px);
+  }
+  .modal::-webkit-scrollbar-thumb { background:#c8c8ce; border-radius:999px; }
+  .modal-hd { background: var(--card); padding: 14px 20px; display:flex; align-items:center; border-bottom:1px solid var(--border);
+    position:sticky; top:0; z-index:1; }
+  .modal-hd h2 { font-size:15px; font-weight:700; }
+/* 通用关闭按钮 ✕ 样式 + hover 变红反馈(全站统一) */
+  .x, .modal-hd .x, .settings-hd .x, .close-btn,
+  [class*="-close"], button[title^="关闭"], button[title*="关闭"] {
+    background:none; border:none; font-size:18px; cursor:pointer;
+    color:var(--muted); padding:4px 8px; border-radius:7px;
+    transition: background .18s, color .18s, transform .12s;
+    -webkit-app-region: no-drag;
+  }
+  .x:hover, .modal-hd .x:hover, .settings-hd .x:hover, .close-btn:hover,
+  [class*="-close"]:hover, button[title^="关闭"]:hover, button[title*="关闭"]:hover {
+    background:var(--danger); color:#fff; transform:scale(1.08);
+  }
+  .x:active, .modal-hd .x:active, .settings-hd .x:active { transform:scale(.94); }
+  .modal-hd .x { margin-left:auto; font-size:20px; }
+  .tab-body { padding: 18px 20px; }
+  .settings-actions { margin-top: 16px; display:flex; gap:10px; justify-content:flex-end; }
+  /* 设置弹窗页签 */
+  .settings-tab { border:none; background:none; font-size:13px; padding:10px 14px; cursor:pointer;
+    color:var(--muted); border-bottom:2px solid transparent; font-family:inherit; margin-bottom:-1px; }
+  .settings-tab.active { color:var(--primary); border-bottom-color:var(--primary); font-weight:500; }
+  .settings-tab:hover { color:var(--text); }
+  /* ---------- 阅读器(全屏沉浸,纸面居中) ---------- */
+  .reader-modal { width:100%; max-width:none; height:100%; display:flex; flex-direction:column; position:relative; }
+  .reader-hd { display:flex; align-items:center; gap:10px; padding: 8px 16px; background:rgba(255,255,255,.72); border-bottom:0.5px solid var(--border); flex-shrink:0; z-index:8; position:relative; }
+  [data-theme="dark"] .reader-hd { background:rgba(28,28,30,.85); }
+  .reader-hd .hd-btn { border:1px solid var(--border); background:transparent; color:var(--text); border-radius:8px; font-size:13px; padding:5px 11px; cursor:pointer; transition:.15s; flex-shrink:0; }
+  .reader-hd .hd-btn:hover { background:var(--secondary); }
+  .reader-hd .rt { font-weight:600; font-size:14px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .reader-hd .rpos { font-size:12px; color:var(--muted); white-space:nowrap; }
+  .reader-hd .rtools { display:flex; gap:6px; flex-shrink:0; }
+  .reader-hd .rtools button { border:1px solid var(--border); background:transparent; color:var(--text); border-radius:8px; font-size:12px; padding:5px 11px; cursor:pointer; transition:.15s; }
+  .reader-hd .rtools button:hover { background:var(--secondary); }
+  .reader-hd .rtools button:disabled { opacity:.4; cursor:not-allowed; }
+  /* 章内阅读进度条(P2):slim header 底部 2px,滚动即走,随 header 沉浸隐藏 */
+  .reader-prog { position:absolute; left:0; right:0; bottom:0; height:2px; pointer-events:none; }
+  .reader-prog i { display:block; height:100%; width:0; background:var(--primary); border-radius:0 2px 2px 0; transition:width .2s; }
+  /* 滚动区:整屏滚动,纸面内容居中 */
+  .reader-main { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; padding:0 24px; }
+  .toc-item { padding:7px 10px; font-size:13px; border-radius:7px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; transition:.12s; }
+  .toc-item:hover { background:var(--secondary); }
+  .toc-item.active { background:var(--primary); color:#fff; }
+  /* 分卷目录:卷标题分隔行 */
+  .toc-vol { padding:8px 10px 4px; font-size:12px; font-weight:700; color:var(--muted); border-top:1px dashed var(--border); margin-top:6px; letter-spacing:.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .toc-vol:first-child { border-top:none; margin-top:0; }
+  /* 书源列表独立滚动:滚动条紧贴列表,左侧导航不随之滚动(桌面模式扣除 40px 标题栏) */
+  #srcList { max-height: calc(100vh - 230px); overflow-y: auto; padding-right: 4px; }
+  body.desktop #srcList { max-height: calc(100vh - 270px); }
+  body.desktop .sidebar { top: 110px; }  /* sticky 偏移:40px 标题栏 + 70px 顶栏 */
+  /* 阅读器统一排版(TXT + EPUB 共用,保证视觉一致) */
+  /* 字体用 CSS 变量 + !important:既能压制 EPUB 内联字体,又可通过内联设置 --reader-font 切换字体 */
+  /* 纸面:定宽居中,卡片色浮于底色(深色模式自动适配),像漫画页一样沉浸 */
+  #readerChapterTitle { text-align:center; font-size:20px; font-weight:600; margin:26px 0 22px; color:var(--text); }
+  body.novel-reading .reader-body {
+    max-width:880px; margin:0 auto 100px; padding:46px 52px 72px;
+    background:var(--paper-card, var(--card)); border-radius:14px; box-shadow:var(--shadow);
+    font-size:17px; line-height:2.05; word-break:break-word;
+    font-family: var(--reader-font, "Georgia", "STSong", "SimSun", "PingFang SC", "Microsoft YaHei", serif) !important; color:var(--paper-text, var(--text));
+  }
+  /* 纸张主题(P2):纸白(默认,跟随明暗主题)/护眼绿/羊皮纸/暗夜(固定深纸) */
+  .reader-body[data-paper="green"] { --paper-card:#c7edcc; --paper-text:#2c3e2d; --paper-sub:#5c6f5e; --paper-chip:rgba(44,62,45,.08); }
+  .reader-body[data-paper="sepia"] { --paper-card:#f4ecd8; --paper-text:#4a3f2a; --paper-sub:#8d7c5a; --paper-chip:rgba(74,63,42,.08); }
+  .reader-body[data-paper="night"] { --paper-card:#1c1c1e; --paper-text:#c9c9ce; --paper-sub:#8e8e93; --paper-chip:rgba(255,255,255,.08); box-shadow:0 4px 22px rgba(0,0,0,.5); }
+  body.novel-reading .reader-body[data-paper] blockquote { background:var(--paper-chip); color:var(--paper-sub); }
+  body.novel-reading .reader-body[data-paper] th { background:var(--paper-chip); }
+  body.novel-reading .reader-body[data-paper] pre, body.novel-reading .reader-body[data-paper] code { background:var(--paper-chip); }
+  body.novel-reading .reader-body[data-paper] .epub-html h1, body.novel-reading .reader-body[data-paper] .epub-html h2 { color:var(--paper-sub); }
+  @media (max-width:700px) { body.novel-reading .reader-body { padding:30px 22px 60px; } }
+  .reader-body p { margin: 0 0 1.1em; text-indent: 2em; }
+  .reader-body img { max-width:100%; height:auto; border-radius:6px; margin: 10px auto; display:block; cursor:zoom-in; }
+  /* EPUB 注入内容布局约束:压制内嵌 <style>/宽表格/float 撑破(与漫画阅读同款"内容不破版"保证) */
+  .reader-body.epub-html { overflow-wrap:break-word; }
+  .reader-body.epub-html * { max-width:100% !important; box-sizing:border-box !important; }
+  .reader-body.epub-html div,
+  .reader-body.epub-html p,
+  .reader-body.epub-html section,
+  .reader-body.epub-html article { width:auto !important; float:none !important; margin-left:0 !important; margin-right:0 !important; }
+  /* 正文内嵌 h1/h2 弱化为居中灰色小标题(顶栏/章标题已有,避免重复抢视觉) */
+  .reader-body.epub-html h1,
+  .reader-body.epub-html h2 { text-align:center; font-size:1.15em; font-weight:600; color:var(--muted); border:none; margin:0 0 1.4em; }
+  .reader-body.epub-html table { display:block; width:100% !important; overflow-x:auto; border-collapse:collapse; }
+  .reader-body.epub-html td, .reader-body.epub-html th { padding:4px 8px; border:0.5px solid var(--border); }
+  .reader-body.epub-html img, .reader-body.epub-html svg, .reader-body.epub-html video { max-width:100% !important; height:auto !important; }
+  .reader-body.epub-html pre { white-space:pre-wrap; word-break:break-word; }
+  .reader-body.epub-html ul, .reader-body.epub-html ol { padding-left:1.6em; }
+  .reader-body.epub-html a { color:var(--primary); }
+  /* 压制 EPUB 内嵌 style 标签对布局的影响(字体已由 epubFontOverride 统一,这里清布局类声明) */
+  .reader-body.epub-html style { display:none !important; }
+  /* 阅读器图片查看弹窗:全屏原尺寸 + 滚动 + 缩放 */
+  #imgZoomMask { align-items:stretch; background:rgba(0,0,0,.92); padding:52px 0 72px; }
+  #imgZoomWrap { flex:1; overflow:auto; display:block; }
+  #imgZoomWrap img { display:block; margin:0 auto; border-radius:10px; box-shadow:0 12px 48px rgba(0,0,0,.5); cursor:default; }
+  #imgZoomActions { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:8px; background:rgba(30,30,32,.92); border-radius:12px; padding:7px 12px; box-shadow:var(--shadow-lg); z-index:5; }
+  #imgZoomActions button { font-size:13px; background:rgba(255,255,255,.14); color:#fff; border:none; border-radius:8px; padding:5px 12px; cursor:pointer; }
+  #imgZoomActions button:active { opacity:.7; }
+  #imgZoomActions .pct { font-size:12px; color:#fff; min-width:44px; text-align:center; font-variant-numeric:tabular-nums; }
+  #imgZoomClose { position:fixed; top:14px; right:14px; background:rgba(30,30,32,.92); color:#fff; border:none; border-radius:50%; width:34px; height:34px; font-size:16px; cursor:pointer; box-shadow:var(--shadow-lg); z-index:5; }
+  .reader-body h1,.reader-body h2,.reader-body h3,.reader-body h4 { font-weight:500; margin: 1.2em 0 .5em; line-height:1.5; text-indent:0; }
+  .reader-body br { line-height:1.6; }
+  /* EPUB 富内容:表格/列表/引用/代码/脚注/音视频 */
+  .reader-body table { border-collapse:collapse; margin:1em auto; max-width:100%; font-size:14px; }
+  .reader-body th, .reader-body td { border:0.5px solid var(--border); padding:6px 10px; text-align:left; }
+  .reader-body th { background:var(--secondary); font-weight:500; }
+  .reader-body ul, .reader-body ol { margin: .6em 0 .6em 2em; padding:0; }
+  .reader-body li { margin:.25em 0; }
+  .reader-body blockquote { margin:.8em 0; padding:.4em 1em; border-left:3px solid var(--primary); background:var(--secondary); border-radius:0 6px 6px 0; color:var(--muted); }
+  .reader-body pre, .reader-body code { font-family:"SF Mono","Consolas","Courier New",monospace; font-size:.9em; background:var(--secondary); border-radius:4px; }
+  .reader-body pre { padding:.6em 1em; overflow-x:auto; line-height:1.6; }
+  .reader-body code { padding:1px 5px; }
+  .reader-body pre code { padding:0; background:none; }
+  .reader-body hr { border:none; border-top:0.5px solid var(--border); margin:1.4em auto; width:60%; }
+  .reader-body a { color:var(--primary); text-decoration:none; }
+  .reader-body a:hover { text-decoration:underline; }
+  .reader-body audio, .reader-body video { max-width:100%; margin:10px auto; display:block; border-radius:8px; }
+  .reader-body sup a, .reader-body .footnote { font-size:.8em; color:var(--primary); }
+  .reader-body .footnote-ref { color:var(--primary); font-size:.8em; vertical-align:super; }
+  /* ---------- 其他 ---------- */
+/* toast + notify 入场/退场动画统一 */
+  @keyframes toastPopIn { 0% { opacity:0; transform:translateX(-50%) translateY(80px) scale(.9); } 60% { opacity:1; transform:translateX(-50%) translateY(-6px) scale(1.03); } 100% { opacity:1; transform:translateX(-50%) translateY(0) scale(1); } }
+  @keyframes toastFadeOut { from { opacity:1; transform:translateX(-50%) translateY(0) scale(1); } to { opacity:0; transform:translateX(-50%) translateY(-12px) scale(.95); } }
+  .toast { position: fixed; bottom: 62px; left: 50%; transform: translateX(-50%) translateY(80px); background:rgba(28,28,30,.96); color:#fff; padding:11px 20px; border-radius:var(--r-md); font-size:13px; box-shadow: var(--shadow-lg); opacity:0; transition:.25s; z-index:var(--z-notify); max-width:80%; }
+  .toast.show { animation: toastPopIn .32s cubic-bezier(.34,1.56,.64,1) forwards; }
+  .toast.fading { animation: toastFadeOut .22s ease forwards; }
+  /* notify 入场动画(原只有退场) */
+  @keyframes notifySlideIn { 0% { opacity:0; transform:translateX(28px) scale(.94); } 100% { opacity:1; transform:translateX(0) scale(1); } }
+  #notifStack > div { animation: notifySlideIn .28s cubic-bezier(.34,1.56,.64,1); }
+  /* checkbox/radio 选中动画 */
+  input[type="checkbox"], input[type="radio"] { transition: transform .14s; }
+  input[type="checkbox"]:active, input[type="radio"]:active { transform:scale(.85); }
+  /* 任务按钮形态切换平滑过渡 */
+  #taskFab { transition: width .3s, height .3s, padding .3s, border-radius .3s, background .3s, color .3s, transform .18s; }
+  /* ---------- 全局加载条 ---------- */
+  #topBar { position: fixed; top:0; left:0; right:0; height:3px; z-index:var(--z-topbar); pointer-events:none; display:none; overflow:hidden; }
+  #topBar.show { display:block; }
+  #topBarFill { height:100%; width:40%; background: linear-gradient(90deg, transparent, #007AFF, transparent); animation: slideBar 1s ease-in-out infinite; }
+  @keyframes slideBar { 0% { transform: translateX(-120%); } 100% { transform: translateX(380%); } }
+  .spin { width: 14px; height: 14px; border: 2px solid rgba(0,122,255,.25); border-top-color: var(--primary); border-radius: 50%; animation: rot .7s linear infinite; display:inline-block; vertical-align:-3px; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  .hint-line { font-size:12px; color:var(--muted); }
+  /* ---------- UI 动画 ---------- */
+  @keyframes modalFadeIn { from { opacity:0; } to { opacity:1; } }
+  @keyframes modalScaleIn { from { opacity:0; transform:scale(.94) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }
+  @keyframes itemSlideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes fadeInUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes indeterminateBar { 0% { margin-left:-30%; } 100% { margin-left:100%; } }
+  .modal-mask { opacity:0; transition:opacity .2s; }
+  .modal-mask.show { opacity:1; animation:modalFadeIn .2s ease; }
+  .modal-mask .modal { animation:modalScaleIn .25s ease; }
+  /* 搜索结果项依次淡入 */
+  .result-card { animation:itemSlideIn .3s ease both; }
+  .result-card:nth-child(1) { animation-delay:0s; }
+  .result-card:nth-child(2) { animation-delay:.04s; }
+  .result-card:nth-child(3) { animation-delay:.08s; }
+  .result-card:nth-child(4) { animation-delay:.12s; }
+  .result-card:nth-child(5) { animation-delay:.16s; }
+  .result-card:nth-child(n+6) { animation-delay:.2s; }
+  /* 书架列表 hover 增强 */
+  .shelf-item { transition:background .12s, transform .15s; }
+  .shelf-item:hover { transform:translateY(-1px); }
+  /* 按钮点击反馈 */
+  button:active { transform:scale(.97); }
+  button { transition:transform .1s, opacity .15s, background .15s, color .15s; }
+  /* ---------- 滚动条美化 ---------- */
+  ::-webkit-scrollbar { width:6px; height:6px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#c8c8ce; border-radius:999px; }
+  ::-webkit-scrollbar-thumb:hover { background:#a8a8ae; }
+  .modal-mask::-webkit-scrollbar { width:6px; }
+  .modal-mask::-webkit-scrollbar-thumb { background:rgba(255,255,255,.35); }
+  .modal-mask::-webkit-scrollbar-track { background:transparent; }
+  /* ---------- OPDS 下载方式选择 ---------- */
+  .opds-mode-btn { flex:1; border:1.5px solid var(--border); background:var(--card); border-radius:10px; padding:10px 12px; cursor:pointer; text-align:left; font-family:inherit; color:var(--text); transition:.15s; }
+  .opds-mode-btn:hover { border-color:var(--primary); }
+  .opds-mode-btn.on { border-color:var(--primary); background:var(--primary-50); box-shadow:0 0 0 1px var(--primary); }
+  /* ---------- SVG 图标(P1) ---------- */
+  .ico { width:15px; height:15px; flex-shrink:0; vertical-align:-2.5px; }
+  .nav-item .ico, .set-nav .ico { width:15px; height:15px; vertical-align:-2.5px; color:var(--text-2); transition:color .15s; }
+  .nav-item:hover .ico, .set-nav:hover .ico { color:var(--text); }
+  .nav-item.active .ico, .set-nav.active .ico { color:var(--primary); }
+  .set-nav.active .ico { color:#fff; }
+  .tb-btn .ico { width:13px; height:13px; vertical-align:-1.5px; }
+  .l-btn .ico { width:38px; height:38px; }
+  .btn .ico, .btn-sm .ico, .mode-switch-btn .ico, .btn-ghost .ico { vertical-align:-2px; margin-right:5px; }
+  .btn-sm .ico { width:13px; height:13px; }
+  .mode-btn .ico { width:13px; height:13px; vertical-align:-2px; margin-right:4px; }
+  /* 减弱动效偏好:关闭非必要动画 */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+  }
+  /* ---------- 按钮 loading 态(P1) ---------- */
+  .btn.loading, .btn-sm.loading { pointer-events:none; opacity:.72; }
+  .btn.loading::before, .btn-sm.loading::before {
+    content:""; width:12px; height:12px; margin-right:6px; vertical-align:-2px;
+    border:2px solid rgba(255,255,255,.4); border-top-color:#fff; border-radius:50%;
+    animation:rot .7s linear infinite; display:inline-block;
+  }
+  .btn-ghost.loading::before, .btn-sm.loading::before { border-color:rgba(0,122,255,.25); border-top-color:var(--primary); }
+  .btn-primary.loading::before { border-color:rgba(255,255,255,.4); border-top-color:#fff; }
+  /* ---------- 骨架屏(P1) ---------- */
+  @keyframes skelShimmer { 0% { background-position:100% 0; } 100% { background-position:-100% 0; } }
+  .skel {
+    border-radius:var(--r-sm);
+    background:linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 45%, var(--surface-2) 65%);
+    background-size:400% 100%; animation:skelShimmer 1.4s ease infinite;
+  }
+  .skel-row { display:flex; align-items:center; gap:12px; padding:13px 16px; }
+  .skel-row .sk-ico { width:26px; height:26px; border-radius:8px; }
+  .skel-row .sk-lines { flex:1; display:flex; flex-direction:column; gap:7px; }
+  .skel-row .sk-line { height:11px; border-radius:6px; }
+  .skel-row .sk-line.w60 { width:58%; } .skel-row .sk-line.w35 { width:35%; }
+  .skel-card { border-radius:var(--r-md); overflow:hidden; background:var(--card); border:0.5px solid var(--border); }
+  .skel-card .sk-cov { width:100%; aspect-ratio:3/4; }
+  .skel-card .sk-bd { padding:9px 11px 11px; display:flex; flex-direction:column; gap:7px; }
+  .skel-card .sk-line { height:11px; border-radius:6px; }
+  /* ---------- 空状态四段式(P1) ---------- */
+  .empty2 { display:flex; flex-direction:column; align-items:center; gap:6px; padding:44px 20px; text-align:center; }
+  .empty2 .e-ico { width:52px; height:52px; border-radius:16px; background:var(--surface-2); color:var(--text-3);
+    display:flex; align-items:center; justify-content:center; margin-bottom:6px; }
+  .empty2 .e-ico .ico { width:26px; height:26px; }
+  .empty2 .e-title { font-size:14px; font-weight:600; color:var(--text); }
+  .empty2 .e-hint { font-size:12px; color:var(--muted); line-height:1.8; max-width:420px; }
+  .empty2 .e-act { margin-top:10px; }
+</style>
+
+<style>
+  /* ===== reader.html 独立窗口补充样式 ===== */
+  html, body { height:100%; overflow:hidden; }
+  /* 顶栏即拖动区(桌面模式):mousedown → /api/window/drag 接管 */
+  body.desktop .reader-bar, body.desktop .reader-hd { -webkit-app-region: drag; }
+  body.desktop .reader-bar button, body.desktop .reader-bar .rb,
+  body.desktop .reader-bar span, body.desktop .reader-hd button { -webkit-app-region: no-drag; }
+</style>
+
+</head>
+<body>
+<div class="toast" id="toast"></div>
+<!-- 漫画独立阅读页(沉浸式:S3 新增,替代原弹窗阅读器) -->
+      <div class="cview" id="cview-reader">
+        <div class="reader-page">
+          <div class="reader-bar" id="readerBar">
+            <button class="btn-sm" onclick="closeComicReader()" title="返回(Esc)">← 返回</button>
+            <span class="rt" id="comicRTitle"></span>
+            <span class="rpos" id="comicRPos"></span>
+            <span class="rpos" id="comicRPage"></span>
+            <button class="btn-sm" onclick="comicReaderAdj(-0.1)" title="屏幕缩小(A-)">A−</button>
+            <span class="rpos" id="comicRZoomVal" title="屏幕缩放比例">100%</span>
+            <button class="btn-sm" onclick="comicReaderAdj(0.1)" title="屏幕放大(A+)">A+</button>
+            <button class="btn-sm" onclick="comicFitMode('width')" id="comicRFitW" title="适应宽度">适宽</button>
+            <button class="btn-sm" onclick="comicFitMode('page')" id="comicRFitP" title="适应整页">整页</button>
+            <button class="btn-sm" onclick="comicDarkToggle()" id="comicRDark" title="夜读(纯黑背景)">夜读</button>
+            <button class="btn-sm" onclick="comicReaderPrev()" id="comicRPrev" title="上一话(←)">上一话</button>
+            <button class="btn-sm" onclick="comicReaderNext()" id="comicRNext" title="下一话(→)">下一话</button>
+            <button class="btn-sm" onclick="comicRTocToggle()" title="目录(T)">☰ 目录</button>
+            <button class="btn-sm" onclick="comicReaderTwoPage()" id="comicRTwoBtn" title="双页模式(宽窗口)">双页</button>
+            <button class="btn-sm" onclick="comicReaderFullscreen()" title="全屏(F)">⛶</button>
+          </div>
+          <div class="creader-body" id="comicRBody" onclick="toggleReaderUI()"></div>
+          <div class="reader-drawer" id="comicRTocWrap">
+            <div class="rd-hd">目录<button class="btn-sm" onclick="comicRTocToggle()">✕</button></div>
+            <div id="comicRToc"></div>
+          </div>
+          <div id="comicRHud" style="display:none; position:absolute; right:16px; bottom:16px; z-index:7;
+               background:rgba(0,0,0,.55); color:#fff; font-size:12.5px; padding:4px 12px; border-radius:999px;
+               pointer-events:none; font-variant-numeric:tabular-nums;">1 / 1</div>
+        </div>
+      </div>
+      
+<!-- ================== 漫画本地 PDF 阅读器 ================== -->
+<div id="cview-pdfreader" style="display:none; position:absolute; inset:0; background:var(--bg); z-index:var(--z-panel)">
+  <div class="reader-bar">
+    <button class="rb" onclick="closeLocalPdf()">‹ 返回</button>
+    <span class="rb-sep"></span>
+    <button class="rb" onclick="pdfZoom(-1)" title="缩小">A−</button>
+    <button class="rb" onclick="pdfZoom(1)" title="放大">A+</button>
+    <span class="rb-sep"></span>
+    <button class="rb" onclick="pdfPrevChapter()">上一话</button>
+    <button class="rb" onclick="pdfNextChapter()">下一话</button>
+    <button class="rb" onclick="pdfToggleToc()">☰ 卷/目录</button>
+    <span class="rb-sep"></span>
+    <button class="rb" onclick="pdfPrevPage()">‹ 上一页</button>
+    <button class="rb" onclick="pdfNextPage()">下一页 ›</button>
+    <span class="rb-sep"></span>
+    <button class="rb" onclick="pdfToggle2page()" title="双页并排显示">双页</button>
+    <button class="rb" id="pdfImgModeBtn" onclick="pdfToggleImgMode()" title="图片直读:绕过 PDF 内核直接抽取页面原图,内存占用最低">图片直读</button>
+    <button class="rb" onclick="pdfOpenSystem()" title="用系统默认浏览器/阅读器内核打开本 PDF">系统内核</button>
+    <button class="rb" onclick="pdfToggleFull()">⛶ 全屏</button>
+    <span class="rb-sep"></span>
+    <span class="rb-title" id="pdfReaderTitle">漫画阅读</span>
+    <span class="rb-sep"></span>
+    <span class="rb-info" id="pdfReaderInfo"></span>
+  </div>
+  <div id="pdfReaderBody" class="reader-body" onclick="pdfBodyClick(event)"></div>
+  <div id="pdfTocWrap" class="reader-toc-wrap" style="display:none">
+    <div class="reader-toc">
+      <div class="reader-toc-hd">目录 / 分卷<button class="x" onclick="pdfToggleToc()">✕</button></div>
+      <div id="pdfTocList" class="reader-toc-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================== 漫画在线阅读器(UI 与书籍阅读器一致) ================== -->
+<div class="dl-float" id="dlFloat">
+  <span class="dot"></span>
+  <span class="nm" id="dlName">下载中</span>
+  <div class="bar"><div class="fill" id="dlFill" style="width:0%"></div></div>
+  <span class="pct" id="dlPct">0%</span>
+  <span style="color:#94a3b8" id="dlText"></span>
+  <button onclick="showView('search')">详情</button>
+</div>
+
+
+<div class="modal-mask" id="readerMask">
+  <div class="modal reader-modal">
+    <div class="reader-hd">
+      <button class="hd-btn" onclick="toggleReaderToc()" title="目录">☰</button>
+      <span class="rt" id="readerTitle"></span>
+      <span class="rpos" id="readerPos"></span>
+      <span class="rtools">
+        <button onclick="closeReader()" title="关闭(Esc)">✕</button>
+      </span>
+      <div class="reader-prog" id="readerProg"><i id="readerProgFill"></i></div>
+    </div>
+    <div class="reader-main" id="readerMain">
+      <h2 id="readerChapterTitle"></h2>
+      <div class="reader-body" id="readerBody"></div>
+    </div>
+    <div class="reader-toc-mask" id="readerTocMask" onclick="closeReaderToc()"></div>
+    <div class="reader-toc" id="readerToc"></div>
+    <div class="reader-bar">
+      <button onclick="readerPrev()" id="btnPrev" title="上一章(←)">← 上一章</button>
+      <button onclick="readerNext()" id="btnNext" title="下一章(→)">下一章 →</button>
+      <span class="bar-sep"></span>
+      <button onclick="readerFontAdj(-1)" title="减小字号">A−</button>
+      <button onclick="readerFontAdj(1)" title="增大字号">A+</button>
+      <span class="bar-sep"></span>
+      <button onclick="readerZoomAdj(-0.1)" title="屏幕缩小">🔍−</button>
+      <span id="readerZoomVal" title="屏幕缩放比例" style="font-size:11px; color:var(--muted)">100%</span>
+      <button onclick="readerZoomAdj(0.1)" title="屏幕放大">🔍+</button>
+      <button onclick="readerLineAdj()" title="行距">↕</button>
+      <button onclick="showReaderLayout()" title="纸张与版心">Aa</button>
+      <button onclick="showReaderFonts()" id="readerFontBtn" title="选择字体">文</button>
+      <button onclick="readerBookmarkToggle()" id="btnBookmark" title="书签(收藏本章)">☆</button>
+      <button onclick="toggleReaderSpeak()" id="btnSpeak" title="朗读本章">🔊</button>
+      <button onclick="showReaderNotes()" title="书签与笔记">📒</button>
+    </div>
+  </div>
+</div>
+
+<!-- 阅读器图片查看(点击放大:原尺寸滚动查看 + 缩放 + 复制) -->
+<div class="modal-mask" id="imgZoomMask" onclick="if(event.target===this)closeImgZoom()">
+  <div id="imgZoomWrap"><img id="imgZoomSrc" alt="插图"></div>
+  <div id="imgZoomActions">
+    <button onclick="imgZoomScale(-1)" title="缩小">−</button>
+    <span class="pct" id="imgZoomPct">100%</span>
+    <button onclick="imgZoomScale(1)" title="放大">+</button>
+    <button onclick="imgZoomFit()" title="适应窗口">⛶ 适应</button>
+    <button onclick="imgZoom100()" title="原始大小">1:1</button>
+    <span style="width:1px; height:16px; background:rgba(255,255,255,.25)"></span>
+    <button onclick="copyImgZoom()" title="复制图片">📋</button>
+    <button onclick="openImgZoomSrc()" title="新窗口打开">↗</button>
+  </div>
+  <button id="imgZoomClose" title="关闭(Esc)" onclick="closeImgZoom()">✕</button>
+</div>
+
+<!-- 书签与笔记列表 -->
+<div class="modal-mask" id="notesMask" onclick="if(event.target===this)closeReaderNotes()">
+  <div class="modal" style="width:480px">
+    <div class="modal-hd"><h2>📒 书签与笔记 · <span id="notesTitle"></span></h2><button class="x" onclick="closeReaderNotes()">✕</button></div>
+    <div class="tab-body" id="notesBody" style="max-height:60vh; overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- 划词添加笔记输入 -->
+<div class="modal-mask" id="noteAddMask" style="z-index:var(--z-confirm)" onclick="if(event.target===this)closeNoteAdd()">
+  <div class="modal" style="width:440px">
+    <div class="modal-hd"><h2>✏️ 添加笔记</h2><button class="x" onclick="closeNoteAdd()">✕</button></div>
+    <div class="tab-body">
+      <div id="noteQuote" style="font-size:12px; color:var(--muted); background:var(--secondary); border-radius:8px; padding:8px 10px; margin-bottom:10px; max-height:72px; overflow-y:auto; border-left:3px solid var(--primary)"></div>
+      <textarea id="noteText" rows="3" placeholder="写下你的想法…" style="width:100%; font-size:13px"></textarea>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px">
+        <button class="btn btn-ghost" onclick="closeNoteAdd()">取消</button>
+        <button class="btn btn-primary" onclick="saveNoteAdd()">保存笔记</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 二维码由后端生成 base64 返回,前端 <img> 显示(不依赖 CDN,WebView2 离线也 OK) -->
+
+<script src="/static/pdfjs/pdf.min.js"></script>
+<script src="/static/reader-core.js"></script>
+<script>
+/* ===== reader.html 宿主环境 ===== */
+'use strict';
+// 精简 api/esc/toast(独立页无主界面加载条)
+async function api(path, opts, timeoutMs = 60000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(path, {...(opts || {}), signal: ctrl.signal});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    return j;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('请求超时');
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+function jss(s) { return String(s ?? '').replace(/[\'"]/g, '\$&'); }
+// 下载任务跟踪状态:独立页无后台下载系统,恒为空(后台任务标记恒不显示)
+window._dlTasks = new Map();
+let toastTimer = null;
+function toast(msg, ms = 2600) {
+  const el = document.getElementById('toast');
+  el.innerHTML = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms || 2600);
+}
+// 视图切换桩(reader.html 只承载阅读视图)
+window.comicShowView = function (v) {
+  document.querySelectorAll('.cview').forEach(c => c.classList.toggle('active', c.id === 'cview-' + v));
+};
+window.showView = function () {};
+window.isDesktop = function () { return !!(window.chrome && window.chrome.webview); };
+// 窗口控制:桌面模式带 wid 调 /api/window/*(reader 窗口自身);浏览器模式无窗口概念
+window.__READER_WID__ = new URLSearchParams(location.search).get('wid') || '';
+function winPost(path, body) {
+  try {
+    return fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(Object.assign({win: window.__READER_WID__ || undefined}, body || {}))}).catch(function(){});
+  } catch (e) { return Promise.resolve(); }
+}
+if (isDesktop()) document.body.classList.add('desktop');
+// 关闭函数改写为关闭本窗口(桌面)/标签页(浏览器)
+window.closeComicReader = function () {
+  if (isDesktop()) { winPost('/api/window/close'); } else { window.close(); }
+};
+window.closeReader = function () {
+  if (isDesktop()) { winPost('/api/window/close'); } else { window.close(); }
+};
+window.closeLocalPdf = function () {
+  if (isDesktop()) { winPost('/api/window/close'); } else { window.close(); }
+};
+// 拖动:阅读器顶栏 → /api/window/drag(带 win)
+document.addEventListener('mousedown', function (e) {
+  if (!isDesktop()) return;
+  if (e.button !== 0) return;
+  if (e.target.closest && e.target.closest('button, input, select, textarea, a, .btn-sm')) return;
+  if (e.target.closest && e.target.closest('.reader-bar, .reader-hd')) { e.preventDefault(); winPost('/api/window/drag'); }
+}, true);
+// ===== 启动:按 URL 参数进入对应阅读器 =====
+(function boot() {
+  const q = new URLSearchParams(location.search);
+  const mode = q.get('mode') || '';
+  window.__EMBED_READER__ = true;   // 入口函数不再二次开窗
+  const num = k => { const v = parseInt(q.get(k) || '1', 10); return isFinite(v) && v > 0 ? v : 1; };
+  try {
+    if (mode === 'comic') {
+      comicOpenReader(q.get('source') || '', q.get('comic_id') || '', q.get('title') || '漫画', 'reader');
+    } else if (mode === 'novel') {
+      openReader(q.get('file') || '', num('idx'));
+    } else if (mode === 'novel_online') {
+      openReaderOnline(q.get('rurl') || '', q.get('title') || '在线阅读', num('idx'));
+    } else if (mode === 'epub') {
+      openEpubOnline(q.get('rurl') || '', q.get('title') || 'EPUB 在线阅读');
+    } else if (mode === 'pdf') {
+      comicOpenLocalPdf(q.get('title') || '漫画', q.get('file') || '');
+    } else {
+      document.body.innerHTML = '<div style="padding:40px; color:var(--muted); font-size:14px">缺少阅读参数(mode)</div>';
+    }
+  } catch (e) {
+    document.body.innerHTML = '<div style="padding:40px; color:var(--danger); font-size:14px">打开失败: ' + esc(e.message) + '</div>';
+  }
+})();
+</script>
+</body>
+</html>

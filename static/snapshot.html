@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b2545">
+<title>小说管家 · 离线</title>
+<style>
+  :root {
+    --bg:#f5f5f7; --card:#fff; --secondary:#f2f2f6; --border:#d2d2d7;
+    --text:#1d1d1f; --muted:#86868b; --primary:#007AFF; --primary-dark:#0066d6;
+    --primary-50:#e8f1ff; --success:#34C759;
+    --radius:18px;
+    --shadow:0 1px 2px rgba(0,0,0,.03), 0 8px 24px rgba(0,0,0,.05);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; }
+  body { font-family:-apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; background:var(--bg); color:var(--text); }
+  .topbar {
+    position:sticky; top:0; z-index:20; background:linear-gradient(135deg,#0b2545,#174a8a);
+    border-bottom:none; padding:14px 16px; display:flex; align-items:center; gap:10px;
+  }
+  .topbar .logo { width:32px; height:32px; border-radius:9px; object-fit:cover; box-shadow:0 3px 12px rgba(0,0,0,.4); flex-shrink:0; }
+  .topbar h1 { font-size:17px; font-weight:700; flex:1; letter-spacing:.3px; color:#fff; }
+  .badge { font-size:11.5px; font-weight:600; padding:4px 9px; border-radius:999px; white-space:nowrap; background:rgba(255,255,255,.16); color:#bcd4ff; }
+  .seg { display:flex; background:var(--secondary); border-radius:11px; padding:3px; margin:12px 16px 2px; }
+  .seg span { flex:1; text-align:center; font-size:13.5px; font-weight:600; color:var(--muted); padding:8px 0; border-radius:9px; cursor:pointer; transition:.18s; }
+  .seg span.on { background:var(--card); color:var(--text); box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  #offBanner { margin:12px 16px 0; padding:13px 15px; background:var(--primary-50); color:#0b4fa8; border-radius:14px; font-size:13px; line-height:1.75; border:1px solid rgba(11,79,168,.25); box-shadow:0 2px 10px rgba(11,79,168,.08); }
+  #list { padding:12px 16px 40px; }
+  .sec-hd { display:flex; align-items:center; margin:10px 2px 10px; }
+  .sec-hd .t { font-size:14px; font-weight:700; }
+  .sec-hd .n { font-size:11.5px; color:var(--muted); margin-left:6px; }
+  .sec-hd .sp { flex:1; }
+  .book {
+    background:var(--card); border-radius:16px; padding:13px 14px; margin-bottom:10px;
+    box-shadow:var(--shadow); display:flex; align-items:center; gap:12px;
+  }
+  .book .cov {
+    width:42px; height:56px; border-radius:9px; flex-shrink:0; background:var(--primary-50);
+    color:var(--primary); display:flex; align-items:center; justify-content:center;
+    font-size:18px; font-weight:700; box-shadow:inset 0 0 0 .5px rgba(0,122,255,.18);
+  }
+  .book .info { flex:1; min-width:0; }
+  .book .name { font-size:14.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .book .meta { font-size:12px; color:var(--muted); margin-top:3px; display:flex; gap:8px; flex-wrap:wrap; }
+  .book .meta .ok { color:var(--success); }
+  .rowbtns { display:flex; gap:7px; flex-shrink:0; }
+  .fbtn { border:none; background:var(--primary); color:#fff; border-radius:9px; padding:7px 12px; font-size:12.5px; font-weight:600; cursor:pointer; flex-shrink:0; }
+  .fbtn:active { opacity:.75; }
+  .fbtn.ghost { background:var(--card); color:var(--primary); border:1px solid var(--primary); }
+  .fbtn.gray { background:var(--secondary); color:var(--text); border:1px solid var(--border); }
+  .fbtn.sm { padding:5px 9px; font-size:11.5px; border-radius:8px; }
+  .empty { text-align:center; color:var(--muted); font-size:13px; padding:60px 24px; line-height:1.9; }
+  .chaps { margin:0 16px 12px; background:var(--card); border-radius:14px; box-shadow:var(--shadow); overflow:hidden; }
+  .chaps .ch { display:flex; align-items:center; gap:8px; padding:10px 14px; font-size:13px; border-top:0.5px solid var(--secondary); }
+  .chaps .ch:first-child { border-top:none; }
+  .chaps .ch .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+  .chaps .ch .st { font-size:11px; color:var(--muted); flex-shrink:0; }
+  .chaps .ch a { font-size:11.5px; color:var(--primary); text-decoration:none; padding:4px 6px; }
+  .chaps .ch a:active { opacity:.6; }
+  #reader { position:fixed; inset:0; background:var(--bg); z-index:50; display:none; flex-direction:column; }
+  #reader.show { display:flex; }
+  .rbar { display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--card); border-bottom:0.5px solid var(--border); }
+  .rbar .back { font-size:16px; cursor:pointer; padding:4px 8px; }
+  .rbar .rt { flex:1; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rbar .fs { font-size:14px; color:var(--muted); padding:4px 8px; cursor:pointer; user-select:none; }
+  .rbody { flex:1; overflow-y:auto; padding:18px 20px 40px; font-size:17px; line-height:2; font-family:"DengXian","PingFang SC","Microsoft YaHei",sans-serif; }
+  .rbody h2 { font-size:16px; font-weight:600; margin-bottom:14px; }
+  .rbody p { margin:0 0 1em; text-indent:2em; }
+  .rbody img { max-width:100%; height:auto; display:block; margin:10px auto; border-radius:6px; }
+  .rbody table { border-collapse:collapse; width:100%; font-size:14px; margin:10px 0; }
+  .rbody th,.rbody td { border:0.5px solid var(--border); padding:5px 8px; }
+  .rbottom { display:flex; background:var(--card); border-top:0.5px solid var(--border); padding:8px 12px calc(8px + env(safe-area-inset-bottom)); gap:10px; }
+  .rbottom button { flex:1; border:1px solid var(--border); background:var(--card); border-radius:10px; padding:11px 0; font-size:14px; color:var(--text); cursor:pointer; }
+  #tocMask { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:60; display:none; align-items:flex-end; }
+  #tocMask.show { display:flex; }
+  #toc { width:100%; max-height:70vh; background:var(--card); border-radius:16px 16px 0 0; padding:14px 10px 30px; overflow-y:auto; }
+  #toc .th { font-size:13px; font-weight:600; color:var(--muted); padding:6px 10px 10px; }
+  #toc .item { padding:9px 12px; font-size:14px; border-radius:8px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #toc .item.cur { background:var(--primary-50); color:var(--primary); font-weight:600; }
+  #loadMask { position:fixed; inset:0; background:rgba(11,37,69,.92); z-index:90; display:none; flex-direction:column; align-items:center; justify-content:center; padding:40px; }
+  #loadMask.show { display:flex; }
+  #loadMask .lt { color:#fff; font-size:15px; font-weight:600; text-align:center; margin-bottom:20px; line-height:1.7; }
+  #loadMask .bar { width:70%; max-width:280px; height:6px; border-radius:3px; background:rgba(255,255,255,.18); overflow:hidden; }
+  #loadMask .bar i { display:block; height:100%; width:0; background:#4da3ff; border-radius:3px; transition:width .2s; }
+  #loadMask .lp { color:#9cc3ff; font-size:12px; margin-top:12px; }
+  .toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px); background:rgba(17,24,39,.92); color:#fff; padding:9px 18px; border-radius:10px; font-size:13px; opacity:0; transition:.25s; z-index:99; pointer-events:none; max-width:86vw; text-align:center; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <img class="logo" src="icon/app.png" onerror="this.style.display='none'" alt="">
+  <h1 id="appTitle">小说管家</h1>
+  <span class="badge">● 离线</span>
+</div>
+
+<div id="offBanner"></div>
+
+<div class="seg" id="segBar">
+  <span id="tabBook" class="on" onclick="showTab('book')">📖 小说</span>
+  <span id="tabComic" onclick="showTab('comic')">🎨 漫画</span>
+</div>
+
+<div id="list"><div class="empty">加载中…</div></div>
+
+<div id="reader">
+  <div class="rbar">
+    <span class="back" onclick="closeReader()">✕</span>
+    <span class="rt" id="rTitle"></span>
+    <span class="fs" onclick="fontAdj(-1)">A-</span>
+    <span class="fs" onclick="fontAdj(1)">A+</span>
+    <span class="fs" onclick="showToc()" style="font-size:13px">目录</span>
+  </div>
+  <div class="rbody" id="rBody"></div>
+  <div class="rbottom">
+    <button onclick="prevCh()">← 上一章</button>
+    <button onclick="nextCh()">下一章 →</button>
+  </div>
+</div>
+
+<div id="tocMask" onclick="if(event.target===this)hideToc()">
+  <div id="toc"><div class="th">目录</div></div>
+</div>
+
+<div id="loadMask">
+  <div class="lt" id="loadText">正在加载…</div>
+  <div class="bar"><i id="loadBar"></i></div>
+  <div class="lp" id="loadPct">0%</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SNAP_RAW = null;
+</script>
+<script>
+const SNAP = (typeof SNAP_RAW !== 'undefined' && SNAP_RAW) ? SNAP_RAW : null;
+let files = [], comics = [], curTab = 'book';
+let curBook = null, chs = [], idx = 1, fontSize = 17;
+
+function renderAll() {
+  const box = document.getElementById('list');
+  if (curTab === 'comic') { renderComics(); return; }
+  renderBooks();
+}
+function showTab(t) {
+  curTab = t;
+  document.getElementById('tabBook').className = t === 'book' ? 'on' : '';
+  document.getElementById('tabComic').className = t === 'comic' ? 'on' : '';
+  renderAll();
+}
+function renderBooks() {
+  const box = document.getElementById('list');
+  const list = files;
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">本包未包含小说<br><span style="font-size:12px">回到在线页重新打包并勾选小说即可</span></div>';
+    return;
+  }
+  box.innerHTML = '<div class="sec-hd"><span class="t">📖 小说</span><span class="n">' + list.length + ' 本</span><span class="sp"></span></div>';
+  list.forEach(b => {
+    const row = document.createElement('div');
+    row.className = 'book';
+    let btns = '';
+    if (b.has_body) btns += '<button class="fbtn sm" onclick="openBook(\'' + jss(b.name) + '\')">阅读</button>';
+    if (SNAP.with_files) btns += '<button class="fbtn ghost sm" onclick="dlFile(\'files/' + enc(b.name) + '\',\'' + jss(b.name) + '\')">⬇ 文件</button>';
+    row.innerHTML =
+      '<div class="cov">' + esc(coverChar(b.name)) + '</div>'
+      + '<div class="info"><div class="name">' + esc(b.name) + '</div>'
+      + '<div class="meta"><span>' + fmtSize(b.size) + '</span><span>' + b.chs + ' 章</span><span class="ok">✓ 已打包</span></div></div>'
+      + '<div class="rowbtns">' + btns + '</div>';
+    box.appendChild(row);
+  });
+}
+function renderComics() {
+  const box = document.getElementById('list');
+  if (!comics.length) {
+    box.innerHTML = '<div class="empty">本包未包含漫画<br><span style="font-size:12px">回到在线页重新打包并勾选漫画即可</span></div>';
+    return;
+  }
+  box.innerHTML = '<div class="sec-hd"><span class="t">🎨 包内漫画</span><span class="n">' + comics.length + ' 部</span><span class="sp"></span></div>';
+  comics.forEach(c => {
+    const row = document.createElement('div');
+    row.className = 'book';
+    row.innerHTML =
+      '<div class="cov">' + esc(coverChar(c.title)) + '</div>'
+      + '<div class="info"><div class="name">' + esc(c.title) + '</div>'
+      + '<div class="meta"><span>' + c.files.length + ' 话</span><span class="ok">✓ 已打包</span></div></div>'
+      + (SNAP.with_files ? '<button class="fbtn gray sm" onclick="toggleChaps(\'' + jss(c.title) + '\')">话列表</button>' : '');
+    box.appendChild(row);
+    if (!SNAP.with_files) return;
+    const cmeta = comics.find(x => x.title === c.title);
+    const chaps = document.createElement('div');
+    chaps.className = 'chaps';
+    chaps.style.display = 'none';
+    chaps.id = 'chaps-' + cssid(c.title);
+    chaps.innerHTML = (cmeta.files || []).map(p =>
+      '<div class="ch"><span class="nm">' + esc(p.replace(/\.pdf$/i, '')) + '</span>'
+      + '<a href="' + cmeta.dir + '/' + enc(p) + '" target="_blank">打开</a>'
+      + '<a href="' + cmeta.dir + '/' + enc(p) + '" download="' + enc(p) + '">下载</a></div>'
+    ).join('') || '<div class="ch"><span class="nm">无 PDF</span></div>';
+    box.appendChild(chaps);
+  });
+}
+function toggleChaps(title) {
+  const el = document.getElementById('chaps-' + cssid(title));
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function dlFile(href, name) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('已开始保存:' + name + '(若未开始,请长按链接 → 存储到文件)');
+}
+// ---------------- 按需加载:自制进度 UI + 动态注入 data/*.js ----------------
+const loadMask = document.getElementById('loadMask');
+function showLoad(name) {
+  document.getElementById('loadText').textContent = '正在加载《' + name + '》…';
+  document.getElementById('loadBar').style.width = '0%';
+  document.getElementById('loadPct').textContent = '0%';
+  loadMask.classList.add('show');
+  let p = 0;
+  const t = setInterval(() => {  // 加载中的平滑进度(真实完成由 onload 置 100%)
+    p = Math.min(88, p + 6 + Math.random() * 10);
+    document.getElementById('loadBar').style.width = p + '%';
+    document.getElementById('loadPct').textContent = Math.round(p) + '%';
+  }, 160);
+  return t;
+}
+function finishLoad(t) {
+  clearInterval(t);
+  document.getElementById('loadBar').style.width = '100%';
+  document.getElementById('loadPct').textContent = '100%';
+  setTimeout(() => loadMask.classList.remove('show'), 220);
+}
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error('数据加载失败'));
+    document.body.appendChild(s);
+  });
+}
+// ---------------- 阅读器 ----------------
+async function openBook(name) {
+  curBook = name;
+  const b = (SNAP.books || []).find(x => x.name === name);
+  if (!b || !b.has_body) { toast('这本书没有内嵌正文,可下载原文件用阅读器打开'); return; }
+  let data = (window.__SNAP_DATA__ || {})[name];
+  if (!data) {
+    const t = showLoad(name);
+    try {
+      await loadScript(b.data);
+    } catch (e) { finishLoad(t); toast('加载失败:' + e.message); return; }
+    finishLoad(t);
+    data = (window.__SNAP_DATA__ || {})[name];
+  }
+  if (!data || !(data.chapters || []).length) { toast('书籍内容为空'); return; }
+  chs = data.chapters;
+  idx = 1;
+  document.getElementById('reader').classList.add('show');
+  document.getElementById('rTitle').textContent = name;
+  loadCh(1);
+}
+function loadCh(i) {
+  idx = Math.min(Math.max(1, i), chs.length);
+  const body = document.getElementById('rBody');
+  const ch = chs[idx - 1];
+  if (!ch) { body.innerHTML = '<p style="text-align:center;color:var(--muted);text-indent:0">章节不存在</p>'; return; }
+  body.scrollTop = 0;
+  document.getElementById('rTitle').textContent = ch.title || ('第' + idx + '章');
+  body.innerHTML = '<h2>' + esc(ch.title || '') + '</h2>' + (ch.html || (ch.text || '').split(/\n+/).map(p => '<p>' + esc(p) + '</p>').join(''));
+  saveProgress();
+}
+function prevCh() { loadCh(idx - 1); }
+function nextCh() { loadCh(idx + 1); }
+function fontAdj(d) {
+  fontSize = Math.min(26, Math.max(14, fontSize + d));
+  document.getElementById('rBody').style.fontSize = fontSize + 'px';
+}
+function showToc() {
+  const box = document.getElementById('toc');
+  box.innerHTML = '<div class="th">目录 · ' + chs.length + ' 章</div>' + chs.map((c, i) =>
+    '<div class="item' + (i + 1 === idx ? ' cur' : '') + '" onclick="hideToc();loadCh(' + (i + 1) + ')">' + esc(c.title || ('第' + (i + 1) + '章')) + '</div>').join('');
+  document.getElementById('tocMask').classList.add('show');
+}
+function hideToc() { document.getElementById('tocMask').classList.remove('show'); }
+function closeReader() { document.getElementById('reader').classList.remove('show'); curBook = null; }
+function saveProgress() { try { localStorage.setItem('novelist_snap_pos', JSON.stringify({file: curBook, idx: idx})); } catch (e) {} }
+
+// 工具
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function jss(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+function cssid(s) { return String(s == null ? '' : s).replace(/[^\w\u4e00-\u9fa5]/g, '_'); }
+function enc(s) { return encodeURIComponent(s); }
+function fmtSize(n) { n = n || 0; if (n > 1048576) return (n/1048576).toFixed(1)+'MB'; if (n > 1024) return (n/1024).toFixed(0)+'KB'; return n+'B'; }
+function coverChar(name) { const s = (name || '书').replace(/\.(txt|epub)$/i, ''); return s.slice(-2, -1) || s.slice(0, 1) || '书'; }
+let toastTimer = null;
+function toast(msg) { const el = document.getElementById('toast'); el.innerHTML = msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2600); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') prevCh();
+  if (e.key === 'ArrowRight') nextCh();
+});
+
+// 初始化
+if (!SNAP) {
+  document.getElementById('list').innerHTML = '<div class="empty">无效的离线包<br><span style="font-size:12px">请通过在线页「📦 打包快照」重新打包</span></div>';
+} else {
+  files = (SNAP.books || []).map(b => b);
+  comics = SNAP.comics || [];
+  const el = document.getElementById('offBanner');
+  el.innerHTML = '<b>📦 离线包</b> · 生成于 ' + esc(SNAP.gen_time || '')
+    + ' · 内嵌 ' + esc(String(SNAP.books.length)) + ' 本小说、' + esc(String(SNAP.comics.length)) + ' 部漫画<br><span style="opacity:.85">点击「阅读」时按需加载该书内容;漫画与文件在包内 files/ 目录,可直接打开或保存。</span>';
+  document.getElementById('appTitle').textContent = '小说管家(离线)';
+  renderAll();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+# ================= Python =================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# ================= 构建与打包产物 =================
+build/
+dist/
+*.spec.bak
+
+# ================= 本地工具目录(AI 会话/调试/缓存) =================
+.qoder/
+.workbuddy/
+.recovery/
+.webview2-cache/
+archive/
+
+# ================= 运行时用户数据(书架/阅读记录/配置,勿公开) =================
+downloads/
+bookshelf.json
+comic_shelf.json
+comic_base_overrides.json
+comic_sources_custom.json
+comic_subs.json
+config.json
+source_candidates.json
+subscriptions.json
+task_history.json
+window_state.json
+notes.json
+verify_cookies.json
+verify_pending.json
+
+# ================= 内部开发文档 =================
+docs/
+
+# ================= 第三方反编译参考资料(版权风险,仅本地) =================
+_Manhuatai.java.txt
+_QiMiaoMH.java.txt
+
+# ================= 操作系统杂项 =================
+Thumbs.db
+Desktop.ini
+.DS_Store

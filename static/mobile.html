@@ -1,0 +1,3656 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#007AFF">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<title>漫画+小说 · 手机</title>
+<script>
+/* 跟随系统双主题(P2 移植):打开即设 data-theme,监听系统切换,同步状态栏 theme-color */
+(function () {
+  var mq = matchMedia('(prefers-color-scheme: dark)');
+  var apply = function () {
+    document.documentElement.dataset.theme = mq.matches ? 'dark' : 'light';
+    var m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute('content', mq.matches ? '#0A84FF' : '#007AFF');
+  };
+  apply();
+  if (mq.addEventListener) mq.addEventListener('change', apply);
+  else if (mq.addListener) mq.addListener(apply);
+})();
+</script>
+<style>
+  :root {
+    --bg:#f5f5f7; --card:#fff; --secondary:#f2f2f6; --border:#d2d2d7;
+    --text:#1d1d1f; --muted:#86868b; --primary:#007AFF; --primary-dark:#0066d6;
+    --primary-50:#e8f1ff; --success:#34C759; --success-50:#e7f8ec;
+    --danger:#FF3B30; --warn:#FF9500;
+    --radius:18px;
+    --shadow:0 1px 2px rgba(0,0,0,.03), 0 8px 24px rgba(0,0,0,.05);
+    color-scheme: light;
+  }
+  /* 深色令牌(P2):与桌面 index.html [data-theme="dark"] 对齐 */
+  [data-theme="dark"] {
+    --bg:#1d1d1f; --card:#2c2c2e; --secondary:#3a3a3c; --border:#3a3a3c;
+    --text:#f5f5f7; --muted:#a1a1a6; --primary:#0A84FF; --primary-dark:#0a6dc9;
+    --primary-50:#16324f; --success:#30d158; --success-50:#143525;
+    --danger:#ff453a; --warn:#ff9f0a;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.45);
+    color-scheme: dark;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; }
+  body { font-family:-apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; background:var(--bg); color:var(--text); }
+  /* ---------- 顶栏 ---------- */
+  .topbar {
+    position:sticky; top:0; z-index:20; background:rgba(255,255,255,.92);
+    -webkit-backdrop-filter:blur(18px); backdrop-filter:blur(18px);
+    border-bottom:0.5px solid var(--border); padding:14px 16px;
+    display:flex; align-items:center; gap:10px;
+  }
+  .topbar .logo { width:32px; height:32px; border-radius:9px; object-fit:cover; box-shadow:0 3px 10px rgba(0,0,0,.12); flex-shrink:0; }
+  .topbar h1 { font-size:17px; font-weight:700; flex:1; letter-spacing:.3px; }
+  .topbar .link { font-size:13px; color:var(--primary); cursor:pointer; padding:5px 2px; white-space:nowrap; }
+  .topbar .link:active { opacity:.6; }
+  .badge { font-size:11.5px; font-weight:600; padding:4px 9px; border-radius:999px; white-space:nowrap; }
+  .badge.on { background:var(--success-50); color:#1e7e34; }
+  .badge.off { background:var(--secondary); color:var(--muted); }
+  .topbar.off { background:linear-gradient(135deg,#0b2545,#174a8a); border-bottom:none; }
+  .topbar.off h1 { color:#fff; }
+  .topbar.off .link { color:#9cc3ff; }
+  .topbar.off .badge.off { background:rgba(255,255,255,.16); color:#bcd4ff; }
+  /* 深色覆盖(P2):令牌覆盖不到的硬编码浅色值 */
+  [data-theme="dark"] .topbar { background:rgba(28,28,30,.85); }
+  [data-theme="dark"] .badge.on { color:#30d158; }
+  [data-theme="dark"] #offBanner { color:#8ec2ff; border-color:rgba(142,194,255,.25); box-shadow:none; }
+  /* ---------- 离线说明条 ---------- */
+  #offBanner { display:none; margin:12px 16px 0; padding:13px 15px; background:var(--primary-50); color:#0b4fa8; border-radius:14px; font-size:13px; line-height:1.75; border:1px solid rgba(11,79,168,.25); box-shadow:0 2px 10px rgba(11,79,168,.08); }
+  /* ---------- 分段控件 ---------- */
+  .seg { display:flex; background:var(--secondary); border-radius:11px; padding:3px; margin:12px 16px 2px; }
+  .seg span { flex:1; text-align:center; font-size:13.5px; font-weight:600; color:var(--muted); padding:8px 0; border-radius:9px; cursor:pointer; transition:.18s; }
+  .seg span.on { background:var(--card); color:var(--text); box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  /* ---------- 列表 ---------- */
+  #list { padding:12px 16px 40px; }
+  .sec-hd { display:flex; align-items:center; margin:10px 2px 10px; }
+  .sec-hd .t { font-size:14px; font-weight:700; }
+  .sec-hd .n { font-size:11.5px; color:var(--muted); margin-left:6px; }
+  .sec-hd .sp { flex:1; }
+  .sec-hd .act { font-size:12.5px; color:var(--primary); cursor:pointer; padding:4px 2px; }
+  .book {
+    background:var(--card); border-radius:16px; padding:13px 14px; margin-bottom:10px;
+    box-shadow:var(--shadow); display:flex; align-items:center; gap:12px;
+  }
+  .book .cov {
+    width:42px; height:56px; border-radius:9px; flex-shrink:0; background:var(--primary-50);
+    color:var(--primary); display:flex; align-items:center; justify-content:center;
+    font-size:18px; font-weight:700; box-shadow:inset 0 0 0 .5px rgba(0,122,255,.18);
+  }
+  .book .cov img { width:100%; height:100%; object-fit:cover; border-radius:9px; }
+  .book .info { flex:1; min-width:0; }
+  .book .name { font-size:14.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .book .meta { font-size:12px; color:var(--muted); margin-top:3px; display:flex; gap:8px; flex-wrap:wrap; }
+  .rowbtns { display:flex; gap:7px; flex-shrink:0; }
+  .fbtn { border:none; background:var(--primary); color:#fff; border-radius:9px; padding:7px 12px; font-size:12.5px; font-weight:600; cursor:pointer; flex-shrink:0; }
+  .fbtn:active { opacity:.75; }
+  .fbtn.ghost { background:var(--card); color:var(--primary); border:1px solid var(--primary); }
+  .fbtn.gray { background:var(--secondary); color:var(--text); border:1px solid var(--border); }
+  .fbtn.sm { padding:5px 9px; font-size:11.5px; border-radius:8px; }
+  .empty { text-align:center; color:var(--muted); font-size:13px; padding:60px 24px; line-height:1.9; }
+  /* 漫画展开的话列表 */
+  .chaps { margin:0 16px 12px; background:var(--card); border-radius:14px; box-shadow:var(--shadow); overflow:hidden; }
+  .chaps .ch { display:flex; align-items:center; gap:8px; padding:10px 14px; font-size:13px; border-top:0.5px solid var(--secondary); }
+  .chaps .ch:first-child { border-top:none; }
+  .chaps .ch .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+  .chaps .ch a { font-size:11.5px; color:var(--primary); text-decoration:none; padding:4px 6px; }
+  .chaps .ch a:active { opacity:.6; }
+  /* ---------- 阅读器 ---------- */
+  #reader { position:fixed; inset:0; background:var(--bg); z-index:50; display:none; flex-direction:column; }
+  #reader.show { display:flex; }
+  .rbar { display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--card); border-bottom:0.5px solid var(--border); }
+  .rbar .back { font-size:16px; cursor:pointer; padding:4px 8px; }
+  .rbar .rt { flex:1; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rbar .fs { font-size:14px; color:var(--muted); padding:4px 8px; cursor:pointer; user-select:none; }
+  .rbody { flex:1; overflow-y:auto; padding:18px 20px 40px; font-size:17px; line-height:2; font-family:"DengXian","PingFang SC","Microsoft YaHei",sans-serif; }
+  .rbody h2 { font-size:16px; font-weight:600; margin-bottom:14px; }
+  .rbody p { margin:0 0 1em; text-indent:2em; }
+  .rbody img { max-width:100%; height:auto; display:block; margin:10px auto; border-radius:6px; }
+  .rbody table { border-collapse:collapse; width:100%; font-size:14px; margin:10px 0; }
+  .rbody th,.rbody td { border:0.5px solid var(--border); padding:5px 8px; }
+  .rbottom { display:flex; background:var(--card); border-top:0.5px solid var(--border); padding:8px 12px calc(8px + env(safe-area-inset-bottom)); gap:10px; }
+  .rbottom button { flex:1; border:1px solid var(--border); background:var(--card); border-radius:10px; padding:11px 0; font-size:14px; color:var(--text); cursor:pointer; }
+  /* 目录 */
+  #tocMask { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:60; display:none; align-items:flex-end; }
+  #tocMask.show { display:flex; }
+  #toc { width:100%; max-height:70vh; background:var(--card); border-radius:16px 16px 0 0; padding:14px 10px 30px; overflow-y:auto; }
+  #toc .th { font-size:13px; font-weight:600; color:var(--muted); padding:6px 10px 10px; }
+  #toc .item { padding:9px 12px; font-size:14px; border-radius:8px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #toc .item.cur { background:var(--primary-50); color:var(--primary); font-weight:600; }
+  /* 打包面板 */
+  #packMask { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:70; display:none; align-items:flex-end; }
+  #packMask.show { display:flex; }
+  #packPanel { width:100%; max-height:88vh; background:var(--card); border-radius:18px 18px 0 0; padding:16px 16px calc(16px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; }
+  #packPanel .ph { display:flex; align-items:center; font-size:16px; font-weight:700; }
+  #packPanel .ph .px { margin-left:auto; font-size:18px; color:var(--muted); cursor:pointer; padding:2px 6px; }
+  #packPanel .psub { font-size:12px; color:var(--muted); line-height:1.7; margin:6px 0 10px; }
+  #packPanel .seg { margin:0 0 10px; }
+  .plist { flex:1; overflow-y:auto; min-height:120px; max-height:44vh; }
+  .p-item { display:flex; align-items:center; gap:10px; padding:10px 4px; border-bottom:0.5px solid var(--secondary); font-size:13.5px; }
+  .p-item input { width:19px; height:19px; accent-color:var(--primary); flex-shrink:0; }
+  .p-item .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .p-item .sub { font-size:11px; color:var(--muted); flex-shrink:0; }
+  .p-size { font-size:12px; color:var(--muted); text-align:center; padding:8px 0 2px; }
+  .p-opt { padding:8px 4px 2px; border-top:0.5px solid var(--secondary); }
+  .pfmt { font-size:12px; font-weight:600; padding:5px 11px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--muted); cursor:pointer; }
+  .pfmt.on { border-color:var(--primary); color:var(--primary); background:var(--primary-50); }
+  .p-btns { display:flex; gap:10px; margin-top:10px; }
+  .p-btns .fbtn { flex:1; padding:12px 0; font-size:14px; border-radius:12px; }
+  /* 引导 */
+  #guideMask { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:80; display:none; align-items:center; justify-content:center; padding:24px; }
+  #guideMask.show { display:flex; }
+  #guidePanel { width:100%; max-width:420px; max-height:88vh; overflow-y:auto; background:var(--card); border-radius:18px; padding:22px 20px; box-shadow:var(--shadow); }
+  #guidePanel .gt { font-size:17px; font-weight:700; margin-bottom:4px; }
+  #guidePanel .gs { font-size:12.5px; color:var(--muted); margin-bottom:14px; }
+  #guidePanel .gitem { display:flex; gap:12px; margin-bottom:13px; }
+  #guidePanel .gitem .gn { width:26px; height:26px; border-radius:50%; background:var(--primary-50); color:var(--primary); font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
+  #guidePanel .gitem .gt2 { font-size:14px; font-weight:600; margin-bottom:2px; }
+  #guidePanel .gitem .gd { font-size:12.5px; color:var(--muted); line-height:1.75; }
+  #guidePanel .gb { width:100%; padding:12px 0; font-size:14px; border-radius:12px; }
+  .toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px); background:rgba(17,24,39,.92); color:#fff; padding:9px 18px; border-radius:10px; font-size:13px; opacity:0; transition:.25s; z-index:99; pointer-events:none; max-width:86vw; text-align:center; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  /* ---------- 远程直连(WebRTC)信令面板 ---------- */
+  /* z-index 必须高于 #offlineMask(100):否则一旦判定「电脑离线」,
+     全屏遮罩会盖住本面板,「保存本页后断网打开」这条路径就彻底走不通了。 */
+  #wrtcMask { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:110; display:none; align-items:center; justify-content:center; padding:16px; }
+  #wrtcMask.show { display:flex; }
+  #wrtcPanel { width:100%; max-width:440px; max-height:92vh; overflow-y:auto; background:var(--card); border-radius:18px; padding:18px 16px; box-shadow:var(--shadow); }
+  #wrtcPanel .ph { font-size:16px; font-weight:700; margin-bottom:6px; display:flex; align-items:center; }
+  #wrtcPanel .ph .px { margin-left:auto; font-size:18px; color:var(--muted); cursor:pointer; padding:2px 6px; }
+  #wrtcPanel .psub { font-size:12px; color:var(--muted); line-height:1.75; margin-bottom:12px; }
+  /* ---------- 电脑离线全屏遮罩(盖住所有弹层,禁用交互) ---------- */
+  #offlineMask { position:fixed; inset:0; background:var(--bg); z-index:100; display:none; flex-direction:column; align-items:center; justify-content:center; padding:36px; text-align:center; }
+  #offlineMask.show { display:flex; }
+  #offlineMask .om-ico { font-size:52px; margin-bottom:14px; }
+  #offlineMask .om-title { font-size:18px; font-weight:700; margin-bottom:8px; }
+  #offlineMask .om-desc { font-size:13px; color:var(--muted); line-height:1.9; margin-bottom:22px; }
+  #offlineMask .om-btn { width:100%; max-width:280px; padding:13px 0; font-size:14.5px; border-radius:12px; }
+  #offlineMask .om-hint { font-size:11.5px; color:var(--muted); line-height:1.8; margin-top:18px; }
+</style>
+</head>
+<body>
+
+<div class="topbar" id="topbar">
+  <img class="logo" src="/icon/app.png" alt="">
+  <h1 id="appTitle">漫画+小说</h1>
+  <span class="badge on" id="stBadge">● 在线</span>
+  <span class="link" id="wrtcLink" onclick="openWrtcPanel()" style="display:none">📶 远程直连</span>
+  <span class="link" id="refreshLink" onclick="location.reload()">刷新</span>
+</div>
+
+<div id="offBanner"></div>
+
+<div class="seg" id="segBar">
+  <span id="tabBook" class="on" onclick="showTab('book')">📖 小说</span>
+  <span id="tabComic" onclick="showTab('comic')">🎨 漫画</span>
+</div>
+
+<div id="list"><div class="empty">加载中…</div></div>
+
+<div id="reader">
+  <div class="rbar">
+    <span class="back" onclick="closeReader()">✕</span>
+    <span class="rt" id="rTitle"></span>
+    <span class="fs" onclick="fontAdj(-1)">A-</span>
+    <span class="fs" onclick="fontAdj(1)">A+</span>
+    <span class="fs" onclick="showToc()" style="font-size:13px">目录</span>
+  </div>
+  <div class="rbody" id="rBody"></div>
+  <div class="rbottom">
+    <button onclick="prevCh()">← 上一章</button>
+    <button onclick="nextCh()">下一章 →</button>
+  </div>
+</div>
+
+<div id="tocMask" onclick="if(event.target===this)hideToc()">
+  <div id="toc"><div class="th">目录</div></div>
+</div>
+
+<div id="packMask" onclick="if(event.target===this)closePackPanel()">
+  <div id="packPanel">
+    <div class="ph">📦 打包快照<span class="px" onclick="closePackPanel()">✕</span></div>
+    <div class="psub">勾选小说 / 漫画,打包成离线文件保存到手机:<br>之后无需连接电脑也能打开浏览、阅读包内内容。</div>
+    <div class="seg" id="pSeg">
+      <span id="pTabBook" class="on" onclick="pTab('book')">📖 小说</span>
+      <span id="pTabComic" onclick="pTab('comic')">🎨 漫画</span>
+    </div>
+    <div class="plist" id="packList"></div>
+    <div class="p-size" id="packSize"></div>
+    <div class="p-opt">
+      <div style="display:flex; align-items:center; gap:10px">
+        <span style="font-size:12.5px; font-weight:600; flex-shrink:0">打包格式</span>
+        <span class="pfmt" id="pfmtZip" onclick="pFmt('zip')">📦 ZIP(推荐)</span>
+        <span class="pfmt" id="pfmtHtml" onclick="pFmt('html')">HTML</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:8px">
+        <input type="checkbox" id="pWithFiles" checked>
+        <label for="pWithFiles" style="font-size:12px; color:var(--muted); line-height:1.6">包含原文件(EPUB / PDF 等,包内可单独下载用系统阅读器打开;不勾则仅浏览器内阅读)</label>
+      </div>
+      <div id="packProg" style="display:none; margin-top:10px">
+        <div style="font-size:12px; color:var(--primary); margin-bottom:6px" id="packProgText">正在打包…</div>
+        <div style="height:6px; border-radius:3px; background:var(--secondary); overflow:hidden"><div id="packProgBar" style="height:100%; width:0; background:var(--primary); border-radius:3px; transition:width .3s"></div></div>
+      </div>
+    </div>
+    <div class="p-btns">
+      <button class="fbtn gray" onclick="togglePackAll()" id="packAllBtn">全选</button>
+      <button class="fbtn" onclick="genSnapshot()" id="packGoBtn">📦 打包下载</button>
+    </div>
+  </div>
+</div>
+
+<div id="guideMask" onclick="if(event.target===this)closeGuide()">
+  <div id="guidePanel">
+    <div class="gt">📱 手机端使用说明</div>
+    <div class="gs">手机与电脑连接同一网络时打开本页</div>
+    <div class="gitem"><div class="gn">1</div><div><div class="gt2">远程预览</div><div class="gd">点书上的「阅读」,直接在手机浏览器里阅读电脑上的小说 / 漫画,不占手机存储。</div></div></div>
+    <div class="gitem"><div class="gn">2</div><div><div class="gt2">下载</div><div class="gd">点「下载」把 EPUB / TXT / 漫画 ZIP 保存到手机:<br>安卓 → 系统 <b>Download/</b> 目录 · iPhone → 文件 App → <b>下载</b>。<br>下载后可用手机阅读 App 打开。</div></div></div>
+    <div class="gitem"><div class="gn">3</div><div><div class="gt2">打包快照</div><div class="gd">点「📦 打包快照」勾选内容 → 打包下载离线文件。之后<b>电脑关机 / 断网</b>也能离线阅读:<br>· <b>ZIP(推荐)</b>:解压后打开其中的 index.html,按需加载阅读,体积更小<br>· <b>HTML</b>:单个网页文件,直接打开即可</div></div></div>
+    <div class="gitem"><div class="gn">4</div><div><div class="gt2">离线模式</div><div class="gd">打包文件打开后顶部显示「● 离线」,只可阅读已打包的内容;需要新内容时回到在线页重新打包即可。</div></div></div>
+    <button class="fbtn gb" onclick="closeGuide()">知道了</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 远程直连(WebRTC)信令面板:手机任意网络(含流量)与电脑直连 -->
+<div id="wrtcMask" onclick="if(event.target===this)hideWrtcPanel()">
+  <div id="wrtcPanel">
+    <div class="ph">📶 远程直连<span class="px" onclick="hideWrtcPanel()">✕</span></div>
+    <div class="psub">电脑与手机不在同一网络时(校园网 / 流量)也能直连,数据不经第三方:
+      <br>① 电脑端: 设置 → 手机 → 「任意网络直连」→「生成连接码」
+      <br>② <b>同一网络(热点/局域网)</b>:点下方「⚡ 自动直连」即可,无需扫码
+      <br>③ 其他网络:点「📷 扫电脑屏幕」识别连接码,应答码经云端自动回传
+      <br><span style="opacity:.85">提示:首次可在连接状态下点「保存本页」,之后断网也能打开本页发起直连。</span></div>
+    <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap">
+      <button class="fbtn" style="flex:1; background:var(--primary); color:#fff; border-color:var(--primary); display:none" id="wrtcAutoBtn" onclick="autoConnectHere()">⚡ 自动直连(经当前网络,免扫码)</button>
+    </div>
+    <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap">
+      <button class="fbtn ghost" style="flex:1" onclick="scanOffer()">📷 扫电脑屏幕</button>
+      <button class="fbtn ghost" id="wrtcSaveBtn" onclick="saveWrtcPage()" style="display:none; flex:1">保存本页</button>
+    </div>
+    <textarea id="wrtcOffer" placeholder="粘贴电脑屏幕上的连接码(novelist-wrtc://…)" style="width:100%; height:66px; border:1px solid var(--border); border-radius:10px; padding:8px; font-size:12px; resize:none; font-family:monospace; background:var(--card); color:var(--text)"></textarea>
+    <div id="wrtcScan" style="display:none; margin-top:10px">
+      <video id="wrtcScanVideo" playsinline muted style="width:100%; border-radius:12px; background:#000; max-height:220px"></video>
+      <div style="font-size:11.5px; color:var(--muted); margin-top:6px; text-align:center">对准电脑屏幕上的二维码,识别后自动连接</div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+      <button class="fbtn" style="flex:1" onclick="wrtcConnect()" id="wrtcGoBtn">连接</button>
+    </div>
+    <div id="wrtcState" style="font-size:12px; color:var(--muted); line-height:1.8; margin-top:10px"></div>
+    <div id="wrtcAnswer" style="display:none; margin-top:12px">
+      <div style="font-size:12.5px; font-weight:600; margin-bottom:4px">应答码(云端自动回传失败时才需要)</div>
+      <div style="font-size:12px; color:var(--muted); line-height:1.7; margin-bottom:8px">正常情况下应答码会自动发送给电脑,无需看这里;若电脑端提示未收到,再让电脑「摄像头扫码」对准下方二维码。</div>
+      <div id="wrtcAnswerQr" style="text-align:center"></div>
+      <div id="wrtcAnswerText" style="font-family:monospace; font-size:10px; word-break:break-all; margin-top:8px; background:var(--secondary); padding:8px; border-radius:8px; user-select:all"></div>
+      <div style="display:flex; gap:8px; margin-top:8px">
+        <button class="fbtn" style="flex:1" onclick="copyAnswer()">复制应答码</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="offlineMask">
+  <div class="om-ico">📡</div>
+  <div class="om-title">已断开与电脑的连接</div>
+  <div class="om-desc">电脑端「漫画+小说」未运行、电脑已关机,<br>或手机与电脑不在同一网络。<br>电脑恢复正常后页面会自动重新连接。</div>
+  <button class="fbtn om-btn" onclick="retryConnect()">🔄 重新连接</button>
+  <button class="fbtn om-btn" style="margin-top:10px; background:var(--secondary); color:var(--text)" onclick="openRemoteFromOffline()">📶 用「远程直连」连接电脑</button>
+  <div class="om-hint">需要离线阅读时,可先在在线状态下打包快照<br>(📦 ZIP / HTML),断网后直接打开离线包即可阅读<br><br>校园网 / 不在同一网络时,用「远程直连」<br>(电脑生成连接码 → 手机扫码 → 点对点直连,不经第三方)</div>
+</div>
+
+<!-- 内联 QR 生成器(qrcode-generator MIT,离线可用) -->
+<script>
+//---------------------------------------------------------------------
+//
+// QR Code Generator for JavaScript
+//
+// Copyright (c) 2009 Kazuhiko Arase
+//
+// URL: http://www.d-project.com/
+//
+// Licensed under the MIT license:
+//  http://www.opensource.org/licenses/mit-license.php
+//
+// The word 'QR Code' is registered trademark of
+// DENSO WAVE INCORPORATED
+//  http://www.denso-wave.com/qrcode/faqpatent-e.html
+//
+//---------------------------------------------------------------------
+
+var qrcode = function() {
+
+  //---------------------------------------------------------------------
+  // qrcode
+  //---------------------------------------------------------------------
+
+  /**
+   * qrcode
+   * @param typeNumber 1 to 40
+   * @param errorCorrectionLevel 'L','M','Q','H'
+   */
+  var qrcode = function(typeNumber, errorCorrectionLevel) {
+
+    var PAD0 = 0xEC;
+    var PAD1 = 0x11;
+
+    var _typeNumber = typeNumber;
+    var _errorCorrectionLevel = QRErrorCorrectionLevel[errorCorrectionLevel];
+    var _modules = null;
+    var _moduleCount = 0;
+    var _dataCache = null;
+    var _dataList = [];
+
+    var _this = {};
+
+    var makeImpl = function(test, maskPattern) {
+
+      _moduleCount = _typeNumber * 4 + 17;
+      _modules = function(moduleCount) {
+        var modules = new Array(moduleCount);
+        for (var row = 0; row < moduleCount; row += 1) {
+          modules[row] = new Array(moduleCount);
+          for (var col = 0; col < moduleCount; col += 1) {
+            modules[row][col] = null;
+          }
+        }
+        return modules;
+      }(_moduleCount);
+
+      setupPositionProbePattern(0, 0);
+      setupPositionProbePattern(_moduleCount - 7, 0);
+      setupPositionProbePattern(0, _moduleCount - 7);
+      setupPositionAdjustPattern();
+      setupTimingPattern();
+      setupTypeInfo(test, maskPattern);
+
+      if (_typeNumber >= 7) {
+        setupTypeNumber(test);
+      }
+
+      if (_dataCache == null) {
+        _dataCache = createData(_typeNumber, _errorCorrectionLevel, _dataList);
+      }
+
+      mapData(_dataCache, maskPattern);
+    };
+
+    var setupPositionProbePattern = function(row, col) {
+
+      for (var r = -1; r <= 7; r += 1) {
+
+        if (row + r <= -1 || _moduleCount <= row + r) continue;
+
+        for (var c = -1; c <= 7; c += 1) {
+
+          if (col + c <= -1 || _moduleCount <= col + c) continue;
+
+          if ( (0 <= r && r <= 6 && (c == 0 || c == 6) )
+              || (0 <= c && c <= 6 && (r == 0 || r == 6) )
+              || (2 <= r && r <= 4 && 2 <= c && c <= 4) ) {
+            _modules[row + r][col + c] = true;
+          } else {
+            _modules[row + r][col + c] = false;
+          }
+        }
+      }
+    };
+
+    var getBestMaskPattern = function() {
+
+      var minLostPoint = 0;
+      var pattern = 0;
+
+      for (var i = 0; i < 8; i += 1) {
+
+        makeImpl(true, i);
+
+        var lostPoint = QRUtil.getLostPoint(_this);
+
+        if (i == 0 || minLostPoint > lostPoint) {
+          minLostPoint = lostPoint;
+          pattern = i;
+        }
+      }
+
+      return pattern;
+    };
+
+    var setupTimingPattern = function() {
+
+      for (var r = 8; r < _moduleCount - 8; r += 1) {
+        if (_modules[r][6] != null) {
+          continue;
+        }
+        _modules[r][6] = (r % 2 == 0);
+      }
+
+      for (var c = 8; c < _moduleCount - 8; c += 1) {
+        if (_modules[6][c] != null) {
+          continue;
+        }
+        _modules[6][c] = (c % 2 == 0);
+      }
+    };
+
+    var setupPositionAdjustPattern = function() {
+
+      var pos = QRUtil.getPatternPosition(_typeNumber);
+
+      for (var i = 0; i < pos.length; i += 1) {
+
+        for (var j = 0; j < pos.length; j += 1) {
+
+          var row = pos[i];
+          var col = pos[j];
+
+          if (_modules[row][col] != null) {
+            continue;
+          }
+
+          for (var r = -2; r <= 2; r += 1) {
+
+            for (var c = -2; c <= 2; c += 1) {
+
+              if (r == -2 || r == 2 || c == -2 || c == 2
+                  || (r == 0 && c == 0) ) {
+                _modules[row + r][col + c] = true;
+              } else {
+                _modules[row + r][col + c] = false;
+              }
+            }
+          }
+        }
+      }
+    };
+
+    var setupTypeNumber = function(test) {
+
+      var bits = QRUtil.getBCHTypeNumber(_typeNumber);
+
+      for (var i = 0; i < 18; i += 1) {
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+        _modules[Math.floor(i / 3)][i % 3 + _moduleCount - 8 - 3] = mod;
+      }
+
+      for (var i = 0; i < 18; i += 1) {
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+        _modules[i % 3 + _moduleCount - 8 - 3][Math.floor(i / 3)] = mod;
+      }
+    };
+
+    var setupTypeInfo = function(test, maskPattern) {
+
+      var data = (_errorCorrectionLevel << 3) | maskPattern;
+      var bits = QRUtil.getBCHTypeInfo(data);
+
+      // vertical
+      for (var i = 0; i < 15; i += 1) {
+
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+
+        if (i < 6) {
+          _modules[i][8] = mod;
+        } else if (i < 8) {
+          _modules[i + 1][8] = mod;
+        } else {
+          _modules[_moduleCount - 15 + i][8] = mod;
+        }
+      }
+
+      // horizontal
+      for (var i = 0; i < 15; i += 1) {
+
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+
+        if (i < 8) {
+          _modules[8][_moduleCount - i - 1] = mod;
+        } else if (i < 9) {
+          _modules[8][15 - i - 1 + 1] = mod;
+        } else {
+          _modules[8][15 - i - 1] = mod;
+        }
+      }
+
+      // fixed module
+      _modules[_moduleCount - 8][8] = (!test);
+    };
+
+    var mapData = function(data, maskPattern) {
+
+      var inc = -1;
+      var row = _moduleCount - 1;
+      var bitIndex = 7;
+      var byteIndex = 0;
+      var maskFunc = QRUtil.getMaskFunction(maskPattern);
+
+      for (var col = _moduleCount - 1; col > 0; col -= 2) {
+
+        if (col == 6) col -= 1;
+
+        while (true) {
+
+          for (var c = 0; c < 2; c += 1) {
+
+            if (_modules[row][col - c] == null) {
+
+              var dark = false;
+
+              if (byteIndex < data.length) {
+                dark = ( ( (data[byteIndex] >>> bitIndex) & 1) == 1);
+              }
+
+              var mask = maskFunc(row, col - c);
+
+              if (mask) {
+                dark = !dark;
+              }
+
+              _modules[row][col - c] = dark;
+              bitIndex -= 1;
+
+              if (bitIndex == -1) {
+                byteIndex += 1;
+                bitIndex = 7;
+              }
+            }
+          }
+
+          row += inc;
+
+          if (row < 0 || _moduleCount <= row) {
+            row -= inc;
+            inc = -inc;
+            break;
+          }
+        }
+      }
+    };
+
+    var createBytes = function(buffer, rsBlocks) {
+
+      var offset = 0;
+
+      var maxDcCount = 0;
+      var maxEcCount = 0;
+
+      var dcdata = new Array(rsBlocks.length);
+      var ecdata = new Array(rsBlocks.length);
+
+      for (var r = 0; r < rsBlocks.length; r += 1) {
+
+        var dcCount = rsBlocks[r].dataCount;
+        var ecCount = rsBlocks[r].totalCount - dcCount;
+
+        maxDcCount = Math.max(maxDcCount, dcCount);
+        maxEcCount = Math.max(maxEcCount, ecCount);
+
+        dcdata[r] = new Array(dcCount);
+
+        for (var i = 0; i < dcdata[r].length; i += 1) {
+          dcdata[r][i] = 0xff & buffer.getBuffer()[i + offset];
+        }
+        offset += dcCount;
+
+        var rsPoly = QRUtil.getErrorCorrectPolynomial(ecCount);
+        var rawPoly = qrPolynomial(dcdata[r], rsPoly.getLength() - 1);
+
+        var modPoly = rawPoly.mod(rsPoly);
+        ecdata[r] = new Array(rsPoly.getLength() - 1);
+        for (var i = 0; i < ecdata[r].length; i += 1) {
+          var modIndex = i + modPoly.getLength() - ecdata[r].length;
+          ecdata[r][i] = (modIndex >= 0)? modPoly.getAt(modIndex) : 0;
+        }
+      }
+
+      var totalCodeCount = 0;
+      for (var i = 0; i < rsBlocks.length; i += 1) {
+        totalCodeCount += rsBlocks[i].totalCount;
+      }
+
+      var data = new Array(totalCodeCount);
+      var index = 0;
+
+      for (var i = 0; i < maxDcCount; i += 1) {
+        for (var r = 0; r < rsBlocks.length; r += 1) {
+          if (i < dcdata[r].length) {
+            data[index] = dcdata[r][i];
+            index += 1;
+          }
+        }
+      }
+
+      for (var i = 0; i < maxEcCount; i += 1) {
+        for (var r = 0; r < rsBlocks.length; r += 1) {
+          if (i < ecdata[r].length) {
+            data[index] = ecdata[r][i];
+            index += 1;
+          }
+        }
+      }
+
+      return data;
+    };
+
+    var createData = function(typeNumber, errorCorrectionLevel, dataList) {
+
+      var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, errorCorrectionLevel);
+
+      var buffer = qrBitBuffer();
+
+      for (var i = 0; i < dataList.length; i += 1) {
+        var data = dataList[i];
+        buffer.put(data.getMode(), 4);
+        buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber) );
+        data.write(buffer);
+      }
+
+      // calc num max data.
+      var totalDataCount = 0;
+      for (var i = 0; i < rsBlocks.length; i += 1) {
+        totalDataCount += rsBlocks[i].dataCount;
+      }
+
+      if (buffer.getLengthInBits() > totalDataCount * 8) {
+        throw 'code length overflow. ('
+          + buffer.getLengthInBits()
+          + '>'
+          + totalDataCount * 8
+          + ')';
+      }
+
+      // end code
+      if (buffer.getLengthInBits() + 4 <= totalDataCount * 8) {
+        buffer.put(0, 4);
+      }
+
+      // padding
+      while (buffer.getLengthInBits() % 8 != 0) {
+        buffer.putBit(false);
+      }
+
+      // padding
+      while (true) {
+
+        if (buffer.getLengthInBits() >= totalDataCount * 8) {
+          break;
+        }
+        buffer.put(PAD0, 8);
+
+        if (buffer.getLengthInBits() >= totalDataCount * 8) {
+          break;
+        }
+        buffer.put(PAD1, 8);
+      }
+
+      return createBytes(buffer, rsBlocks);
+    };
+
+    _this.addData = function(data, mode) {
+
+      mode = mode || 'Byte';
+
+      var newData = null;
+
+      switch(mode) {
+      case 'Numeric' :
+        newData = qrNumber(data);
+        break;
+      case 'Alphanumeric' :
+        newData = qrAlphaNum(data);
+        break;
+      case 'Byte' :
+        newData = qr8BitByte(data);
+        break;
+      case 'Kanji' :
+        newData = qrKanji(data);
+        break;
+      default :
+        throw 'mode:' + mode;
+      }
+
+      _dataList.push(newData);
+      _dataCache = null;
+    };
+
+    _this.isDark = function(row, col) {
+      if (row < 0 || _moduleCount <= row || col < 0 || _moduleCount <= col) {
+        throw row + ',' + col;
+      }
+      return _modules[row][col];
+    };
+
+    _this.getModuleCount = function() {
+      return _moduleCount;
+    };
+
+    _this.make = function() {
+      if (_typeNumber < 1) {
+        var typeNumber = 1;
+
+        for (; typeNumber < 40; typeNumber++) {
+          var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, _errorCorrectionLevel);
+          var buffer = qrBitBuffer();
+
+          for (var i = 0; i < _dataList.length; i++) {
+            var data = _dataList[i];
+            buffer.put(data.getMode(), 4);
+            buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber) );
+            data.write(buffer);
+          }
+
+          var totalDataCount = 0;
+          for (var i = 0; i < rsBlocks.length; i++) {
+            totalDataCount += rsBlocks[i].dataCount;
+          }
+
+          if (buffer.getLengthInBits() <= totalDataCount * 8) {
+            break;
+          }
+        }
+
+        _typeNumber = typeNumber;
+      }
+
+      makeImpl(false, getBestMaskPattern() );
+    };
+
+    _this.createTableTag = function(cellSize, margin) {
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      var qrHtml = '';
+
+      qrHtml += '<table style="';
+      qrHtml += ' border-width: 0px; border-style: none;';
+      qrHtml += ' border-collapse: collapse;';
+      qrHtml += ' padding: 0px; margin: ' + margin + 'px;';
+      qrHtml += '">';
+      qrHtml += '<tbody>';
+
+      for (var r = 0; r < _this.getModuleCount(); r += 1) {
+
+        qrHtml += '<tr>';
+
+        for (var c = 0; c < _this.getModuleCount(); c += 1) {
+          qrHtml += '<td style="';
+          qrHtml += ' border-width: 0px; border-style: none;';
+          qrHtml += ' border-collapse: collapse;';
+          qrHtml += ' padding: 0px; margin: 0px;';
+          qrHtml += ' width: ' + cellSize + 'px;';
+          qrHtml += ' height: ' + cellSize + 'px;';
+          qrHtml += ' background-color: ';
+          qrHtml += _this.isDark(r, c)? '#000000' : '#ffffff';
+          qrHtml += ';';
+          qrHtml += '"/>';
+        }
+
+        qrHtml += '</tr>';
+      }
+
+      qrHtml += '</tbody>';
+      qrHtml += '</table>';
+
+      return qrHtml;
+    };
+
+    _this.createSvgTag = function(cellSize, margin, alt, title) {
+
+      var opts = {};
+      if (typeof arguments[0] == 'object') {
+        // Called by options.
+        opts = arguments[0];
+        // overwrite cellSize and margin.
+        cellSize = opts.cellSize;
+        margin = opts.margin;
+        alt = opts.alt;
+        title = opts.title;
+      }
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      // Compose alt property surrogate
+      alt = (typeof alt === 'string') ? {text: alt} : alt || {};
+      alt.text = alt.text || null;
+      alt.id = (alt.text) ? alt.id || 'qrcode-description' : null;
+
+      // Compose title property surrogate
+      title = (typeof title === 'string') ? {text: title} : title || {};
+      title.text = title.text || null;
+      title.id = (title.text) ? title.id || 'qrcode-title' : null;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var c, mc, r, mr, qrSvg='', rect;
+
+      rect = 'l' + cellSize + ',0 0,' + cellSize +
+        ' -' + cellSize + ',0 0,-' + cellSize + 'z ';
+
+      qrSvg += '<svg version="1.1" xmlns="http://www.w3.org/2000/svg"';
+      qrSvg += !opts.scalable ? ' width="' + size + 'px" height="' + size + 'px"' : '';
+      qrSvg += ' viewBox="0 0 ' + size + ' ' + size + '" ';
+      qrSvg += ' preserveAspectRatio="xMinYMin meet"';
+      qrSvg += (title.text || alt.text) ? ' role="img" aria-labelledby="' +
+          escapeXml([title.id, alt.id].join(' ').trim() ) + '"' : '';
+      qrSvg += '>';
+      qrSvg += (title.text) ? '<title id="' + escapeXml(title.id) + '">' +
+          escapeXml(title.text) + '</title>' : '';
+      qrSvg += (alt.text) ? '<description id="' + escapeXml(alt.id) + '">' +
+          escapeXml(alt.text) + '</description>' : '';
+      qrSvg += '<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>';
+      qrSvg += '<path d="';
+
+      for (r = 0; r < _this.getModuleCount(); r += 1) {
+        mr = r * cellSize + margin;
+        for (c = 0; c < _this.getModuleCount(); c += 1) {
+          if (_this.isDark(r, c) ) {
+            mc = c*cellSize+margin;
+            qrSvg += 'M' + mc + ',' + mr + rect;
+          }
+        }
+      }
+
+      qrSvg += '" stroke="transparent" fill="black"/>';
+      qrSvg += '</svg>';
+
+      return qrSvg;
+    };
+
+    _this.createDataURL = function(cellSize, margin) {
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var min = margin;
+      var max = size - margin;
+
+      return createDataURL(size, size, function(x, y) {
+        if (min <= x && x < max && min <= y && y < max) {
+          var c = Math.floor( (x - min) / cellSize);
+          var r = Math.floor( (y - min) / cellSize);
+          return _this.isDark(r, c)? 0 : 1;
+        } else {
+          return 1;
+        }
+      } );
+    };
+
+    _this.createImgTag = function(cellSize, margin, alt) {
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+
+      var img = '';
+      img += '<img';
+      img += '\u0020src="';
+      img += _this.createDataURL(cellSize, margin);
+      img += '"';
+      img += '\u0020width="';
+      img += size;
+      img += '"';
+      img += '\u0020height="';
+      img += size;
+      img += '"';
+      if (alt) {
+        img += '\u0020alt="';
+        img += escapeXml(alt);
+        img += '"';
+      }
+      img += '/>';
+
+      return img;
+    };
+
+    var escapeXml = function(s) {
+      var escaped = '';
+      for (var i = 0; i < s.length; i += 1) {
+        var c = s.charAt(i);
+        switch(c) {
+        case '<': escaped += '&lt;'; break;
+        case '>': escaped += '&gt;'; break;
+        case '&': escaped += '&amp;'; break;
+        case '"': escaped += '&quot;'; break;
+        default : escaped += c; break;
+        }
+      }
+      return escaped;
+    };
+
+    var _createHalfASCII = function(margin) {
+      var cellSize = 1;
+      margin = (typeof margin == 'undefined')? cellSize * 2 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var min = margin;
+      var max = size - margin;
+
+      var y, x, r1, r2, p;
+
+      var blocks = {
+        '██': '█',
+        '█ ': '▀',
+        ' █': '▄',
+        '  ': ' '
+      };
+
+      var blocksLastLineNoMargin = {
+        '██': '▀',
+        '█ ': '▀',
+        ' █': ' ',
+        '  ': ' '
+      };
+
+      var ascii = '';
+      for (y = 0; y < size; y += 2) {
+        r1 = Math.floor((y - min) / cellSize);
+        r2 = Math.floor((y + 1 - min) / cellSize);
+        for (x = 0; x < size; x += 1) {
+          p = '█';
+
+          if (min <= x && x < max && min <= y && y < max && _this.isDark(r1, Math.floor((x - min) / cellSize))) {
+            p = ' ';
+          }
+
+          if (min <= x && x < max && min <= y+1 && y+1 < max && _this.isDark(r2, Math.floor((x - min) / cellSize))) {
+            p += ' ';
+          }
+          else {
+            p += '█';
+          }
+
+          // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
+          ascii += (margin < 1 && y+1 >= max) ? blocksLastLineNoMargin[p] : blocks[p];
+        }
+
+        ascii += '\n';
+      }
+
+      if (size % 2 && margin > 0) {
+        return ascii.substring(0, ascii.length - size - 1) + Array(size+1).join('▀');
+      }
+
+      return ascii.substring(0, ascii.length-1);
+    };
+
+    _this.createASCII = function(cellSize, margin) {
+      cellSize = cellSize || 1;
+
+      if (cellSize < 2) {
+        return _createHalfASCII(margin);
+      }
+
+      cellSize -= 1;
+      margin = (typeof margin == 'undefined')? cellSize * 2 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var min = margin;
+      var max = size - margin;
+
+      var y, x, r, p;
+
+      var white = Array(cellSize+1).join('██');
+      var black = Array(cellSize+1).join('  ');
+
+      var ascii = '';
+      var line = '';
+      for (y = 0; y < size; y += 1) {
+        r = Math.floor( (y - min) / cellSize);
+        line = '';
+        for (x = 0; x < size; x += 1) {
+          p = 1;
+
+          if (min <= x && x < max && min <= y && y < max && _this.isDark(r, Math.floor((x - min) / cellSize))) {
+            p = 0;
+          }
+
+          // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
+          line += p ? white : black;
+        }
+
+        for (r = 0; r < cellSize; r += 1) {
+          ascii += line + '\n';
+        }
+      }
+
+      return ascii.substring(0, ascii.length-1);
+    };
+
+    _this.renderTo2dContext = function(context, cellSize) {
+      cellSize = cellSize || 2;
+      var length = _this.getModuleCount();
+      for (var row = 0; row < length; row++) {
+        for (var col = 0; col < length; col++) {
+          context.fillStyle = _this.isDark(row, col) ? 'black' : 'white';
+          context.fillRect(row * cellSize, col * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrcode.stringToBytes
+  //---------------------------------------------------------------------
+
+  qrcode.stringToBytesFuncs = {
+    'default' : function(s) {
+      var bytes = [];
+      for (var i = 0; i < s.length; i += 1) {
+        var c = s.charCodeAt(i);
+        bytes.push(c & 0xff);
+      }
+      return bytes;
+    }
+  };
+
+  qrcode.stringToBytes = qrcode.stringToBytesFuncs['default'];
+
+  //---------------------------------------------------------------------
+  // qrcode.createStringToBytes
+  //---------------------------------------------------------------------
+
+  /**
+   * @param unicodeData base64 string of byte array.
+   * [16bit Unicode],[16bit Bytes], ...
+   * @param numChars
+   */
+  qrcode.createStringToBytes = function(unicodeData, numChars) {
+
+    // create conversion map.
+
+    var unicodeMap = function() {
+
+      var bin = base64DecodeInputStream(unicodeData);
+      var read = function() {
+        var b = bin.read();
+        if (b == -1) throw 'eof';
+        return b;
+      };
+
+      var count = 0;
+      var unicodeMap = {};
+      while (true) {
+        var b0 = bin.read();
+        if (b0 == -1) break;
+        var b1 = read();
+        var b2 = read();
+        var b3 = read();
+        var k = String.fromCharCode( (b0 << 8) | b1);
+        var v = (b2 << 8) | b3;
+        unicodeMap[k] = v;
+        count += 1;
+      }
+      if (count != numChars) {
+        throw count + ' != ' + numChars;
+      }
+
+      return unicodeMap;
+    }();
+
+    var unknownChar = '?'.charCodeAt(0);
+
+    return function(s) {
+      var bytes = [];
+      for (var i = 0; i < s.length; i += 1) {
+        var c = s.charCodeAt(i);
+        if (c < 128) {
+          bytes.push(c);
+        } else {
+          var b = unicodeMap[s.charAt(i)];
+          if (typeof b == 'number') {
+            if ( (b & 0xff) == b) {
+              // 1byte
+              bytes.push(b);
+            } else {
+              // 2bytes
+              bytes.push(b >>> 8);
+              bytes.push(b & 0xff);
+            }
+          } else {
+            bytes.push(unknownChar);
+          }
+        }
+      }
+      return bytes;
+    };
+  };
+
+  //---------------------------------------------------------------------
+  // QRMode
+  //---------------------------------------------------------------------
+
+  var QRMode = {
+    MODE_NUMBER :    1 << 0,
+    MODE_ALPHA_NUM : 1 << 1,
+    MODE_8BIT_BYTE : 1 << 2,
+    MODE_KANJI :     1 << 3
+  };
+
+  //---------------------------------------------------------------------
+  // QRErrorCorrectionLevel
+  //---------------------------------------------------------------------
+
+  var QRErrorCorrectionLevel = {
+    L : 1,
+    M : 0,
+    Q : 3,
+    H : 2
+  };
+
+  //---------------------------------------------------------------------
+  // QRMaskPattern
+  //---------------------------------------------------------------------
+
+  var QRMaskPattern = {
+    PATTERN000 : 0,
+    PATTERN001 : 1,
+    PATTERN010 : 2,
+    PATTERN011 : 3,
+    PATTERN100 : 4,
+    PATTERN101 : 5,
+    PATTERN110 : 6,
+    PATTERN111 : 7
+  };
+
+  //---------------------------------------------------------------------
+  // QRUtil
+  //---------------------------------------------------------------------
+
+  var QRUtil = function() {
+
+    var PATTERN_POSITION_TABLE = [
+      [],
+      [6, 18],
+      [6, 22],
+      [6, 26],
+      [6, 30],
+      [6, 34],
+      [6, 22, 38],
+      [6, 24, 42],
+      [6, 26, 46],
+      [6, 28, 50],
+      [6, 30, 54],
+      [6, 32, 58],
+      [6, 34, 62],
+      [6, 26, 46, 66],
+      [6, 26, 48, 70],
+      [6, 26, 50, 74],
+      [6, 30, 54, 78],
+      [6, 30, 56, 82],
+      [6, 30, 58, 86],
+      [6, 34, 62, 90],
+      [6, 28, 50, 72, 94],
+      [6, 26, 50, 74, 98],
+      [6, 30, 54, 78, 102],
+      [6, 28, 54, 80, 106],
+      [6, 32, 58, 84, 110],
+      [6, 30, 58, 86, 114],
+      [6, 34, 62, 90, 118],
+      [6, 26, 50, 74, 98, 122],
+      [6, 30, 54, 78, 102, 126],
+      [6, 26, 52, 78, 104, 130],
+      [6, 30, 56, 82, 108, 134],
+      [6, 34, 60, 86, 112, 138],
+      [6, 30, 58, 86, 114, 142],
+      [6, 34, 62, 90, 118, 146],
+      [6, 30, 54, 78, 102, 126, 150],
+      [6, 24, 50, 76, 102, 128, 154],
+      [6, 28, 54, 80, 106, 132, 158],
+      [6, 32, 58, 84, 110, 136, 162],
+      [6, 26, 54, 82, 110, 138, 166],
+      [6, 30, 58, 86, 114, 142, 170]
+    ];
+    var G15 = (1 << 10) | (1 << 8) | (1 << 5) | (1 << 4) | (1 << 2) | (1 << 1) | (1 << 0);
+    var G18 = (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 5) | (1 << 2) | (1 << 0);
+    var G15_MASK = (1 << 14) | (1 << 12) | (1 << 10) | (1 << 4) | (1 << 1);
+
+    var _this = {};
+
+    var getBCHDigit = function(data) {
+      var digit = 0;
+      while (data != 0) {
+        digit += 1;
+        data >>>= 1;
+      }
+      return digit;
+    };
+
+    _this.getBCHTypeInfo = function(data) {
+      var d = data << 10;
+      while (getBCHDigit(d) - getBCHDigit(G15) >= 0) {
+        d ^= (G15 << (getBCHDigit(d) - getBCHDigit(G15) ) );
+      }
+      return ( (data << 10) | d) ^ G15_MASK;
+    };
+
+    _this.getBCHTypeNumber = function(data) {
+      var d = data << 12;
+      while (getBCHDigit(d) - getBCHDigit(G18) >= 0) {
+        d ^= (G18 << (getBCHDigit(d) - getBCHDigit(G18) ) );
+      }
+      return (data << 12) | d;
+    };
+
+    _this.getPatternPosition = function(typeNumber) {
+      return PATTERN_POSITION_TABLE[typeNumber - 1];
+    };
+
+    _this.getMaskFunction = function(maskPattern) {
+
+      switch (maskPattern) {
+
+      case QRMaskPattern.PATTERN000 :
+        return function(i, j) { return (i + j) % 2 == 0; };
+      case QRMaskPattern.PATTERN001 :
+        return function(i, j) { return i % 2 == 0; };
+      case QRMaskPattern.PATTERN010 :
+        return function(i, j) { return j % 3 == 0; };
+      case QRMaskPattern.PATTERN011 :
+        return function(i, j) { return (i + j) % 3 == 0; };
+      case QRMaskPattern.PATTERN100 :
+        return function(i, j) { return (Math.floor(i / 2) + Math.floor(j / 3) ) % 2 == 0; };
+      case QRMaskPattern.PATTERN101 :
+        return function(i, j) { return (i * j) % 2 + (i * j) % 3 == 0; };
+      case QRMaskPattern.PATTERN110 :
+        return function(i, j) { return ( (i * j) % 2 + (i * j) % 3) % 2 == 0; };
+      case QRMaskPattern.PATTERN111 :
+        return function(i, j) { return ( (i * j) % 3 + (i + j) % 2) % 2 == 0; };
+
+      default :
+        throw 'bad maskPattern:' + maskPattern;
+      }
+    };
+
+    _this.getErrorCorrectPolynomial = function(errorCorrectLength) {
+      var a = qrPolynomial([1], 0);
+      for (var i = 0; i < errorCorrectLength; i += 1) {
+        a = a.multiply(qrPolynomial([1, QRMath.gexp(i)], 0) );
+      }
+      return a;
+    };
+
+    _this.getLengthInBits = function(mode, type) {
+
+      if (1 <= type && type < 10) {
+
+        // 1 - 9
+
+        switch(mode) {
+        case QRMode.MODE_NUMBER    : return 10;
+        case QRMode.MODE_ALPHA_NUM : return 9;
+        case QRMode.MODE_8BIT_BYTE : return 8;
+        case QRMode.MODE_KANJI     : return 8;
+        default :
+          throw 'mode:' + mode;
+        }
+
+      } else if (type < 27) {
+
+        // 10 - 26
+
+        switch(mode) {
+        case QRMode.MODE_NUMBER    : return 12;
+        case QRMode.MODE_ALPHA_NUM : return 11;
+        case QRMode.MODE_8BIT_BYTE : return 16;
+        case QRMode.MODE_KANJI     : return 10;
+        default :
+          throw 'mode:' + mode;
+        }
+
+      } else if (type < 41) {
+
+        // 27 - 40
+
+        switch(mode) {
+        case QRMode.MODE_NUMBER    : return 14;
+        case QRMode.MODE_ALPHA_NUM : return 13;
+        case QRMode.MODE_8BIT_BYTE : return 16;
+        case QRMode.MODE_KANJI     : return 12;
+        default :
+          throw 'mode:' + mode;
+        }
+
+      } else {
+        throw 'type:' + type;
+      }
+    };
+
+    _this.getLostPoint = function(qrcode) {
+
+      var moduleCount = qrcode.getModuleCount();
+
+      var lostPoint = 0;
+
+      // LEVEL1
+
+      for (var row = 0; row < moduleCount; row += 1) {
+        for (var col = 0; col < moduleCount; col += 1) {
+
+          var sameCount = 0;
+          var dark = qrcode.isDark(row, col);
+
+          for (var r = -1; r <= 1; r += 1) {
+
+            if (row + r < 0 || moduleCount <= row + r) {
+              continue;
+            }
+
+            for (var c = -1; c <= 1; c += 1) {
+
+              if (col + c < 0 || moduleCount <= col + c) {
+                continue;
+              }
+
+              if (r == 0 && c == 0) {
+                continue;
+              }
+
+              if (dark == qrcode.isDark(row + r, col + c) ) {
+                sameCount += 1;
+              }
+            }
+          }
+
+          if (sameCount > 5) {
+            lostPoint += (3 + sameCount - 5);
+          }
+        }
+      };
+
+      // LEVEL2
+
+      for (var row = 0; row < moduleCount - 1; row += 1) {
+        for (var col = 0; col < moduleCount - 1; col += 1) {
+          var count = 0;
+          if (qrcode.isDark(row, col) ) count += 1;
+          if (qrcode.isDark(row + 1, col) ) count += 1;
+          if (qrcode.isDark(row, col + 1) ) count += 1;
+          if (qrcode.isDark(row + 1, col + 1) ) count += 1;
+          if (count == 0 || count == 4) {
+            lostPoint += 3;
+          }
+        }
+      }
+
+      // LEVEL3
+
+      for (var row = 0; row < moduleCount; row += 1) {
+        for (var col = 0; col < moduleCount - 6; col += 1) {
+          if (qrcode.isDark(row, col)
+              && !qrcode.isDark(row, col + 1)
+              &&  qrcode.isDark(row, col + 2)
+              &&  qrcode.isDark(row, col + 3)
+              &&  qrcode.isDark(row, col + 4)
+              && !qrcode.isDark(row, col + 5)
+              &&  qrcode.isDark(row, col + 6) ) {
+            lostPoint += 40;
+          }
+        }
+      }
+
+      for (var col = 0; col < moduleCount; col += 1) {
+        for (var row = 0; row < moduleCount - 6; row += 1) {
+          if (qrcode.isDark(row, col)
+              && !qrcode.isDark(row + 1, col)
+              &&  qrcode.isDark(row + 2, col)
+              &&  qrcode.isDark(row + 3, col)
+              &&  qrcode.isDark(row + 4, col)
+              && !qrcode.isDark(row + 5, col)
+              &&  qrcode.isDark(row + 6, col) ) {
+            lostPoint += 40;
+          }
+        }
+      }
+
+      // LEVEL4
+
+      var darkCount = 0;
+
+      for (var col = 0; col < moduleCount; col += 1) {
+        for (var row = 0; row < moduleCount; row += 1) {
+          if (qrcode.isDark(row, col) ) {
+            darkCount += 1;
+          }
+        }
+      }
+
+      var ratio = Math.abs(100 * darkCount / moduleCount / moduleCount - 50) / 5;
+      lostPoint += ratio * 10;
+
+      return lostPoint;
+    };
+
+    return _this;
+  }();
+
+  //---------------------------------------------------------------------
+  // QRMath
+  //---------------------------------------------------------------------
+
+  var QRMath = function() {
+
+    var EXP_TABLE = new Array(256);
+    var LOG_TABLE = new Array(256);
+
+    // initialize tables
+    for (var i = 0; i < 8; i += 1) {
+      EXP_TABLE[i] = 1 << i;
+    }
+    for (var i = 8; i < 256; i += 1) {
+      EXP_TABLE[i] = EXP_TABLE[i - 4]
+        ^ EXP_TABLE[i - 5]
+        ^ EXP_TABLE[i - 6]
+        ^ EXP_TABLE[i - 8];
+    }
+    for (var i = 0; i < 255; i += 1) {
+      LOG_TABLE[EXP_TABLE[i] ] = i;
+    }
+
+    var _this = {};
+
+    _this.glog = function(n) {
+
+      if (n < 1) {
+        throw 'glog(' + n + ')';
+      }
+
+      return LOG_TABLE[n];
+    };
+
+    _this.gexp = function(n) {
+
+      while (n < 0) {
+        n += 255;
+      }
+
+      while (n >= 256) {
+        n -= 255;
+      }
+
+      return EXP_TABLE[n];
+    };
+
+    return _this;
+  }();
+
+  //---------------------------------------------------------------------
+  // qrPolynomial
+  //---------------------------------------------------------------------
+
+  function qrPolynomial(num, shift) {
+
+    if (typeof num.length == 'undefined') {
+      throw num.length + '/' + shift;
+    }
+
+    var _num = function() {
+      var offset = 0;
+      while (offset < num.length && num[offset] == 0) {
+        offset += 1;
+      }
+      var _num = new Array(num.length - offset + shift);
+      for (var i = 0; i < num.length - offset; i += 1) {
+        _num[i] = num[i + offset];
+      }
+      return _num;
+    }();
+
+    var _this = {};
+
+    _this.getAt = function(index) {
+      return _num[index];
+    };
+
+    _this.getLength = function() {
+      return _num.length;
+    };
+
+    _this.multiply = function(e) {
+
+      var num = new Array(_this.getLength() + e.getLength() - 1);
+
+      for (var i = 0; i < _this.getLength(); i += 1) {
+        for (var j = 0; j < e.getLength(); j += 1) {
+          num[i + j] ^= QRMath.gexp(QRMath.glog(_this.getAt(i) ) + QRMath.glog(e.getAt(j) ) );
+        }
+      }
+
+      return qrPolynomial(num, 0);
+    };
+
+    _this.mod = function(e) {
+
+      if (_this.getLength() - e.getLength() < 0) {
+        return _this;
+      }
+
+      var ratio = QRMath.glog(_this.getAt(0) ) - QRMath.glog(e.getAt(0) );
+
+      var num = new Array(_this.getLength() );
+      for (var i = 0; i < _this.getLength(); i += 1) {
+        num[i] = _this.getAt(i);
+      }
+
+      for (var i = 0; i < e.getLength(); i += 1) {
+        num[i] ^= QRMath.gexp(QRMath.glog(e.getAt(i) ) + ratio);
+      }
+
+      // recursive call
+      return qrPolynomial(num, 0).mod(e);
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // QRRSBlock
+  //---------------------------------------------------------------------
+
+  var QRRSBlock = function() {
+
+    var RS_BLOCK_TABLE = [
+
+      // L
+      // M
+      // Q
+      // H
+
+      // 1
+      [1, 26, 19],
+      [1, 26, 16],
+      [1, 26, 13],
+      [1, 26, 9],
+
+      // 2
+      [1, 44, 34],
+      [1, 44, 28],
+      [1, 44, 22],
+      [1, 44, 16],
+
+      // 3
+      [1, 70, 55],
+      [1, 70, 44],
+      [2, 35, 17],
+      [2, 35, 13],
+
+      // 4
+      [1, 100, 80],
+      [2, 50, 32],
+      [2, 50, 24],
+      [4, 25, 9],
+
+      // 5
+      [1, 134, 108],
+      [2, 67, 43],
+      [2, 33, 15, 2, 34, 16],
+      [2, 33, 11, 2, 34, 12],
+
+      // 6
+      [2, 86, 68],
+      [4, 43, 27],
+      [4, 43, 19],
+      [4, 43, 15],
+
+      // 7
+      [2, 98, 78],
+      [4, 49, 31],
+      [2, 32, 14, 4, 33, 15],
+      [4, 39, 13, 1, 40, 14],
+
+      // 8
+      [2, 121, 97],
+      [2, 60, 38, 2, 61, 39],
+      [4, 40, 18, 2, 41, 19],
+      [4, 40, 14, 2, 41, 15],
+
+      // 9
+      [2, 146, 116],
+      [3, 58, 36, 2, 59, 37],
+      [4, 36, 16, 4, 37, 17],
+      [4, 36, 12, 4, 37, 13],
+
+      // 10
+      [2, 86, 68, 2, 87, 69],
+      [4, 69, 43, 1, 70, 44],
+      [6, 43, 19, 2, 44, 20],
+      [6, 43, 15, 2, 44, 16],
+
+      // 11
+      [4, 101, 81],
+      [1, 80, 50, 4, 81, 51],
+      [4, 50, 22, 4, 51, 23],
+      [3, 36, 12, 8, 37, 13],
+
+      // 12
+      [2, 116, 92, 2, 117, 93],
+      [6, 58, 36, 2, 59, 37],
+      [4, 46, 20, 6, 47, 21],
+      [7, 42, 14, 4, 43, 15],
+
+      // 13
+      [4, 133, 107],
+      [8, 59, 37, 1, 60, 38],
+      [8, 44, 20, 4, 45, 21],
+      [12, 33, 11, 4, 34, 12],
+
+      // 14
+      [3, 145, 115, 1, 146, 116],
+      [4, 64, 40, 5, 65, 41],
+      [11, 36, 16, 5, 37, 17],
+      [11, 36, 12, 5, 37, 13],
+
+      // 15
+      [5, 109, 87, 1, 110, 88],
+      [5, 65, 41, 5, 66, 42],
+      [5, 54, 24, 7, 55, 25],
+      [11, 36, 12, 7, 37, 13],
+
+      // 16
+      [5, 122, 98, 1, 123, 99],
+      [7, 73, 45, 3, 74, 46],
+      [15, 43, 19, 2, 44, 20],
+      [3, 45, 15, 13, 46, 16],
+
+      // 17
+      [1, 135, 107, 5, 136, 108],
+      [10, 74, 46, 1, 75, 47],
+      [1, 50, 22, 15, 51, 23],
+      [2, 42, 14, 17, 43, 15],
+
+      // 18
+      [5, 150, 120, 1, 151, 121],
+      [9, 69, 43, 4, 70, 44],
+      [17, 50, 22, 1, 51, 23],
+      [2, 42, 14, 19, 43, 15],
+
+      // 19
+      [3, 141, 113, 4, 142, 114],
+      [3, 70, 44, 11, 71, 45],
+      [17, 47, 21, 4, 48, 22],
+      [9, 39, 13, 16, 40, 14],
+
+      // 20
+      [3, 135, 107, 5, 136, 108],
+      [3, 67, 41, 13, 68, 42],
+      [15, 54, 24, 5, 55, 25],
+      [15, 43, 15, 10, 44, 16],
+
+      // 21
+      [4, 144, 116, 4, 145, 117],
+      [17, 68, 42],
+      [17, 50, 22, 6, 51, 23],
+      [19, 46, 16, 6, 47, 17],
+
+      // 22
+      [2, 139, 111, 7, 140, 112],
+      [17, 74, 46],
+      [7, 54, 24, 16, 55, 25],
+      [34, 37, 13],
+
+      // 23
+      [4, 151, 121, 5, 152, 122],
+      [4, 75, 47, 14, 76, 48],
+      [11, 54, 24, 14, 55, 25],
+      [16, 45, 15, 14, 46, 16],
+
+      // 24
+      [6, 147, 117, 4, 148, 118],
+      [6, 73, 45, 14, 74, 46],
+      [11, 54, 24, 16, 55, 25],
+      [30, 46, 16, 2, 47, 17],
+
+      // 25
+      [8, 132, 106, 4, 133, 107],
+      [8, 75, 47, 13, 76, 48],
+      [7, 54, 24, 22, 55, 25],
+      [22, 45, 15, 13, 46, 16],
+
+      // 26
+      [10, 142, 114, 2, 143, 115],
+      [19, 74, 46, 4, 75, 47],
+      [28, 50, 22, 6, 51, 23],
+      [33, 46, 16, 4, 47, 17],
+
+      // 27
+      [8, 152, 122, 4, 153, 123],
+      [22, 73, 45, 3, 74, 46],
+      [8, 53, 23, 26, 54, 24],
+      [12, 45, 15, 28, 46, 16],
+
+      // 28
+      [3, 147, 117, 10, 148, 118],
+      [3, 73, 45, 23, 74, 46],
+      [4, 54, 24, 31, 55, 25],
+      [11, 45, 15, 31, 46, 16],
+
+      // 29
+      [7, 146, 116, 7, 147, 117],
+      [21, 73, 45, 7, 74, 46],
+      [1, 53, 23, 37, 54, 24],
+      [19, 45, 15, 26, 46, 16],
+
+      // 30
+      [5, 145, 115, 10, 146, 116],
+      [19, 75, 47, 10, 76, 48],
+      [15, 54, 24, 25, 55, 25],
+      [23, 45, 15, 25, 46, 16],
+
+      // 31
+      [13, 145, 115, 3, 146, 116],
+      [2, 74, 46, 29, 75, 47],
+      [42, 54, 24, 1, 55, 25],
+      [23, 45, 15, 28, 46, 16],
+
+      // 32
+      [17, 145, 115],
+      [10, 74, 46, 23, 75, 47],
+      [10, 54, 24, 35, 55, 25],
+      [19, 45, 15, 35, 46, 16],
+
+      // 33
+      [17, 145, 115, 1, 146, 116],
+      [14, 74, 46, 21, 75, 47],
+      [29, 54, 24, 19, 55, 25],
+      [11, 45, 15, 46, 46, 16],
+
+      // 34
+      [13, 145, 115, 6, 146, 116],
+      [14, 74, 46, 23, 75, 47],
+      [44, 54, 24, 7, 55, 25],
+      [59, 46, 16, 1, 47, 17],
+
+      // 35
+      [12, 151, 121, 7, 152, 122],
+      [12, 75, 47, 26, 76, 48],
+      [39, 54, 24, 14, 55, 25],
+      [22, 45, 15, 41, 46, 16],
+
+      // 36
+      [6, 151, 121, 14, 152, 122],
+      [6, 75, 47, 34, 76, 48],
+      [46, 54, 24, 10, 55, 25],
+      [2, 45, 15, 64, 46, 16],
+
+      // 37
+      [17, 152, 122, 4, 153, 123],
+      [29, 74, 46, 14, 75, 47],
+      [49, 54, 24, 10, 55, 25],
+      [24, 45, 15, 46, 46, 16],
+
+      // 38
+      [4, 152, 122, 18, 153, 123],
+      [13, 74, 46, 32, 75, 47],
+      [48, 54, 24, 14, 55, 25],
+      [42, 45, 15, 32, 46, 16],
+
+      // 39
+      [20, 147, 117, 4, 148, 118],
+      [40, 75, 47, 7, 76, 48],
+      [43, 54, 24, 22, 55, 25],
+      [10, 45, 15, 67, 46, 16],
+
+      // 40
+      [19, 148, 118, 6, 149, 119],
+      [18, 75, 47, 31, 76, 48],
+      [34, 54, 24, 34, 55, 25],
+      [20, 45, 15, 61, 46, 16]
+    ];
+
+    var qrRSBlock = function(totalCount, dataCount) {
+      var _this = {};
+      _this.totalCount = totalCount;
+      _this.dataCount = dataCount;
+      return _this;
+    };
+
+    var _this = {};
+
+    var getRsBlockTable = function(typeNumber, errorCorrectionLevel) {
+
+      switch(errorCorrectionLevel) {
+      case QRErrorCorrectionLevel.L :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 0];
+      case QRErrorCorrectionLevel.M :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 1];
+      case QRErrorCorrectionLevel.Q :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 2];
+      case QRErrorCorrectionLevel.H :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 3];
+      default :
+        return undefined;
+      }
+    };
+
+    _this.getRSBlocks = function(typeNumber, errorCorrectionLevel) {
+
+      var rsBlock = getRsBlockTable(typeNumber, errorCorrectionLevel);
+
+      if (typeof rsBlock == 'undefined') {
+        throw 'bad rs block @ typeNumber:' + typeNumber +
+            '/errorCorrectionLevel:' + errorCorrectionLevel;
+      }
+
+      var length = rsBlock.length / 3;
+
+      var list = [];
+
+      for (var i = 0; i < length; i += 1) {
+
+        var count = rsBlock[i * 3 + 0];
+        var totalCount = rsBlock[i * 3 + 1];
+        var dataCount = rsBlock[i * 3 + 2];
+
+        for (var j = 0; j < count; j += 1) {
+          list.push(qrRSBlock(totalCount, dataCount) );
+        }
+      }
+
+      return list;
+    };
+
+    return _this;
+  }();
+
+  //---------------------------------------------------------------------
+  // qrBitBuffer
+  //---------------------------------------------------------------------
+
+  var qrBitBuffer = function() {
+
+    var _buffer = [];
+    var _length = 0;
+
+    var _this = {};
+
+    _this.getBuffer = function() {
+      return _buffer;
+    };
+
+    _this.getAt = function(index) {
+      var bufIndex = Math.floor(index / 8);
+      return ( (_buffer[bufIndex] >>> (7 - index % 8) ) & 1) == 1;
+    };
+
+    _this.put = function(num, length) {
+      for (var i = 0; i < length; i += 1) {
+        _this.putBit( ( (num >>> (length - i - 1) ) & 1) == 1);
+      }
+    };
+
+    _this.getLengthInBits = function() {
+      return _length;
+    };
+
+    _this.putBit = function(bit) {
+
+      var bufIndex = Math.floor(_length / 8);
+      if (_buffer.length <= bufIndex) {
+        _buffer.push(0);
+      }
+
+      if (bit) {
+        _buffer[bufIndex] |= (0x80 >>> (_length % 8) );
+      }
+
+      _length += 1;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrNumber
+  //---------------------------------------------------------------------
+
+  var qrNumber = function(data) {
+
+    var _mode = QRMode.MODE_NUMBER;
+    var _data = data;
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return _data.length;
+    };
+
+    _this.write = function(buffer) {
+
+      var data = _data;
+
+      var i = 0;
+
+      while (i + 2 < data.length) {
+        buffer.put(strToNum(data.substring(i, i + 3) ), 10);
+        i += 3;
+      }
+
+      if (i < data.length) {
+        if (data.length - i == 1) {
+          buffer.put(strToNum(data.substring(i, i + 1) ), 4);
+        } else if (data.length - i == 2) {
+          buffer.put(strToNum(data.substring(i, i + 2) ), 7);
+        }
+      }
+    };
+
+    var strToNum = function(s) {
+      var num = 0;
+      for (var i = 0; i < s.length; i += 1) {
+        num = num * 10 + chatToNum(s.charAt(i) );
+      }
+      return num;
+    };
+
+    var chatToNum = function(c) {
+      if ('0' <= c && c <= '9') {
+        return c.charCodeAt(0) - '0'.charCodeAt(0);
+      }
+      throw 'illegal char :' + c;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrAlphaNum
+  //---------------------------------------------------------------------
+
+  var qrAlphaNum = function(data) {
+
+    var _mode = QRMode.MODE_ALPHA_NUM;
+    var _data = data;
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return _data.length;
+    };
+
+    _this.write = function(buffer) {
+
+      var s = _data;
+
+      var i = 0;
+
+      while (i + 1 < s.length) {
+        buffer.put(
+          getCode(s.charAt(i) ) * 45 +
+          getCode(s.charAt(i + 1) ), 11);
+        i += 2;
+      }
+
+      if (i < s.length) {
+        buffer.put(getCode(s.charAt(i) ), 6);
+      }
+    };
+
+    var getCode = function(c) {
+
+      if ('0' <= c && c <= '9') {
+        return c.charCodeAt(0) - '0'.charCodeAt(0);
+      } else if ('A' <= c && c <= 'Z') {
+        return c.charCodeAt(0) - 'A'.charCodeAt(0) + 10;
+      } else {
+        switch (c) {
+        case ' ' : return 36;
+        case '$' : return 37;
+        case '%' : return 38;
+        case '*' : return 39;
+        case '+' : return 40;
+        case '-' : return 41;
+        case '.' : return 42;
+        case '/' : return 43;
+        case ':' : return 44;
+        default :
+          throw 'illegal char :' + c;
+        }
+      }
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qr8BitByte
+  //---------------------------------------------------------------------
+
+  var qr8BitByte = function(data) {
+
+    var _mode = QRMode.MODE_8BIT_BYTE;
+    var _data = data;
+    var _bytes = qrcode.stringToBytes(data);
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return _bytes.length;
+    };
+
+    _this.write = function(buffer) {
+      for (var i = 0; i < _bytes.length; i += 1) {
+        buffer.put(_bytes[i], 8);
+      }
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrKanji
+  //---------------------------------------------------------------------
+
+  var qrKanji = function(data) {
+
+    var _mode = QRMode.MODE_KANJI;
+    var _data = data;
+
+    var stringToBytes = qrcode.stringToBytesFuncs['SJIS'];
+    if (!stringToBytes) {
+      throw 'sjis not supported.';
+    }
+    !function(c, code) {
+      // self test for sjis support.
+      var test = stringToBytes(c);
+      if (test.length != 2 || ( (test[0] << 8) | test[1]) != code) {
+        throw 'sjis not supported.';
+      }
+    }('\u53cb', 0x9746);
+
+    var _bytes = stringToBytes(data);
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return ~~(_bytes.length / 2);
+    };
+
+    _this.write = function(buffer) {
+
+      var data = _bytes;
+
+      var i = 0;
+
+      while (i + 1 < data.length) {
+
+        var c = ( (0xff & data[i]) << 8) | (0xff & data[i + 1]);
+
+        if (0x8140 <= c && c <= 0x9FFC) {
+          c -= 0x8140;
+        } else if (0xE040 <= c && c <= 0xEBBF) {
+          c -= 0xC140;
+        } else {
+          throw 'illegal char at ' + (i + 1) + '/' + c;
+        }
+
+        c = ( (c >>> 8) & 0xff) * 0xC0 + (c & 0xff);
+
+        buffer.put(c, 13);
+
+        i += 2;
+      }
+
+      if (i < data.length) {
+        throw 'illegal char at ' + (i + 1);
+      }
+    };
+
+    return _this;
+  };
+
+  //=====================================================================
+  // GIF Support etc.
+  //
+
+  //---------------------------------------------------------------------
+  // byteArrayOutputStream
+  //---------------------------------------------------------------------
+
+  var byteArrayOutputStream = function() {
+
+    var _bytes = [];
+
+    var _this = {};
+
+    _this.writeByte = function(b) {
+      _bytes.push(b & 0xff);
+    };
+
+    _this.writeShort = function(i) {
+      _this.writeByte(i);
+      _this.writeByte(i >>> 8);
+    };
+
+    _this.writeBytes = function(b, off, len) {
+      off = off || 0;
+      len = len || b.length;
+      for (var i = 0; i < len; i += 1) {
+        _this.writeByte(b[i + off]);
+      }
+    };
+
+    _this.writeString = function(s) {
+      for (var i = 0; i < s.length; i += 1) {
+        _this.writeByte(s.charCodeAt(i) );
+      }
+    };
+
+    _this.toByteArray = function() {
+      return _bytes;
+    };
+
+    _this.toString = function() {
+      var s = '';
+      s += '[';
+      for (var i = 0; i < _bytes.length; i += 1) {
+        if (i > 0) {
+          s += ',';
+        }
+        s += _bytes[i];
+      }
+      s += ']';
+      return s;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // base64EncodeOutputStream
+  //---------------------------------------------------------------------
+
+  var base64EncodeOutputStream = function() {
+
+    var _buffer = 0;
+    var _buflen = 0;
+    var _length = 0;
+    var _base64 = '';
+
+    var _this = {};
+
+    var writeEncoded = function(b) {
+      _base64 += String.fromCharCode(encode(b & 0x3f) );
+    };
+
+    var encode = function(n) {
+      if (n < 0) {
+        // error.
+      } else if (n < 26) {
+        return 0x41 + n;
+      } else if (n < 52) {
+        return 0x61 + (n - 26);
+      } else if (n < 62) {
+        return 0x30 + (n - 52);
+      } else if (n == 62) {
+        return 0x2b;
+      } else if (n == 63) {
+        return 0x2f;
+      }
+      throw 'n:' + n;
+    };
+
+    _this.writeByte = function(n) {
+
+      _buffer = (_buffer << 8) | (n & 0xff);
+      _buflen += 8;
+      _length += 1;
+
+      while (_buflen >= 6) {
+        writeEncoded(_buffer >>> (_buflen - 6) );
+        _buflen -= 6;
+      }
+    };
+
+    _this.flush = function() {
+
+      if (_buflen > 0) {
+        writeEncoded(_buffer << (6 - _buflen) );
+        _buffer = 0;
+        _buflen = 0;
+      }
+
+      if (_length % 3 != 0) {
+        // padding
+        var padlen = 3 - _length % 3;
+        for (var i = 0; i < padlen; i += 1) {
+          _base64 += '=';
+        }
+      }
+    };
+
+    _this.toString = function() {
+      return _base64;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // base64DecodeInputStream
+  //---------------------------------------------------------------------
+
+  var base64DecodeInputStream = function(str) {
+
+    var _str = str;
+    var _pos = 0;
+    var _buffer = 0;
+    var _buflen = 0;
+
+    var _this = {};
+
+    _this.read = function() {
+
+      while (_buflen < 8) {
+
+        if (_pos >= _str.length) {
+          if (_buflen == 0) {
+            return -1;
+          }
+          throw 'unexpected end of file./' + _buflen;
+        }
+
+        var c = _str.charAt(_pos);
+        _pos += 1;
+
+        if (c == '=') {
+          _buflen = 0;
+          return -1;
+        } else if (c.match(/^\s$/) ) {
+          // ignore if whitespace.
+          continue;
+        }
+
+        _buffer = (_buffer << 6) | decode(c.charCodeAt(0) );
+        _buflen += 6;
+      }
+
+      var n = (_buffer >>> (_buflen - 8) ) & 0xff;
+      _buflen -= 8;
+      return n;
+    };
+
+    var decode = function(c) {
+      if (0x41 <= c && c <= 0x5a) {
+        return c - 0x41;
+      } else if (0x61 <= c && c <= 0x7a) {
+        return c - 0x61 + 26;
+      } else if (0x30 <= c && c <= 0x39) {
+        return c - 0x30 + 52;
+      } else if (c == 0x2b) {
+        return 62;
+      } else if (c == 0x2f) {
+        return 63;
+      } else {
+        throw 'c:' + c;
+      }
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // gifImage (B/W)
+  //---------------------------------------------------------------------
+
+  var gifImage = function(width, height) {
+
+    var _width = width;
+    var _height = height;
+    var _data = new Array(width * height);
+
+    var _this = {};
+
+    _this.setPixel = function(x, y, pixel) {
+      _data[y * _width + x] = pixel;
+    };
+
+    _this.write = function(out) {
+
+      //---------------------------------
+      // GIF Signature
+
+      out.writeString('GIF87a');
+
+      //---------------------------------
+      // Screen Descriptor
+
+      out.writeShort(_width);
+      out.writeShort(_height);
+
+      out.writeByte(0x80); // 2bit
+      out.writeByte(0);
+      out.writeByte(0);
+
+      //---------------------------------
+      // Global Color Map
+
+      // black
+      out.writeByte(0x00);
+      out.writeByte(0x00);
+      out.writeByte(0x00);
+
+      // white
+      out.writeByte(0xff);
+      out.writeByte(0xff);
+      out.writeByte(0xff);
+
+      //---------------------------------
+      // Image Descriptor
+
+      out.writeString(',');
+      out.writeShort(0);
+      out.writeShort(0);
+      out.writeShort(_width);
+      out.writeShort(_height);
+      out.writeByte(0);
+
+      //---------------------------------
+      // Local Color Map
+
+      //---------------------------------
+      // Raster Data
+
+      var lzwMinCodeSize = 2;
+      var raster = getLZWRaster(lzwMinCodeSize);
+
+      out.writeByte(lzwMinCodeSize);
+
+      var offset = 0;
+
+      while (raster.length - offset > 255) {
+        out.writeByte(255);
+        out.writeBytes(raster, offset, 255);
+        offset += 255;
+      }
+
+      out.writeByte(raster.length - offset);
+      out.writeBytes(raster, offset, raster.length - offset);
+      out.writeByte(0x00);
+
+      //---------------------------------
+      // GIF Terminator
+      out.writeString(';');
+    };
+
+    var bitOutputStream = function(out) {
+
+      var _out = out;
+      var _bitLength = 0;
+      var _bitBuffer = 0;
+
+      var _this = {};
+
+      _this.write = function(data, length) {
+
+        if ( (data >>> length) != 0) {
+          throw 'length over';
+        }
+
+        while (_bitLength + length >= 8) {
+          _out.writeByte(0xff & ( (data << _bitLength) | _bitBuffer) );
+          length -= (8 - _bitLength);
+          data >>>= (8 - _bitLength);
+          _bitBuffer = 0;
+          _bitLength = 0;
+        }
+
+        _bitBuffer = (data << _bitLength) | _bitBuffer;
+        _bitLength = _bitLength + length;
+      };
+
+      _this.flush = function() {
+        if (_bitLength > 0) {
+          _out.writeByte(_bitBuffer);
+        }
+      };
+
+      return _this;
+    };
+
+    var getLZWRaster = function(lzwMinCodeSize) {
+
+      var clearCode = 1 << lzwMinCodeSize;
+      var endCode = (1 << lzwMinCodeSize) + 1;
+      var bitLength = lzwMinCodeSize + 1;
+
+      // Setup LZWTable
+      var table = lzwTable();
+
+      for (var i = 0; i < clearCode; i += 1) {
+        table.add(String.fromCharCode(i) );
+      }
+      table.add(String.fromCharCode(clearCode) );
+      table.add(String.fromCharCode(endCode) );
+
+      var byteOut = byteArrayOutputStream();
+      var bitOut = bitOutputStream(byteOut);
+
+      // clear code
+      bitOut.write(clearCode, bitLength);
+
+      var dataIndex = 0;
+
+      var s = String.fromCharCode(_data[dataIndex]);
+      dataIndex += 1;
+
+      while (dataIndex < _data.length) {
+
+        var c = String.fromCharCode(_data[dataIndex]);
+        dataIndex += 1;
+
+        if (table.contains(s + c) ) {
+
+          s = s + c;
+
+        } else {
+
+          bitOut.write(table.indexOf(s), bitLength);
+
+          if (table.size() < 0xfff) {
+
+            if (table.size() == (1 << bitLength) ) {
+              bitLength += 1;
+            }
+
+            table.add(s + c);
+          }
+
+          s = c;
+        }
+      }
+
+      bitOut.write(table.indexOf(s), bitLength);
+
+      // end code
+      bitOut.write(endCode, bitLength);
+
+      bitOut.flush();
+
+      return byteOut.toByteArray();
+    };
+
+    var lzwTable = function() {
+
+      var _map = {};
+      var _size = 0;
+
+      var _this = {};
+
+      _this.add = function(key) {
+        if (_this.contains(key) ) {
+          throw 'dup key:' + key;
+        }
+        _map[key] = _size;
+        _size += 1;
+      };
+
+      _this.size = function() {
+        return _size;
+      };
+
+      _this.indexOf = function(key) {
+        return _map[key];
+      };
+
+      _this.contains = function(key) {
+        return typeof _map[key] != 'undefined';
+      };
+
+      return _this;
+    };
+
+    return _this;
+  };
+
+  var createDataURL = function(width, height, getPixel) {
+    var gif = gifImage(width, height);
+    for (var y = 0; y < height; y += 1) {
+      for (var x = 0; x < width; x += 1) {
+        gif.setPixel(x, y, getPixel(x, y) );
+      }
+    }
+
+    var b = byteArrayOutputStream();
+    gif.write(b);
+
+    var base64 = base64EncodeOutputStream();
+    var bytes = b.toByteArray();
+    for (var i = 0; i < bytes.length; i += 1) {
+      base64.writeByte(bytes[i]);
+    }
+    base64.flush();
+
+    return 'data:image/gif;base64,' + base64;
+  };
+
+  //---------------------------------------------------------------------
+  // returns qrcode function.
+
+  return qrcode;
+}();
+
+// multibyte support
+!function() {
+
+  qrcode.stringToBytesFuncs['UTF-8'] = function(s) {
+    // http://stackoverflow.com/questions/18729405/how-to-convert-utf8-string-to-byte-array
+    function toUTF8Array(str) {
+      var utf8 = [];
+      for (var i=0; i < str.length; i++) {
+        var charcode = str.charCodeAt(i);
+        if (charcode < 0x80) utf8.push(charcode);
+        else if (charcode < 0x800) {
+          utf8.push(0xc0 | (charcode >> 6),
+              0x80 | (charcode & 0x3f));
+        }
+        else if (charcode < 0xd800 || charcode >= 0xe000) {
+          utf8.push(0xe0 | (charcode >> 12),
+              0x80 | ((charcode>>6) & 0x3f),
+              0x80 | (charcode & 0x3f));
+        }
+        // surrogate pair
+        else {
+          i++;
+          // UTF-16 encodes 0x10000-0x10FFFF by
+          // subtracting 0x10000 and splitting the
+          // 20 bits of 0x0-0xFFFFF into two halves
+          charcode = 0x10000 + (((charcode & 0x3ff)<<10)
+            | (str.charCodeAt(i) & 0x3ff));
+          utf8.push(0xf0 | (charcode >>18),
+              0x80 | ((charcode>>12) & 0x3f),
+              0x80 | ((charcode>>6) & 0x3f),
+              0x80 | (charcode & 0x3f));
+        }
+      }
+      return utf8;
+    }
+    return toUTF8Array(s);
+  };
+
+}();
+
+(function (factory) {
+  if (typeof define === 'function' && define.amd) {
+      define([], factory);
+  } else if (typeof exports === 'object') {
+      module.exports = factory();
+  }
+}(function () {
+    return qrcode;
+}));
+
+</script>
+<script>
+// 离线快照模式:/offline-mobile 生成的单文件快照,离线可浏览阅读
+const OFF = (typeof OFFLINE !== 'undefined') ? OFFLINE : null;
+// 以本地文件方式打开(file://,即「保存本页」后的离线副本):根本没有 HTTP 后端,
+// 不要跑 ping / 心跳轮询,直接引导走远程直连。
+const NOHTTP = (location.protocol === 'file:' || location.protocol === 'data:');
+// ---------- 传输层抽象:http(局域网直连) / wrtc(WebRTC 远程直连) ----------
+// __EMB__:本页被 direct.html 经直连通道内嵌载入(blob iframe)时,
+// API 请求改走 postMessage,由宿主页经同一条 DataChannel 转发。
+const TR = { type: window.__EMB__ ? 'wrtc' : 'http', dc: null, reqId: 0, pending: {}, pc: null };
+function wrpc(method, path, query, body) {
+  if (window.__EMB__) return wrpcEmb(method, path, query, body);
+  return new Promise((resolve, reject) => {
+    if (!TR.dc || TR.dc.readyState !== 'open') { reject(new Error('远程直连未连接')); return; }
+    const id = ++TR.reqId;
+    const msg = { id: id, method: method || 'GET', path: path };
+    if (query) msg.query = query;
+    if (body) { msg.body_b64 = btoa(unescape(encodeURIComponent(JSON.stringify(body)))); msg.content_type = 'application/json'; }
+    TR.pending[id] = { resolve: resolve, reject: reject, t: setTimeout(() => { delete TR.pending[id]; reject(new Error('请求超时')); }, 120000) };
+    try { TR.dc.send(JSON.stringify(msg)); } catch (e) { clearTimeout(TR.pending[id].t); delete TR.pending[id]; reject(e); }
+  });
+}
+// 嵌入模式:请求发宿主页,响应走 message 事件
+function wrpcEmb(method, path, query, body) {
+  return new Promise((resolve, reject) => {
+    const id = ++TR.reqId;
+    const msg = { __emb: 'req', id: id, method: method || 'GET', path: path };
+    if (query) msg.query = query;
+    if (body) { msg.body_b64 = btoa(unescape(encodeURIComponent(JSON.stringify(body)))); msg.content_type = 'application/json'; }
+    TR.pending[id] = { resolve: resolve, reject: reject, t: setTimeout(() => { delete TR.pending[id]; reject(new Error('请求超时')); }, 120000) };
+    try { window.parent.postMessage(msg, '*'); } catch (e) { clearTimeout(TR.pending[id].t); delete TR.pending[id]; reject(e); }
+  });
+}
+window.addEventListener('message', ev => {
+  if (!window.__EMB__ || ev.source !== window.parent) return;
+  const d = ev.data;
+  if (!d || d.__emb !== 'resp') return;
+  const p = TR.pending[d.id];
+  if (!p) return;
+  clearTimeout(p.t); delete TR.pending[d.id];
+  if (d.status >= 400) { p.reject(new Error(d.error || ('HTTP ' + d.status))); return; }
+  if (d.type === 'json') { p.resolve(d.body); return; }
+  p.resolve(d);
+});
+function onDcMessage(ev) {
+  let j;
+  try { j = JSON.parse(ev.data); } catch (e) { return; }
+  const p = TR.pending[j.id];
+  if (!p) return;
+  clearTimeout(p.t); delete TR.pending[j.id];
+  if (j.status >= 400) { p.reject(new Error(j.error || ('HTTP ' + j.status))); return; }
+  if (j.type === 'json') { p.resolve(j.body); return; }
+  p.resolve(j);  // b64 响应(下载等)
+}
+function setupDc(dc) {
+  TR.dc = dc;
+  const goOnline = () => {
+    TR.type = 'wrtc';
+    document.getElementById('stBadge').textContent = '● 直连';
+    hideWrtcPanel();
+    toast('远程直连成功');
+    loadList();
+  };
+  // 注意:ICE 可能已完成,datachannel 到达时 readyState 已是 open,
+  // 此时 onopen 不会再触发,必须检查 readyState
+  if (dc.readyState === 'open') goOnline();
+  else dc.onopen = goOnline;
+  dc.onmessage = onDcMessage;
+  dc.onclose = () => {
+    TR.dc = null;
+    if (TR.type === 'wrtc') {
+      TR.type = 'http';
+      document.getElementById('stBadge').textContent = '● 在线';
+      toast('直连已断开');
+    }
+  };
+}
+function b64ToBytes(b64) {
+  // 连接码是 urlsafe base64(- 和 _);atob 只认标准字符集,需转换并补齐 padding
+  let s = String(b64).replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+async function decompressB64(b64) {
+  if (typeof DecompressionStream === 'undefined') throw new Error('浏览器不支持 zlib 解压');
+  const stream = new Blob([b64ToBytes(b64)]).stream().pipeThrough(new DecompressionStream('deflate'));
+  const buf = await new Response(stream).arrayBuffer();
+  return new TextDecoder().decode(buf);
+}
+async function compressStrToB64(s) {
+  if (typeof CompressionStream === 'undefined') throw new Error('浏览器不支持 zlib 压缩');
+  const stream = new Blob([new TextEncoder().encode(s)]).stream().pipeThrough(new CompressionStream('deflate'));
+  const buf = await new Response(stream).arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(bin);
+}
+
+// 手机会话 ID:电脑端设置页据此显示手机在线状态
+let sid = '';
+try {
+  sid = localStorage.getItem('novelist_sid') || '';
+  if (!sid) {
+    sid = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    localStorage.setItem('novelist_sid', sid);
+  }
+} catch (e) {}
+let files = [], comics = [], curTab = 'book';
+let curFile = null, chs = [], idx = 1, fontSize = 17;
+const packKey = 'novelist_mobile_pack';
+let packSel = { book: [], comic: [] };
+try { packSel = Object.assign(packSel, JSON.parse(localStorage.getItem(packKey) || '{}')); } catch (e) {}
+// 远程直连入口:离线快照模式隐藏(快照用内嵌数据);嵌入模式下连接由宿主页持有
+(function () {
+  const l = document.getElementById('wrtcLink');
+  if (l) l.style.display = (OFF || window.__EMB__) ? 'none' : '';
+  const s = document.getElementById('wrtcSaveBtn');
+  if (s) s.style.display = (OFF || NOHTTP || window.__EMB__) ? 'none' : '';   // 本地副本无需再保存
+  const ab = document.getElementById('wrtcAutoBtn');
+  // 自动直连仅在有 HTTP 通道时可用(同一网络/隧道,信令走当前连接,免扫码)
+  if (ab) ab.style.display = (OFF || NOHTTP || window.__EMB__) ? 'none' : '';
+  if (window.__EMB__) {
+    const bd = document.getElementById('stBadge');
+    if (bd) bd.textContent = '● 直连';
+  }
+  if (NOHTTP) {                                              // 本地副本没有站点图标
+    const lg = document.querySelector('.topbar .logo');
+    if (lg) lg.style.display = 'none';
+  }
+})();
+// 「⚡ 自动直连」:同一网络/隧道场景,信令走当前 HTTP,无需扫码
+async function autoConnectHere() {
+  const st = document.getElementById('wrtcState');
+  document.getElementById('wrtcMask').classList.add('show');
+  if (TR.type === 'wrtc') { st.textContent = '已处于直连状态,无需重复连接'; return; }
+  st.textContent = '正在经当前网络与电脑建立 P2P 直连…';
+  await tryAutoP2p();
+  // tryAutoP2p 成功会走 setupDc(goOnline)自动收尾;失败保持原通道,给一句明确提示
+  setTimeout(() => {
+    if (TR.type !== 'wrtc' && st.textContent.indexOf('正在') === 0) {
+      st.textContent = '自动直连未完成打洞(电脑端需先生成连接码)。当前仍可经网络访问;或改用扫码/粘贴连接码。';
+    }
+  }, 3000);
+}
+
+// ---------------- 远程直连(WebRTC)信令 ----------------
+function openWrtcPanel() {
+  document.getElementById('wrtcMask').classList.add('show');
+  const st = document.getElementById('wrtcState');
+  if (TR.type === 'wrtc') st.textContent = '已处于直连状态,无需重复连接';
+  else st.textContent = '等待粘贴连接码…';
+}
+function hideWrtcPanel() {
+  stopScan();
+  document.getElementById('wrtcMask').classList.remove('show');
+}
+// 页内扫码:手机摄像头直接识别电脑屏幕上的连接码二维码(省去系统相机+复制+粘贴)
+// 注意:摄像头只能在安全上下文(https / localhost / 本地文件)调用,
+// 经 http://局域网IP 打开时浏览器会直接禁止 —— 此时改用「⚡ 自动直连」。
+let scanStream = null, scanTimer = null;
+async function scanOffer() {
+  const area = document.getElementById('wrtcScan');
+  const video = document.getElementById('wrtcScanVideo');
+  if (scanStream) { stopScan(); return; }
+  if (!window.isSecureContext || !navigator.mediaDevices) {
+    toast('浏览器禁止在 http 页面调用摄像头。同一网络请用「⚡ 自动直连」;其他场景用系统相机扫码后粘贴', 4200);
+    return;
+  }
+  if (!('BarcodeDetector' in window)) {
+    toast('当前浏览器不支持页内扫码,请用系统相机扫电脑屏幕后复制粘贴');
+    return;
+  }
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}});
+    video.srcObject = scanStream;
+    area.style.display = '';
+    const det = new BarcodeDetector({formats: ['qr_code']});
+    scanTimer = setInterval(async () => {
+      try {
+        const codes = await det.detect(video);
+        for (const c of codes) {
+          const raw = (c.rawValue || '').trim();
+          if (raw.indexOf('novelist-wrtc://') >= 0) {
+            stopScan();
+            document.getElementById('wrtcOffer').value = raw;
+            toast('已识别,正在连接…');
+            wrtcConnect();
+            return;
+          }
+        }
+      } catch (e) { /* 单帧失败忽略 */ }
+    }, 400);
+  } catch (e) {
+    area.style.display = 'none';
+    toast('无法打开摄像头:' + e.message + ',请用系统相机扫码后复制粘贴');
+  }
+}
+function stopScan() {
+  if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+  if (scanStream) {
+    scanStream.getTracks().forEach(t => t.stop());
+    scanStream = null;
+  }
+  const area = document.getElementById('wrtcScan');
+  if (area) area.style.display = 'none';
+  const video = document.getElementById('wrtcScanVideo');
+  if (video) video.srcObject = null;
+}
+// ---------------- 云端信令:应答码自动回传(MQTT over WebSocket) ----------------
+// 电脑生成连接码后,按「连接码派生主题」在公共 MQTT broker 上守候;
+// 手机扫码生成应答码后直接 publish 到同一主题,电脑即时收到并完成握手。
+// 手机端因此只需要扫一次码;此处为纯 JS 最小 MQTT 3.1.1 客户端(仅需
+// CONNECT/CONNACK/PUBLISH),不依赖任何外部库,离线保存的本页也能用。
+const SIGNAL_BROKERS = [
+  'wss://broker-cn.emqx.io:8084/mqtt',
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt'
+];
+function _mEncStr(s) {
+  const b = new TextEncoder().encode(s);
+  const out = new Uint8Array(b.length + 2);
+  out[0] = b.length >> 8; out[1] = b.length & 255;
+  out.set(b, 2);
+  return out;
+}
+function _mFixed(flags, body) {
+  const rem = [];
+  let n = body.length;
+  do { let d = n % 128; n = Math.floor(n / 128); if (n) d |= 0x80; rem.push(d); } while (n);
+  const out = new Uint8Array(1 + rem.length + body.length);
+  out[0] = flags; out.set(rem, 1); out.set(body, 1 + rem.length);
+  return out;
+}
+function _mConnect(cid) {
+  const vh = _mEncStr('MQTT');
+  const body = new Uint8Array(vh.length + 4);
+  body.set(vh, 0);
+  body[vh.length] = 4;          // protocol level 3.1.1
+  body[vh.length + 1] = 0x02;   // clean session
+  body[vh.length + 2] = 0; body[vh.length + 3] = 60;   // keepalive 60s
+  const payload = _mEncStr(cid);
+  return _mFixed(0x10, _concat(body, payload));
+}
+function _concat(a, b) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0); out.set(b, a.length);
+  return out;
+}
+function _mPublish(topic, text) {
+  const t = _mEncStr(topic);
+  const p = new TextEncoder().encode(text);
+  return _mFixed(0x30, _concat(t, p));   // QoS0
+}
+function wsMqttPublish(url, topic, text, ms) {
+  return new Promise((resolve, reject) => {
+    let ws;
+    try { ws = new WebSocket(url, 'mqtt'); } catch (e) { reject(e); return; }
+    ws.binaryType = 'arraybuffer';
+    const to = setTimeout(() => { try { ws.close(); } catch (e) {} reject(new Error('超时')); }, ms || 8000);
+    ws.onopen = () => { ws.send(_mConnect('nvl-m-' + Math.random().toString(36).slice(2, 10))); };
+    ws.onmessage = ev => {
+      const buf = new Uint8Array(ev.data);
+      if (buf[0] === 0x20) {                       // CONNACK
+        if (buf.length < 4 || buf[3] !== 0) { clearTimeout(to); try { ws.close(); } catch (e) {} reject(new Error('被拒绝')); return; }
+        ws.send(_mPublish(topic, text));
+        // QoS0 无确认:给 broker 半秒转发时间即认为成功
+        setTimeout(() => { clearTimeout(to); try { ws.close(); } catch (e) {} resolve(); }, 500);
+      }
+    };
+    ws.onerror = () => { clearTimeout(to); reject(new Error('连接失败')); };
+  });
+}
+async function signalSendAnswer(offerB64, answerB64, onState) {
+  const topic = 'novelist-wrtc/v1/' + sha256Hex(offerB64).slice(0, 24);
+  const payload = 'novelist-wrtc-answer://v1/' + answerB64;
+  for (const url of SIGNAL_BROKERS) {
+    const host = url.replace(/^wss:\/\//, '').split(':')[0];
+    try {
+      if (onState) onState('正在经云端中转自动回传应答码(' + host + ')…');
+      await wsMqttPublish(url, topic, payload);
+      return { ok: true, broker: host };
+    } catch (e) { /* 换下一个 broker */ }
+  }
+  return { ok: false };
+}
+// 纯 JS SHA-256(连接码里派生主题用):页面常以 http://IP 打开,非安全上下文
+// 没有 crypto.subtle,必须自带实现;输入为 base64 纯 ASCII。
+function sha256Hex(ascii) {
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  let H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  const rr = (v, a) => (v >>> a) | (v << (32 - a));
+  const l = ascii.length;
+  const words = [];
+  for (let i = 0; i < l; i++) words[i >> 2] = (words[i >> 2] || 0) | (ascii.charCodeAt(i) << (24 - (i % 4) * 8));
+  words[l >> 2] = (words[l >> 2] || 0) | (0x80 << (24 - (l % 4) * 8));
+  const nb = Math.ceil((l + 9) / 64);
+  for (let i = words.length; i < nb * 16; i++) words[i] = 0;
+  words[nb * 16 - 1] = l * 8;
+  const w = new Array(64);
+  for (let b = 0; b < nb; b++) {
+    for (let i = 0; i < 16; i++) w[i] = words[b * 16 + i] | 0;
+    for (let i = 16; i < 64; i++) {
+      const s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+    let [a, bb, c, d, e, f, g, h] = H;
+    for (let i = 0; i < 64; i++) {
+      const S1 = rr(e, 6) ^ rr(e, 11) ^ rr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + K[i] + w[i]) | 0;
+      const S0 = rr(a, 2) ^ rr(a, 13) ^ rr(a, 22);
+      const mj = (a & bb) ^ (a & c) ^ (bb & c);
+      const t2 = (S0 + mj) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = bb; bb = a; a = (t1 + t2) | 0;
+    }
+    H = [(H[0] + a) | 0, (H[1] + bb) | 0, (H[2] + c) | 0, (H[3] + d) | 0,
+         (H[4] + e) | 0, (H[5] + f) | 0, (H[6] + g) | 0, (H[7] + h) | 0];
+  }
+  return H.map(x => ('00000000' + ((x >>> 0).toString(16))).slice(-8)).join('');
+}
+// 连接码 # 段:电脑下发的 ICE 提示(STUN/TURN),老连接码无 # 段返回 null
+function parseOfferHints(offerText) {
+  try {
+    const i = offerText.indexOf('#');
+    if (i < 0) return null;
+    const hb = offerText.slice(i + 1).trim();
+    if (!hb) return null;
+    const bin = atob(hb.replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(decodeURIComponent(escape(bin)));
+  } catch (e) { return null; }
+}
+// 等待 ICE 候选收集完成。
+// 本方案没有 trickle 信令通道(只靠一张二维码传一次 SDP),所以 answer 里
+// 必须自带全部候选地址;否则电脑端拿到的是「零候选」的应答码,永远连不通。
+function waitIceGathering(pc, ms) {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise(res => {
+    let done = false;
+    const fin = () => {
+      if (done) return;
+      done = true;
+      pc.removeEventListener('icegatheringstatechange', onChange);
+      clearTimeout(timer);
+      res();
+    };
+    const onChange = () => { if (pc.iceGatheringState === 'complete') fin(); };
+    pc.addEventListener('icegatheringstatechange', onChange);
+    const timer = setTimeout(fin, ms || 8000);
+  });
+}
+async function wrtcConnect() {
+  const offerText = (document.getElementById('wrtcOffer').value || '').trim();
+  const st = document.getElementById('wrtcState');
+  if (!offerText) { st.textContent = '请先粘贴电脑屏幕上的连接码'; return; }
+  const m = offerText.match(/novelist-wrtc:\/\/v1\/([\w-]+)/);
+  const b64 = m ? m[1] : '';
+  if (!b64) { st.textContent = '连接码格式不正确,请完整复制'; return; }
+  const goBtn = document.getElementById('wrtcGoBtn');
+  goBtn.disabled = true;
+  goBtn.textContent = '连接中…';
+  st.textContent = '正在与电脑建立直连(打洞中,最多等 20 秒)…';
+  try {
+    let sdp;
+    try {
+      sdp = await decompressB64(b64);
+    } catch (e) {
+      st.textContent = '连接码解码失败,请用较新版本浏览器(Chrome/Edge/iOS 16.4+)';
+      return;
+    }
+    if (!sdp || sdp.indexOf('v=') !== 0) { st.textContent = '连接码无效(解码后不是 SDP)'; return; }
+    // 重复点「连接」会泄漏上一个 RTCPeerConnection(仍在收集候选、占着端口)
+    if (TR.pc) { try { TR.pc.close(); } catch (e) {} TR.pc = null; TR.dc = null; }
+    // ICE 服务器:优先用电脑随连接码下发的提示(含 TURN 兜底),否则用默认
+    const hints = parseOfferHints(offerText);
+    const ice = [{urls: (hints && hints.stun && hints.stun.length) ? hints.stun
+      : ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.miwifi.com:3478']}];
+    if (hints && hints.turn && hints.turn.urls && hints.turn.urls.length) {
+      ice.push({urls: hints.turn.urls, username: hints.turn.user || '', credential: hints.turn.pass || ''});
+    }
+    const pc = new RTCPeerConnection({iceServers: ice});
+    TR.pc = pc;
+    pc.ondatachannel = ev => setupDc(ev.channel);
+    pc.oniceconnectionstatechange = () => {
+      const s = pc.iceConnectionState;
+      if (s === 'failed') {
+        if (TR.type !== 'wrtc') st.textContent = '直连失败:NAT 打洞未成功。请改用热点或公网穿透方式。';
+      } else if (s === 'connected') {
+        st.textContent = '连接建立中…';
+      }
+    };
+    await pc.setRemoteDescription({type: 'offer', sdp: sdp});
+    const ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    st.textContent = '正在收集网络候选地址(最多 8 秒)…';
+    await waitIceGathering(pc, 8000);
+    const answerB64 = await compressStrToB64(pc.localDescription.sdp);
+    showAnswer(answerB64);
+    // 云端自动回传:电脑端正按连接码派生的主题守候,发布即达 —— 手机只扫一次码
+    const r = await signalSendAnswer(b64, answerB64, msg => { st.textContent = msg; });
+    if (r.ok) {
+      st.textContent = '✅ 应答码已通过云端中转自动发送给电脑,无需其他操作,等待直连建立…';
+    } else {
+      st.textContent = '云端自动回传不可用(公共中继连不上)。请让电脑端点「摄像头扫码」对准下方二维码,或点「复制应答码」发给电脑粘贴。';
+    }
+  } catch (e) {
+    st.textContent = '连接失败: ' + e.message + '(可改用热点或公网穿透)';
+  } finally {
+    goBtn.disabled = false;
+    goBtn.textContent = '连接';
+  }
+}
+function showAnswer(answerB64) {
+  const box = document.getElementById('wrtcAnswer');
+  box.style.display = '';
+  const full = 'novelist-wrtc://v1/' + answerB64;
+  document.getElementById('wrtcAnswerText').textContent = full;
+  const qrEl = document.getElementById('wrtcAnswerQr');
+  try {
+    // 屏幕扫码不需要高纠错:用 L 换取更低版本(模块更少 = 每个模块更大),
+    // 电脑摄像头才认得出来。典型 111 模块 vs 123 模块(M 级)。
+    const qr = qrcode(0, 'L');
+    qr.addData(full);
+    qr.make();
+    // 关键:按容器宽度铺满显示。之前固定 200px → 仅 1.6 px/模块,
+    // 电脑摄像头基本扫不出来。
+    qrEl.innerHTML = '<img src="' + qr.createDataURL(4, 4) + '" alt="应答二维码" style="display:block; margin:0 auto; width:100%; max-width:340px; height:auto; image-rendering:pixelated; background:#fff; border-radius:10px">'
+      + '<div style="font-size:11px;color:var(--muted);text-align:center;margin-top:6px">把屏幕亮度调高,离电脑摄像头 20–30cm</div>';
+  } catch (e) {
+    qrEl.innerHTML = '<div style="font-size:12px;color:var(--danger)">二维码生成失败,请点「复制应答码」把文本发给电脑端</div>';
+  }
+}
+function copyAnswer() {
+  const txt = document.getElementById('wrtcAnswerText').textContent;
+  const done = () => toast('应答码已复制');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done).catch(() => fallbackCopy(txt, done));
+  } else { fallbackCopy(txt, done); }
+}
+function fallbackCopy(txt, done) {
+  const ta = document.createElement('textarea');
+  ta.value = txt;
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败,请长按文本手动复制'); }
+  ta.remove();
+}
+function saveWrtcPage() {
+  // 在线模式下保存本页副本:以后任何网络(含流量)打开本地文件即可发起直连
+  const a = document.createElement('a');
+  a.href = location.href.split('#')[0];
+  a.download = '漫画+小说-远程直连.html';
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('已开始保存本页<br>之后断网也能打开此文件发起直连');
+}
+
+async function loadList() {
+  const box = document.getElementById('list');
+  if (OFF) {  // 离线快照:用内嵌数据,不依赖电脑
+    files = OFF.files || [];
+    comics = OFF.comics || [];
+    applyOffTheme();
+    showOfflineBanner();
+    renderAll();
+    return;
+  }
+  try {
+    const [fj, cj] = await Promise.all([
+      api('/api/files').catch(() => ({files: []})),
+      api('/api/comic_files').catch(() => ({items: []}))
+    ]);
+    files = fj.files || [];
+    comics = cj.items || [];
+    renderAll();
+    showGuideOnce();
+  } catch (e) { box.innerHTML = '<div class="empty">无法连接电脑<br>请确认电脑已开机、程序已运行,且手机与电脑在同一网络<br><span style="font-size:12px">(电脑端设置 → 手机 → 二维码扫码打开)</span><br><br><span style="font-size:12px; color:var(--primary)">校园网连不上?点右上角「📶 远程直连」,用 WebRTC 或电脑热点连接</span></div>'; }
+}
+// 手机会话登记 + 心跳(每 60s):电脑端设置页显示本机在线
+if (!OFF && !NOHTTP) {
+  api('/api/sync_status?sid=' + sid + '&hello=1').catch(() => {});
+  setInterval(() => api('/api/sync_status?sid=' + sid + '&hello=1').catch(() => {}), 60000);
+}
+// 电脑离线检测:每 4s ping,连续 2 次失败 → 全屏遮罩禁用交互;恢复后自动解除
+let offlineFails = 0, offlineShown = false;
+function pingOnce() {
+  if (TR.type === 'wrtc') {
+    return wrpc('GET', '/api/ping').then(() => true).catch(() => false);
+  }
+  return new Promise(res => {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 3000);
+    fetch('/api/ping', {signal: ctl.signal}).then(r => { clearTimeout(t); res(r.ok); }).catch(() => { clearTimeout(t); res(false); });
+  });
+}
+function showOfflineMask() {
+  // 正在用远程直连时不要盖遮罩:DataChannel 建立前的几秒 ping 必然失败,
+  // 否则会把用户刚打开的远程直连面板直接糊住(见 #wrtcMask z-index 说明)。
+  if (document.getElementById('wrtcMask').classList.contains('show')) return;
+  if (offlineShown) return;
+  offlineShown = true;
+  document.getElementById('offlineMask').classList.add('show');
+  document.body.style.overflow = 'hidden';
+}
+function hideOfflineMask() {
+  if (!offlineShown) return;
+  offlineShown = false;
+  offlineFails = 0;
+  document.getElementById('offlineMask').classList.remove('show');
+  document.body.style.overflow = '';
+}
+// 离线遮罩上的「远程直连」入口:临时撤掉遮罩,让用户能扫码建连
+function openRemoteFromOffline() {
+  hideOfflineMask();
+  openWrtcPanel();
+}
+async function retryConnect() {
+  const ok = await pingOnce();
+  if (ok) {
+    hideOfflineMask(); offlineFails = 0;
+    toast('已重新连接');
+    loadList();
+  } else {
+    toast('仍然无法连接电脑,请稍后再试');
+  }
+}
+if (!OFF && !NOHTTP) {
+  setInterval(async () => {
+    const ok = await pingOnce();
+    if (ok) {
+      offlineFails = 0;
+      if (offlineShown) hideOfflineMask();
+    } else if (++offlineFails >= 2) {
+      showOfflineMask();
+    }
+  }, 4000);
+}
+// 离线视觉:顶栏深蓝 + 状态徽章「离线」
+function applyOffTheme() {
+  const tb = document.getElementById('topbar');
+  if (tb) tb.classList.add('off');
+  const b = document.getElementById('stBadge');
+  if (b) { b.className = 'badge off'; b.textContent = '● 离线'; }
+  const r = document.getElementById('refreshLink');
+  if (r) r.style.display = 'none';
+  document.title = '漫画+小说 · 离线';
+}
+function showOfflineBanner() {
+  const el = document.getElementById('offBanner');
+  if (!el) return;
+  const n = Object.keys(OFF.books || {}).length;
+  const mc = (OFF.comics || []).length;
+  el.style.display = 'block';
+  el.innerHTML = '<b>📦 离线模式</b> · 生成于 ' + esc(OFF.gen_time || '')
+    + ' · 本包含 ' + esc(String(n)) + ' 本小说、' + esc(String(mc)) + ' 部漫画<br><span style="opacity:.85">电脑关机 / 断网也可正常浏览阅读包内内容;需要新内容请在电脑开启时回到在线页重新打包。</span>';
+}
+function showTab(t) {
+  curTab = t;
+  document.getElementById('tabBook').className = t === 'book' ? 'on' : '';
+  document.getElementById('tabComic').className = t === 'comic' ? 'on' : '';
+  renderAll();
+}
+function renderAll() {
+  const box = document.getElementById('list');
+  if (curTab === 'comic') { renderComics(); return; }
+  renderBooks();
+}
+function renderBooks() {
+  const box = document.getElementById('list');
+  const list = OFF
+    ? files.filter(f => { const b = OFF.books[f.name]; return b && (b.chapters || []).length; })
+    : files;
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">' + (OFF ? '本包未包含小说<br><span style="font-size:12px">在线页「📦 打包快照」勾选小说即可打包</span>' : '暂无小说<br><span style="font-size:12px">先在电脑端下载,再回到本页预览 / 下载 / 打包</span>') + '</div>';
+    return;
+  }
+  box.innerHTML = '<div class="sec-hd"><span class="t">📖 小说</span><span class="n">' + list.length + ' 本</span><span class="sp"></span>'
+    + (OFF ? '' : '<span class="act" onclick="openPackPanel()">📦 打包快照</span>') + '</div>';
+  list.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'book';
+    let btns = '<button class="fbtn sm" onclick="openBook(\'' + jss(f.name) + '\')">阅读</button>';
+    if (!OFF) btns = '<button class="fbtn ghost sm" onclick="dlBook(\'' + jss(f.name) + '\')">下载</button>' + btns;
+    row.innerHTML =
+      '<div class="cov">' + esc(coverChar(f.name)) + '</div>'
+      + '<div class="info"><div class="name">' + esc(f.name) + '</div>'
+      + '<div class="meta"><span>' + fmtSize(f.size) + '</span>' + (OFF ? '<span style="color:var(--success)">✓ 已打包</span>' : '') + '</div></div>'
+      + '<div class="rowbtns">' + btns + '</div>';
+    box.appendChild(row);
+  });
+}
+function renderComics() {
+  const box = document.getElementById('list');
+  if (OFF) { renderComicsOff(); return; }
+  if (!comics.length) { box.innerHTML = '<div class="empty">暂无已下载漫画<br><span style="font-size:12px">在电脑端下载漫画后,这里出现整本 ZIP 下载与话列表预览</span></div>'; return; }
+  box.innerHTML = '<div class="sec-hd"><span class="t">🎨 已下载漫画</span><span class="n">' + comics.length + ' 部</span><span class="sp"></span>'
+    + '<span class="act" onclick="openPackPanel()">📦 打包快照</span></div>';
+  comics.forEach(c => {
+    const row = document.createElement('div');
+    row.className = 'book';
+    row.innerHTML =
+      '<div class="cov"><img src="' + esc(c.cover_url || '') + '" onerror="this.parentNode.textContent=coverChar(\'' + jss(c.title) + '\')" alt=""></div>'
+      + '<div class="info"><div class="name">' + esc(c.title) + '</div>'
+      + '<div class="meta"><span>' + c.files + ' 话</span><span>' + fmtSize(c.size) + '</span></div></div>'
+      + '<div class="rowbtns">'
+      + '<button class="fbtn sm" onclick="comicZip(\'' + jss(c.title) + '\')">⬇ ZIP</button>'
+      + '<button class="fbtn gray sm" onclick="toggleChaps(\'' + jss(c.title) + '\')">话列表</button>'
+      + '</div>';
+    box.appendChild(row);
+    const chaps = document.createElement('div');
+    chaps.className = 'chaps';
+    chaps.style.display = 'none';
+    chaps.id = 'chaps-' + cssid(c.title);
+    chaps.innerHTML = (c.pdfs || []).map(p =>
+      '<div class="ch"><span class="nm">' + esc(p.replace(/\.pdf$/i, '')) + '</span>'
+      + (TR.type === 'wrtc' ? '' : '<a href="/downloads/comic/' + enc(c.title) + '/' + enc(p) + '">预览</a>')
+      + '<a href="javascript:void(0)" onclick="dlComicPdf(\'' + jss(c.title) + '\',\'' + jss(p) + '\')">下载</a></div>'
+    ).join('') || '<div class="ch"><span class="nm">无 PDF</span></div>';
+    box.appendChild(chaps);
+  });
+}
+// 离线快照漫画:内嵌 base64 PDF,可下载 / 打开
+function renderComicsOff() {
+  const box = document.getElementById('list');
+  if (!comics.length) { box.innerHTML = '<div class="empty">本包未包含漫画<br><span style="font-size:12px">在线页「📦 打包快照」勾选漫画即可打包</span></div>'; return; }
+  box.innerHTML = '<div class="sec-hd"><span class="t">🎨 包内漫画</span><span class="n">' + comics.length + ' 部</span><span class="sp"></span></div>';
+  comics.forEach(c => {
+    const row = document.createElement('div');
+    row.className = 'book';
+    row.innerHTML =
+      '<div class="cov">' + esc(coverChar(c.title)) + '</div>'
+      + '<div class="info"><div class="name">' + esc(c.title) + '</div>'
+      + '<div class="meta"><span>' + c.files.length + ' 话</span><span style="color:var(--success)">✓ 已打包</span></div></div>'
+      + '<button class="fbtn gray sm" onclick="toggleChaps(\'' + jss(c.title) + '\')">话列表</button>';
+    box.appendChild(row);
+    const chaps = document.createElement('div');
+    chaps.className = 'chaps';
+    chaps.style.display = 'none';
+    chaps.id = 'chaps-' + cssid(c.title);
+    chaps.innerHTML = (c.files || []).map(f =>
+      '<div class="ch"><span class="nm">' + esc(f.name.replace(/\.pdf$/i, '')) + '</span>'
+      + '<span class="st" style="font-size:11px;color:var(--muted);flex-shrink:0">' + fmtSize(f.size) + '</span>'
+      + '<a href="javascript:void(0)" onclick="openOffPdf(\'' + jss(c.title) + '\',\'' + jss(f.name) + '\')">打开</a>'
+      + '<a href="javascript:void(0)" onclick="dlOffPdf(\'' + jss(c.title) + '\',\'' + jss(f.name) + '\')">下载</a></div>'
+    ).join('') || '<div class="ch"><span class="nm">无 PDF</span></div>';
+    box.appendChild(chaps);
+  });
+}
+function offPdfB64(title, name) {
+  const c = (OFF.comics || []).find(x => x.title === title);
+  if (!c) return '';
+  const f = (c.files || []).find(x => x.name === name);
+  return f ? f.b64 : '';
+}
+function dlOffPdf(title, name) {
+  const b64 = offPdfB64(title, name);
+  if (!b64) { toast('未找到该话内容'); return; }
+  const a = document.createElement('a');
+  a.href = 'data:application/pdf;base64,' + b64;
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('已开始保存:' + name + '(保存到系统下载目录)');
+}
+function openOffPdf(title, name) {
+  const b64 = offPdfB64(title, name);
+  if (!b64) { toast('未找到该话内容'); return; }
+  window.open('data:application/pdf;base64,' + b64, '_blank');
+}
+function toggleChaps(title) {
+  const el = document.getElementById('chaps-' + cssid(title));
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function comicZip(title) {
+  if (TR.type === 'wrtc') {
+    wrpc('GET', '/api/comic_pack', 'title=' + encodeURIComponent(title) + '&sid=' + sid).then(j => {
+      saveBlobFromWrtc(j, title + '.zip');
+    }).catch(e => toast('下载失败: ' + e.message));
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = '/api/comic_pack?title=' + encodeURIComponent(title) + '&sid=' + sid;
+  a.download = title + '.zip';
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('开始下载:' + title + '.zip(保存到系统下载目录)');
+}
+function dlComicPdf(title, name) {
+  if (TR.type === 'wrtc') {
+    wrpc('GET', '/downloads/comic/' + encodeURIComponent(title) + '/' + encodeURIComponent(name), 'dl=1&sid=' + sid).then(j => {
+      saveBlobFromWrtc(j, name);
+    }).catch(e => toast('下载失败: ' + e.message));
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = '/downloads/comic/' + encodeURIComponent(title) + '/' + encodeURIComponent(name) + '?dl=1&sid=' + sid;
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('开始下载:' + name);
+}
+function dlBook(name) {
+  if (TR.type === 'wrtc') {
+    wrpc('GET', '/downloads/' + encodeURIComponent(name), 'dl=1&sid=' + sid).then(j => {
+      saveBlobFromWrtc(j, name);
+    }).catch(e => toast('下载失败: ' + e.message));
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = '/downloads/' + encodeURIComponent(name) + '?dl=1&sid=' + sid;
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('开始下载:' + name + '<br>保存位置:安卓 Download/ · iOS 文件App→下载');
+}
+// WebRTC 下载:base64 响应 → Blob 保存
+function saveBlobFromWrtc(j, name) {
+  if (!j || j.type !== 'b64') { toast('下载失败(响应格式异常)'); return; }
+  try {
+    const bin = atob(j.body_b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], {type: j.content_type || 'application/octet-stream'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = j.filename || name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    toast('已开始保存:' + name);
+  } catch (e) { toast('下载失败: ' + e.message); }
+}
+
+// ---------------- 打包快照(勾选 → 直接下载离线网页) ----------------
+function openPackPanel() {
+  if (OFF) { toast('离线模式无需打包,包内即为已打包内容'); return; }
+  pFmt(packFmt);
+  pTab('book');
+  document.getElementById('packMask').classList.add('show');
+}
+function closePackPanel() { document.getElementById('packMask').classList.remove('show'); }
+function pTab(t) {
+  document.getElementById('pTabBook').className = t === 'book' ? 'on' : '';
+  document.getElementById('pTabComic').className = t === 'comic' ? 'on' : '';
+  renderPackList(t);
+}
+function renderPackList(t) {
+  const el = document.getElementById('packList');
+  const items = t === 'book'
+    ? files.map(f => ({ nm: f.name, sub: fmtSize(f.size), raw: f.size }))
+    : comics.map(c => ({ nm: c.title + '.zip', sub: c.files + ' 话 · ' + fmtSize(c.size), raw: c.size }));
+  if (!items.length) { el.innerHTML = '<div class="empty" style="padding:24px 0">' + (t === 'book' ? '暂无小说' : '暂无漫画') + '</div>'; updatePackSize(); return; }
+  el.innerHTML = items.map(it => {
+    const checked = packSel[t].includes(it.nm) ? ' checked' : '';
+    return '<div class="p-item">'
+      + '<input type="checkbox" data-k="' + t + '" data-n="' + jss(it.nm) + '"' + checked + ' onchange="pChk(this)">'
+      + '<span class="nm">' + esc(it.nm.replace(/\.zip$/i, '')) + '</span>'
+      + '<span class="sub">' + esc(it.sub) + '</span></div>';
+  }).join('');
+  updatePackSize();
+}
+function pChk(cb) {
+  const t = cb.dataset.k, nm = cb.dataset.n;
+  const arr = packSel[t];
+  const i = arr.indexOf(nm);
+  if (cb.checked) { if (i < 0) arr.push(nm); } else if (i >= 0) arr.splice(i, 1);
+  try { localStorage.setItem(packKey, JSON.stringify(packSel)); } catch (e) {}
+  updatePackSize();
+}
+function togglePackAll() {
+  const t = document.getElementById('pTabBook').className ? 'book' : 'comic';
+  const items = t === 'book' ? files.map(f => f.name) : comics.map(c => c.title + '.zip');
+  const allOn = items.length && items.every(n => packSel[t].includes(n));
+  packSel[t] = allOn ? [] : items.slice();
+  try { localStorage.setItem(packKey, JSON.stringify(packSel)); } catch (e) {}
+  renderPackList(t);
+}
+// 打包格式:zip(按需加载,推荐)/ html(单文件,整体加载)
+let packFmt = 'zip';
+function pFmt(f) {
+  packFmt = f;
+  document.getElementById('pfmtZip').className = 'pfmt' + (f === 'zip' ? ' on' : '');
+  document.getElementById('pfmtHtml').className = 'pfmt' + (f === 'html' ? ' on' : '');
+  updatePackSize();
+}
+function updatePackSize() {
+  const el = document.getElementById('packSize');
+  let est = 0;
+  if (packFmt === 'zip') {
+    packSel.book.forEach(n => { const f = files.find(x => x.name === n); if (f) est += f.size * 1.05; });
+    packSel.comic.forEach(n => { const c = comics.find(x => x.title + '.zip' === n); if (c) est += c.size; });
+  } else {
+    packSel.book.forEach(n => { const f = files.find(x => x.name === n); if (f) est += f.size * 1.37; });
+    packSel.comic.forEach(n => { const c = comics.find(x => x.title + '.zip' === n); if (c) est += c.size * 1.37; });
+  }
+  const n = packSel.book.length + packSel.comic.length;
+  el.textContent = n
+    ? ('已选 ' + n + ' 项 · 打包后约 ' + fmtSize(Math.round(est)) + ' · ' + (packFmt === 'zip' ? 'ZIP(解压后使用)' : 'HTML(单文件)'))
+    : '请勾选要打包的小说 / 漫画';
+}
+let packJobId = null, packPollTimer = null;
+function genSnapshot() {
+  if (OFF) return;
+  const b = packSel.book, cm = packSel.comic;
+  if (!b.length && !cm.length) { toast('请先勾选要打包的小说或漫画'); return; }
+  if (packFmt === 'html') {
+    const q = [];
+    if (b.length) q.push('favs=' + encodeURIComponent(b.join(',')));
+    if (cm.length) q.push('comics=' + encodeURIComponent(cm.join(',').replace(/\.zip$/gi, '')));
+    q.push('dl=1');
+    const a = document.createElement('a');
+    a.href = '/offline-mobile?' + q.join('&');
+    a.download = '漫画+小说-离线版.html';
+    document.body.appendChild(a); a.click(); a.remove();
+    toast('已开始打包下载,请稍候…(打包完成后自动保存)');
+    return;
+  }
+  // ZIP:两阶段打包,显示实时进度
+  const btn = document.getElementById('packGoBtn');
+  btn.disabled = true; btn.textContent = '⏳ 打包中…';
+  document.getElementById('packProg').style.display = 'block';
+  document.getElementById('packProgText').textContent = '正在准备…';
+  document.getElementById('packProgBar').style.width = '0%';
+  const withFiles = document.getElementById('pWithFiles').checked;
+  const payload = {
+    favs: b,
+    comics: cm.map(n => n.replace(/\.zip$/gi, '')),
+    with_files: withFiles,
+    sid: sid
+  };
+  fetch('/api/snapshot_start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(j => {
+    if (j.error) { packFail(j.error); return; }
+    packJobId = j.job_id;
+    packPollTimer = setInterval(pollPack, 700);
+  }).catch(e => packFail(e.message));
+}
+function pollPack() {
+  if (!packJobId) return;
+  api('/api/snapshot_status?job=' + packJobId).then(j => {
+    const p = j.progress || 0;
+    document.getElementById('packProgBar').style.width = p + '%';
+    document.getElementById('packProgText').textContent = j.status === 'ready'
+      ? '打包完成,开始下载…' : (j.status === 'error' ? '打包失败:' + (j.error || '') : '正在打包… ' + p + '%');
+    if (j.status === 'ready') {
+      clearInterval(packPollTimer);
+      const a = document.createElement('a');
+      a.href = '/api/snapshot_download?job=' + packJobId;
+      a.download = '漫画+小说-离线版.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      packJobId = null;
+      packDone();
+    } else if (j.status === 'error' || j.status === 'not_found') {
+      clearInterval(packPollTimer);
+      packJobId = null;
+      packFail(j.error || '打包失败');
+    }
+  }).catch(() => {});
+}
+function packDone() {
+  document.getElementById('packGoBtn').disabled = false;
+  document.getElementById('packGoBtn').textContent = '📦 打包下载';
+  toast('打包完成,已开始下载<br>保存后解压(ZIP)→ 打开 index.html 即可离线阅读');
+  setTimeout(() => {
+    document.getElementById('packProg').style.display = 'none';
+    closePackPanel();
+  }, 800);
+}
+function packFail(msg) {
+  clearInterval(packPollTimer);
+  packJobId = null;
+  document.getElementById('packGoBtn').disabled = false;
+  document.getElementById('packGoBtn').textContent = '📦 打包下载';
+  document.getElementById('packProgText').textContent = '打包失败:' + msg;
+  setTimeout(() => { document.getElementById('packProg').style.display = 'none'; }, 4000);
+}
+
+// ---------------- 阅读器(在线远程预览 / 离线本地阅读) ----------------
+async function openBook(name) {
+  curFile = name;
+  document.getElementById('reader').classList.add('show');
+  document.getElementById('rTitle').textContent = name;
+  document.getElementById('rBody').innerHTML = '<p style="text-align:center;color:var(--muted);text-indent:0">加载中…</p>';
+  if (OFF) {
+    const bk = (OFF.books || {})[name];
+    if (!bk || !(bk.chapters || []).length) {
+      document.getElementById('rBody').innerHTML = '<p style="text-align:center;color:var(--muted);text-indent:0">这本书未包含在本包中<br>请在电脑开启时于在线页重新打包</p>';
+      return;
+    }
+    chs = bk.chapters;
+    idx = 1;
+    loadCh(1);
+    return;
+  }
+  try {
+    const isEpub = name.toLowerCase().endsWith('.epub');
+    const m = await api((isEpub ? '/api/epub_meta?file=' : '/api/read_meta?file=') + encodeURIComponent(name));
+    chs = m.chapters || [];
+    if (!chs.length) { document.getElementById('rBody').innerHTML = '<p style="text-align:center;color:var(--muted);text-indent:0">无法读取章节</p>'; return; }
+    idx = 1;
+    loadCh(1);
+  } catch (e) { document.getElementById('rBody').innerHTML = '<p style="text-align:center;color:var(--muted);text-indent:0">打开失败:' + e.message + '</p>'; }
+}
+async function loadCh(i) {
+  idx = Math.min(Math.max(1, i), chs.length);
+  const body = document.getElementById('rBody');
+  if (OFF) {
+    const ch = chs[idx - 1];
+    if (!ch) { body.innerHTML = '<p style="text-align:center;color:var(--muted);text-indent:0">章节不存在</p>'; return; }
+    body.scrollTop = 0;
+    document.getElementById('rTitle').textContent = ch.title || ('第' + idx + '章');
+    body.innerHTML = '<h2>' + esc(ch.title || '') + '</h2>' + (ch.html || (ch.text || '').split(/\n+/).map(p => '<p>' + esc(p) + '</p>').join(''));
+    saveProgress();
+    return;
+  }
+  try {
+    const isEpub = curFile.toLowerCase().endsWith('.epub');
+    const ch = await api((isEpub ? '/api/epub_read?file=' : '/api/read?file=') + encodeURIComponent(curFile) + '&ch=' + idx);
+    body.scrollTop = 0;
+    document.getElementById('rTitle').textContent = ch.title || ('第' + idx + '章');
+    body.innerHTML = '<h2>' + esc(ch.title || '') + '</h2>' + (isEpub && ch.html ? ch.html : (ch.text || '').split(/\n+/).map(p => '<p>' + esc(p) + '</p>').join(''));
+    saveProgress();
+  } catch (e) { body.innerHTML = '<p style="text-align:center;color:var(--muted);text-indent:0">读取失败</p>'; }
+}
+function prevCh() { loadCh(idx - 1); }
+function nextCh() { loadCh(idx + 1); }
+function fontAdj(d) {
+  fontSize = Math.min(26, Math.max(14, fontSize + d));
+  document.getElementById('rBody').style.fontSize = fontSize + 'px';
+}
+function showToc() {
+  const box = document.getElementById('toc');
+  box.innerHTML = '<div class="th">目录 · ' + chs.length + ' 章</div>' + chs.map((c, i) =>
+    '<div class="item' + (i + 1 === idx ? ' cur' : '') + '" onclick="hideToc();loadCh(' + (i + 1) + ')">' + esc(c.title || ('第' + (i + 1) + '章')) + '</div>').join('');
+  document.getElementById('tocMask').classList.add('show');
+}
+function hideToc() { document.getElementById('tocMask').classList.remove('show'); }
+function closeReader() { document.getElementById('reader').classList.remove('show'); curFile = null; }
+function saveProgress() { try { localStorage.setItem('novelist_mobile_pos', JSON.stringify({file: curFile, idx: idx})); } catch (e) {} }
+
+// ---------------- 使用引导(在线首次打开) ----------------
+function showGuideOnce() {
+  try {
+    if (sessionStorage.getItem('novelist_mobile_guide')) return;
+    sessionStorage.setItem('novelist_mobile_guide', '1');
+  } catch (e) {}
+  document.getElementById('guideMask').classList.add('show');
+}
+function closeGuide() { document.getElementById('guideMask').classList.remove('show'); }
+
+// 工具
+function api(path) {
+  if (TR.type === 'wrtc') {
+    const q = path.indexOf('?');
+    const p = q >= 0 ? path.slice(0, q) : path;
+    const query = q >= 0 ? path.slice(q + 1) : '';
+    return wrpc('GET', p, query).then(j => {
+      if (j && j.type === 'json') return j.body;
+      throw new Error('非 JSON 响应');
+    });
+  }
+  return fetch(path).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function jss(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+function cssid(s) { return String(s == null ? '' : s).replace(/[^\w\u4e00-\u9fa5]/g, '_'); }
+function enc(s) { return encodeURIComponent(s); }
+function fmtSize(n) { n = n || 0; if (n > 1048576) return (n/1048576).toFixed(1)+'MB'; if (n > 1024) return (n/1024).toFixed(0)+'KB'; return n+'B'; }
+function coverChar(name) { const s = (name || '书').replace(/\.(txt|epub)$/i, ''); return s.slice(-2, -1) || s.slice(0, 1) || '书'; }
+let toastTimer = null;
+function toast(msg) { const el = document.getElementById('toast'); el.innerHTML = msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2600); }
+
+// 方向键
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') prevCh();
+  if (e.key === 'ArrowRight') nextCh();
+});
+// 以本地文件方式打开(「保存本页」的离线副本):没有 HTTP 后端,
+// 直接弹出远程直连面板,而不是先刷一个「加载中」再报连接失败。
+if (NOHTTP && !OFF) {
+  setTimeout(() => {
+    const l = document.getElementById('list');
+    if (l) l.innerHTML = '<div class="empty">这是「远程直连」专用副本<br>用电脑端生成的连接码即可连回电脑</div>';
+    openWrtcPanel();
+  }, 200);
+} else {
+  loadList();
+}
+
+// ---------- 经临时隧道打开时自动 P2P 升级 ----------
+// 信令走当前 HTTP 通道(隧道/局域网都行),数据面由 ICE 尝试点对点直连;
+// 打洞失败自动保持当前通道 —— 功能永远可用,直连只是提速。
+async function tryAutoP2p() {
+  if (TR.type === 'wrtc' || OFF || NOHTTP || window.__EMB__) return;
+  try {
+    const offer = await api('/api/webrtc/offer', {silent: true});
+    if (!offer.ok) return;
+    const m = (offer.offer || '').match(/novelist-wrtc:\/\/v1\/([\w-]+)/);
+    if (!m) return;
+    let sdp;
+    try { sdp = await decompressB64(m[1]); } catch (e) { return; }
+    if (!sdp || sdp.indexOf('v=') !== 0) return;
+    if (TR.pc) { try { TR.pc.close(); } catch (e) {} TR.pc = null; TR.dc = null; }
+    const hints = parseOfferHints(offer.offer);
+    const ice = [{urls: (hints && hints.stun && hints.stun.length) ? hints.stun
+      : ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.miwifi.com:3478']}];
+    if (hints && hints.turn && hints.turn.urls && hints.turn.urls.length) {
+      ice.push({urls: hints.turn.urls, username: hints.turn.user || '', credential: hints.turn.pass || ''});
+    }
+    const pc = new RTCPeerConnection({iceServers: ice});
+    TR.pc = pc;
+    pc.ondatachannel = ev => setupDc(ev.channel);
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'failed' && TR.type !== 'wrtc') {
+        toast('P2P 打洞未成功,继续经当前网络访问(功能不受影响)');
+      }
+    };
+    await pc.setRemoteDescription({type: 'offer', sdp: sdp});
+    const ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    await waitIceGathering(pc, 8000);
+    const answerB64 = await compressStrToB64(pc.localDescription.sdp);
+    // 注意:本页的 api() 只做 GET,提交应答必须用原生 fetch 发 POST
+    const r = await fetch('/api/webrtc/answer', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session: offer.session, answer_b64: answerB64})}).then(x => x.json());
+    if (r.ok) toast('正在建立 P2P 直连(当前连接保持可用)…');
+  } catch (e) { /* 静默:保持当前 HTTP 通道 */ }
+}
+(function () {
+  const via = new URLSearchParams(location.search).get('via');
+  if (via === 'tunnel' || via === 'auto') setTimeout(tryAutoP2p, 800);
+})();
+</script>
+</body>
+</html>
