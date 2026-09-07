@@ -12,9 +12,14 @@
 
 const PDFREAD_KEY = 'novelist_comic_pdf_progress';
 const PDFIMG_KEY = 'novelist_pdf_imgmode';
-let pdfReader = {title: '', file: '', files: [], meta: null, curVol: null, curIdx: -1, pageNum: 1, scale: 0, twoPage: false, imgMode: false, imgMeta: null};
+const PDFCON_KEY = 'novelist_pdf_continuous';
+let pdfReader = {title: '', file: '', files: [], meta: null, curVol: null, curIdx: -1, pageNum: 1, scale: 0, twoPage: false, imgMode: false, imgMeta: null, continuous: true};
 let _pdfImgMetaP = null;
 try { pdfReader.imgMode = localStorage.getItem(PDFIMG_KEY) === '1'; } catch (e) { /* ignore */ }
+try { pdfReader.continuous = localStorage.getItem(PDFCON_KEY) !== '0'; } catch (e) { /* ignore */ }
+/* 连续滚动引擎状态:懒渲染观察器/页码HUD观察器/渲染队列(串行)/重建代际/已知页高宽比 */
+let _pdfContObs = null, _pdfContHudObs = null, _pdfContQueue = [], _pdfContQueued = new Set();
+let _pdfContBusy = false, _pdfContGen = 0, _pdfContRatio = {}, _pdfContSaveT = 0;
 let _pdfBackView = 'files';
 let _pdfDoc = null;          // pdf.js 文档对象
 let _pdfRenderTask = null;   // 当前渲染任务(取消旧任务)
@@ -54,6 +59,8 @@ function _pdfOpen(title, file) {
   const body = document.getElementById('pdfReaderBody');
   body.innerHTML = '<div class="empty" style="padding:40px; color:var(--muted)">加载 PDF 中…</div>';
   body.classList.remove('two-page');
+  body.classList.toggle('cont', pdfReader.continuous);
+  _pdfSyncContBtn();
   document.body.classList.add('comic-reading');
   const v = document.getElementById('cview-pdfreader');
   v.style.display = 'flex';
@@ -64,6 +71,7 @@ function _pdfOpen(title, file) {
   else _pdfLoad();
 }
 function _pdfUnload() {
+  _pdfContTeardown();
   if (_pdfRenderTask) { try { _pdfRenderTask.cancel(); } catch (e) { /* ignore */ } _pdfRenderTask = null; }
   if (_pdfDoc) { try { _pdfDoc.destroy(); } catch (e) { /* ignore */ } _pdfDoc = null; }
 }
@@ -93,6 +101,240 @@ function _pdfSetImgMode(on, note) {
   if (pdfReader.imgMode) { _pdfUnload(); _pdfRenderImg(); }
   else _pdfLoad();
 }
+/* ==================== 连续滚动模式(条漫式) ====================
+   整话纵向连排,滚轮直接往下看(与在线漫画阅读器一致)。
+   pdf.js 路线:每页先给占位块,IntersectionObserver 判定接近视口(±1200px)才渲染 canvas、
+   远离即回收成占位(长 PDF 内存可控);渲染串行排队,滚动时不并发轰炸。
+   图片直读路线:全部 <img loading=lazy> 直排,浏览器原生懒加载。
+   默认开启,可切回单页;与双页互斥。 */
+function _pdfSyncContBtn() {
+  const btn = document.getElementById('pdfContBtn');
+  if (btn) btn.classList.toggle('on', pdfReader.continuous);
+}
+function _pdfContPersist(on) {
+  pdfReader.continuous = !!on;
+  try { localStorage.setItem(PDFCON_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+  _pdfSyncContBtn();
+}
+function pdfToggleCont() {
+  _pdfContPersist(!pdfReader.continuous);
+  if (pdfReader.continuous && pdfReader.twoPage) pdfReader.twoPage = false;
+  toast(pdfReader.continuous ? '连续滚动:页面纵向连排,滚轮直接往下看' : '已切回单页模式');
+  _pdfRefresh();
+}
+function _pdfContTeardown() {
+  if (_pdfContObs) { _pdfContObs.disconnect(); _pdfContObs = null; }
+  if (_pdfContHudObs) { _pdfContHudObs.disconnect(); _pdfContHudObs = null; }
+  _pdfContQueue = []; _pdfContQueued.clear();
+}
+function _pdfContTarget(n) {
+  const saved = _pdfGetProgress();
+  if (saved && saved.title === pdfReader.title && saved.file === pdfReader.file && saved.page)
+    return Math.min(n, Math.max(1, saved.page));
+  return Math.min(n, Math.max(1, pdfReader.pageNum || 1));
+}
+function _pdfContScrollTo(body, wrap) {
+  const br = body.getBoundingClientRect(), tr = wrap.getBoundingClientRect();
+  body.scrollTop += tr.top - br.top;
+}
+function _pdfContScrollBy(dir) {
+  const body = document.getElementById('pdfReaderBody');
+  if (!body) return;
+  const atTop = body.scrollTop <= 0, atBottom = body.scrollHeight - body.clientHeight - body.scrollTop <= 1;
+  if (dir < 0 && atTop) { toast('已经是第一页'); return; }
+  if (dir > 0 && atBottom) { toast('已经是最后一页'); return; }
+  body.scrollBy({top: dir * body.clientHeight * 0.85, behavior: 'smooth'});
+}
+/* 页码 HUD:监听可见页,显示「第 X / N 页 · 连续」并节流保存进度 */
+function _pdfContWireHud(body, wraps, total, gen) {
+  const visible = new Map();
+  _pdfContHudObs = new IntersectionObserver(entries => {
+    if (gen !== _pdfContGen) return;
+    for (const en of entries) {
+      const pg = parseInt(en.target.dataset.page || '0', 10);
+      if (en.isIntersecting) visible.set(pg, en.intersectionRatio); else visible.delete(pg);
+    }
+    if (!visible.size) return;
+    const cur = Math.min(...visible.keys());
+    pdfReader.pageNum = cur;
+    const info = document.getElementById('pdfReaderInfo');
+    if (info) info.textContent = '第 ' + cur + ' / ' + total + ' 页 · 连续';
+    const now = Date.now();
+    if (now - _pdfContSaveT > 800) { _pdfContSaveT = now; _pdfSetProgress(cur); }
+  }, {root: body, threshold: [0, 0.2, 0.5]});
+  wraps.forEach(w => _pdfContHudObs.observe(w));
+}
+async function _pdfRenderCont() {
+  const body = document.getElementById('pdfReaderBody');
+  if (!_pdfDoc || !body) return;
+  if (_pdfRenderTask) { try { _pdfRenderTask.cancel(); } catch (e) { /* ignore */ } _pdfRenderTask = null; }
+  _pdfContTeardown();
+  const gen = ++_pdfContGen;
+  const n = _pdfDoc.numPages;
+  const avail = Math.max(320, body.clientWidth);
+  let w1 = 794, ratio1 = 1.414;   // A4 兜底:第 1 页解析失败时估算
+  try {
+    const p1 = await _pdfDoc.getPage(1);
+    if (gen !== _pdfContGen) return;
+    const v1 = p1.getViewport({scale: 1});
+    w1 = v1.width; ratio1 = v1.height / v1.width;
+    if (!pdfReader.scale) pdfReader.scale = Math.max(0.4, Math.min(2.2, avail / w1));
+  } catch (e) { if (!pdfReader.scale) pdfReader.scale = 1; }
+  const dispW = Math.round(w1 * pdfReader.scale);
+  body.classList.remove('two-page');
+  body.classList.add('cont');
+  body.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  const wraps = [];
+  for (let i = 1; i <= n; i++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'pdf-page-wrap';
+    wrap.dataset.page = String(i);
+    const ph = document.createElement('div');
+    ph.className = 'pdf-cont-ph';
+    ph.style.width = dispW + 'px';
+    ph.style.height = Math.round(dispW * (_pdfContRatio[i] || ratio1)) + 'px';
+    wrap.appendChild(ph);
+    const no = document.createElement('div');
+    no.className = 'pdf-page-no';
+    no.textContent = '第 ' + i + ' 页';
+    wrap.appendChild(no);
+    frag.appendChild(wrap);
+    wraps.push(wrap);
+  }
+  body.appendChild(frag);
+  const target = _pdfContTarget(n);
+  pdfReader.pageNum = target;
+  const info = document.getElementById('pdfReaderInfo');
+  if (info) info.textContent = '第 ' + target + ' / ' + n + ' 页 · 连续';
+  _pdfContWireHud(body, wraps, n, gen);
+  _pdfContObs = new IntersectionObserver(entries => {
+    if (gen !== _pdfContGen) return;
+    for (const en of entries) {
+      const wrap = en.target;
+      if (en.isIntersecting) {
+        const num = parseInt(wrap.dataset.page || '0', 10);
+        if (num && !wrap.querySelector('canvas') && !_pdfContQueued.has(num)) {
+          _pdfContQueued.add(num);
+          _pdfContQueue.push({num, wrap});
+          _pdfContDrain();
+        }
+      } else _pdfContUnrender(wrap);
+    }
+  }, {root: body, rootMargin: '1200px 0px'});
+  wraps.forEach(w => _pdfContObs.observe(w));
+  if (target > 1) _pdfContScrollTo(body, wraps[target - 1]); else body.scrollTop = 0;
+}
+async function _pdfContDrain() {
+  if (_pdfContBusy) return;
+  _pdfContBusy = true;
+  const gen = _pdfContGen;
+  try {
+    while (_pdfContQueue.length && gen === _pdfContGen) {
+      const job = _pdfContQueue.shift();
+      _pdfContQueued.delete(job.num);
+      if (!job.wrap.isConnected) continue;
+      await _pdfContRenderPage(job.num, job.wrap);
+    }
+  } finally { _pdfContBusy = false; }
+}
+async function _pdfContRenderPage(num, wrap) {
+  if (!_pdfDoc) return;
+  let pg;
+  try { pg = await _pdfDoc.getPage(num); } catch (e) { return; }
+  if (!wrap.isConnected) return;
+  const v1 = pg.getViewport({scale: 1});
+  _pdfContRatio[num] = v1.height / v1.width;
+  let rs = pdfReader.scale || 1;
+  if (v1.width * v1.height * rs * rs > 5e6) rs = Math.sqrt(5e6 / (v1.width * v1.height));
+  const vp = pg.getViewport({scale: rs});
+  const canvas = document.createElement('canvas');
+  canvas.className = 'pdf-page';
+  canvas.width = Math.round(vp.width);
+  canvas.height = Math.round(vp.height);
+  if (rs < pdfReader.scale - 0.01) {   // 降采样渲染:显示尺寸拉回目标宽(与单页模式一致)
+    canvas.style.width = Math.round(v1.width * pdfReader.scale) + 'px';
+    canvas.style.height = Math.round(v1.height * pdfReader.scale) + 'px';
+  }
+  // 占位高度先用真实比例校正,减少挂载跳动
+  const ph = wrap.querySelector('.pdf-cont-ph');
+  if (ph) ph.style.height = Math.round((parseInt(canvas.style.width) || canvas.width) * (_pdfContRatio[num] || 1.414)) + 'px';
+  const ctx = canvas.getContext('2d');
+  const rt = pg.render({canvasContext: ctx, viewport: vp});
+  _pdfRenderTask = rt;
+  try { await rt.promise; } catch (e) { return; }
+  _pdfRenderTask = null;
+  if (!wrap.isConnected || wrap.querySelector('canvas')) return;
+  // 渲染期间已滚远:直接回收,避免离屏 canvas 常驻
+  const body = document.getElementById('pdfReaderBody');
+  if (body) {
+    const br = body.getBoundingClientRect(), tr = wrap.getBoundingClientRect();
+    if (tr.bottom < br.top - 1200 || tr.top > br.bottom + 1200) return;
+  }
+  const cur = wrap.querySelector('.pdf-cont-ph');
+  if (cur) cur.replaceWith(canvas); else wrap.insertBefore(canvas, wrap.firstChild);
+}
+function _pdfContUnrender(wrap) {
+  const canvas = wrap.querySelector('canvas');
+  if (!canvas) return;
+  const num = parseInt(wrap.dataset.page || '0', 10);
+  const dw = parseInt(canvas.style.width) || canvas.width;
+  const ph = document.createElement('div');
+  ph.className = 'pdf-cont-ph';
+  ph.style.width = dw + 'px';
+  ph.style.height = Math.round(dw * (_pdfContRatio[num] || 1.414)) + 'px';
+  canvas.replaceWith(ph);
+}
+async function _pdfRenderImgCont() {
+  const body = document.getElementById('pdfReaderBody');
+  const meta = await _pdfImgMetaEnsure();
+  if (!body) return;
+  if (!meta.numPages) {
+    body.innerHTML = '<div class="empty" style="padding:40px">图片直读失败:无法解析该 PDF,建议点「系统内核」打开</div>';
+    return;
+  }
+  _pdfContTeardown();
+  const gen = ++_pdfContGen;
+  const n = meta.numPages;
+  body.classList.remove('two-page');
+  body.classList.add('cont');
+  body.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  const wraps = [];
+  for (let i = 1; i <= n; i++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'pdf-page-wrap';
+    wrap.dataset.page = String(i);
+    const img = document.createElement('img');
+    img.className = 'pdf-page';
+    img.decoding = 'async';
+    img.loading = 'lazy';
+    img.alt = '第 ' + i + ' 页';
+    img.src = '/api/comic_page_image?title=' + encodeURIComponent(pdfReader.title) +
+              '&file=' + encodeURIComponent(pdfReader.file) + '&page=' + i;
+    if (pdfReader.scale) img.style.width = Math.round(Math.min(pdfReader.scale, 3.5) * 100) + '%';
+    img.onerror = () => {
+      img.onerror = null;
+      img.style.width = '320px';
+      img.src = 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="452"><rect width="100%" height="100%" fill="#fff"/><text x="50%" y="50%" fill="#94a3b8" text-anchor="middle" font-size="14">第 ' + i + ' 页无内嵌图片</text></svg>');
+    };
+    wrap.appendChild(img);
+    const no = document.createElement('div');
+    no.className = 'pdf-page-no';
+    no.textContent = '第 ' + i + ' 页';
+    wrap.appendChild(no);
+    frag.appendChild(wrap);
+    wraps.push(wrap);
+  }
+  body.appendChild(frag);
+  const target = _pdfContTarget(n);
+  pdfReader.pageNum = target;
+  const info = document.getElementById('pdfReaderInfo');
+  if (info) info.textContent = '第 ' + target + ' / ' + n + ' 页 · 连续';
+  _pdfContWireHud(body, wraps, n, gen);
+  if (target > 1) _pdfContScrollTo(body, wraps[target - 1]); else body.scrollTop = 0;
+}
 function _pdfImgMetaEnsure() {
   if (pdfReader.imgMeta) return Promise.resolve(pdfReader.imgMeta);
   if (!_pdfImgMetaP) {
@@ -112,11 +354,13 @@ async function _pdfRenderImg() {
     body.innerHTML = '<div class="empty" style="padding:40px">图片直读失败:无法解析该 PDF,建议点「系统内核」打开</div>';
     return;
   }
+  if (pdfReader.continuous) return _pdfRenderImgCont();
   const pn = Math.min(Math.max(1, pdfReader.pageNum), meta.numPages);
   pdfReader.pageNum = pn;
   if (info) info.textContent = '第 ' + pn + ' / ' + meta.numPages + ' 页 · 图片直读';
   _pdfSetProgress(pn);
   body.innerHTML = '';
+  body.classList.remove('cont');
   const pages = pdfReader.twoPage ? [pn, pn + 1].filter(p => p <= meta.numPages) : [pn];
   for (const num of pages) {
     const wrap = document.createElement('div');
@@ -178,6 +422,7 @@ function _pdfLoad() {
     });
 }
 async function _pdfRender() {
+  if (pdfReader.continuous) return _pdfRenderCont();
   const body = document.getElementById('pdfReaderBody');
   const info = document.getElementById('pdfReaderInfo');
   if (!_pdfDoc || !body) return;
@@ -194,6 +439,7 @@ async function _pdfRender() {
     pdfReader.scale = Math.max(0.4, Math.min(2.2, avail / vp1.width));
   }
   body.innerHTML = '';
+  body.classList.remove('cont');
   const pages = pdfReader.twoPage ? [pn, pn + 1].filter(p => p <= _pdfDoc.numPages) : [pn];
   for (const num of pages) {
     // 画布 + 页码角标包一层:每页自带页码,缺页一眼可见
@@ -228,15 +474,21 @@ async function _pdfRender() {
   body.scrollTop = 0;
 }
 function pdfBodyClick(e) {
-  // 点击画布左 1/3=上一页,右 1/3=下一页(避开目录/按钮区)
+  // 点击画布左 1/3=上一页,右 1/3=下一页(避开目录/按钮区);连续模式下改为整屏滚动
   if (!_pdfReady()) return;
   const x = e.clientX, w = document.body.clientWidth;
   if (e.target && e.target.closest && e.target.closest('.reader-bar, #pdfTocWrap')) return;
+  if (pdfReader.continuous) {
+    if (x < w * 0.33) _pdfContScrollBy(-1);
+    else if (x > w * 0.66) _pdfContScrollBy(1);
+    return;
+  }
   if (x < w * 0.33) pdfPrevPage();
   else if (x > w * 0.66) pdfNextPage();
 }
 function pdfPrevPage() {
   if (!_pdfReady()) return;
+  if (pdfReader.continuous) { _pdfContScrollBy(-1); return; }
   const pn = pdfReader.pageNum - (pdfReader.twoPage ? 2 : 1);
   if (pn < 1) { toast('已经是第一页'); return; }
   pdfReader.pageNum = pn;
@@ -244,6 +496,7 @@ function pdfPrevPage() {
 }
 function pdfNextPage() {
   if (!_pdfReady()) return;
+  if (pdfReader.continuous) { _pdfContScrollBy(1); return; }
   const pn = pdfReader.pageNum + (pdfReader.twoPage ? 2 : 1);
   if (pn > _pdfNumPages()) { toast('已经是最后一页'); return; }
   pdfReader.pageNum = pn;
@@ -257,6 +510,7 @@ function pdfZoom(d) {
 function pdfToggle2page() {
   if (!_pdfReady()) return;
   pdfReader.twoPage = !pdfReader.twoPage;
+  if (pdfReader.twoPage && pdfReader.continuous) _pdfContPersist(false);  // 与连续滚动互斥
   document.getElementById('pdfReaderBody').classList.toggle('two-page', pdfReader.twoPage);
   _pdfRefresh();
 }
@@ -301,7 +555,13 @@ function renderPdfToc() {
 }
 function pdfJumpPage(page) {
   if (!_pdfReady()) { toast('PDF 尚未加载完成'); return; }
-  pdfReader.pageNum = Math.min(_pdfNumPages(), Math.max(1, page));
+  page = Math.min(_pdfNumPages(), Math.max(1, page));
+  if (pdfReader.continuous) {
+    const body = document.getElementById('pdfReaderBody');
+    const wrap = body && body.querySelector('.pdf-page-wrap[data-page="' + page + '"]');
+    if (wrap) { _pdfContScrollTo(body, wrap); pdfToggleToc(); return; }
+  }
+  pdfReader.pageNum = page;
   pdfToggleToc();
   _pdfRefresh();
 }
@@ -335,6 +595,7 @@ function _pdfSetProgress(page) {
   } catch (e) { /* ignore */ }
 }
 function closeLocalPdf() {
+  try { if (pdfReader.file && _pdfReady()) _pdfSetProgress(pdfReader.pageNum); } catch (e) { /* ignore */ }
   _pdfUnload();
   const v = document.getElementById('cview-pdfreader');
   if (v) v.style.display = 'none';

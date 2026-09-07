@@ -769,6 +769,11 @@
   #pdfReaderBody .pdf-page-wrap.cur { outline:3px solid var(--primary); outline-offset:-3px; }
   #pdfReaderBody.two-page { display:flex; gap:12px; justify-content:center; align-items:flex-start; }
   #pdfReaderBody.two-page .pdf-page-wrap { margin:0; flex-shrink:0; }
+  /* 连续滚动模式(条漫式):页间无缝连排,懒渲染占位块 */
+  #pdfReaderBody.cont { padding:0; }
+  #pdfReaderBody.cont .pdf-page-wrap { margin:0 auto; box-shadow:none; }
+  #pdfReaderBody.cont .pdf-page-wrap.cur { outline:none; }
+  .pdf-cont-ph { margin:0 auto; background:#333336; }
   /* 全局任务按钮:矩形态(默认,常驻)↔圆形态(有任务)。固定右下角悬浮,
      令牌化层级(--z-fab):无论 launcher/双区/设置页/任何弹窗都置顶可见(悬浮气泡性质)。
      浅色主题白色按钮(与卡片风格统一),深色主题深底白字 */
@@ -2192,6 +2197,7 @@
     <button class="rb" onclick="pdfNextPage()">下一页 ›</button>
     <span class="rb-sep"></span>
     <button class="rb" onclick="pdfToggle2page()" title="双页并排显示">双页</button>
+    <button class="rb" id="pdfContBtn" onclick="pdfToggleCont()" title="连续滚动:整话纵向连排,滚轮直接往下看(条漫式)">连续</button>
     <button class="rb" id="pdfImgModeBtn" onclick="pdfToggleImgMode()" title="图片直读:绕过 PDF 内核直接抽取页面原图,内存占用最低">图片直读</button>
     <button class="rb" onclick="pdfOpenSystem()" title="用系统默认浏览器/阅读器内核打开本 PDF">系统内核</button>
     <button class="rb" onclick="pdfToggleFull()">⛶ 全屏</button>
