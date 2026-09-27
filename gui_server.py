@@ -1814,11 +1814,14 @@ class Handler(BaseHTTPRequestHandler):
 
         url = (payload.get("url") or "").strip()
         if not url:
-            return self._send_json({"error": "缺少 url"})
+            # 必须带 400:前端 api() 仅在 !r.ok 时抛异常,200 会让它把 {"error":...}
+            # 当成功结果,拿到 task_id=undefined → 僵尸任务(按钮永久禁用、
+            # 批量下载 Promise 永不 resolve)。
+            return self._send_json({"error": "缺少 url"}, 400)
         try:
             book = book_from_url(url, _fetcher)
             if book is None:
-                return self._send_json({"error": "无法识别该 URL 的书源"})
+                return self._send_json({"error": "无法识别该 URL 的书源"}, 400)
         except Exception as exc:  # noqa: BLE001
             return self._send_json({"error": str(exc)}, 500)
 

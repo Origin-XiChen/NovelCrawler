@@ -67,6 +67,12 @@ function _pdfOpen(title, file) {
   renderPdfToc();
   _pdfUnload();
   _pdfSyncImgBtn();
+  // PDF 阅读态快捷键:Esc 返回 / ←→ 上一个/下一个 PDF
+  document.onkeydown = e => {
+    if (e.key === 'Escape') closeLocalPdf();
+    else if (e.key === 'ArrowLeft') pdfPrevChapter();
+    else if (e.key === 'ArrowRight') pdfNextChapter();
+  };
   if (pdfReader.imgMode) _pdfRenderImg();
   else _pdfLoad();
 }
@@ -597,6 +603,7 @@ function _pdfSetProgress(page) {
 function closeLocalPdf() {
   try { if (pdfReader.file && _pdfReady()) _pdfSetProgress(pdfReader.pageNum); } catch (e) { /* ignore */ }
   _pdfUnload();
+  document.onkeydown = null;   // 退出 PDF 阅读态,释放快捷键接管
   const v = document.getElementById('cview-pdfreader');
   if (v) v.style.display = 'none';
   document.body.classList.remove('comic-reading');
@@ -1097,8 +1104,28 @@ function _refreshBgTaskFlag() {
   document.body.classList.toggle('has-bg-task', has);
 }
 /* 小说阅读器:点击正文切换 UI 显隐(仿漫画沉浸);工具栏/目录内点击不触发。
-   绑定入口在阅读器宿主页 reader.html 的 bindReaderUiToggle()
-   (注意:内嵌回退模式下由宿主页的 boot 分支统一绑定,此处不再自带绑定函数)。 */
+   绑定入口在阅读器宿主页 reader.html 的 bindReaderUiToggle();内嵌回退模式
+   (index.html 里 window.open 被拦截)下若宿主页未提供绑定,此处自带兜底绑定 ——
+   否则 ui-hidden 加上后没有任何"减"它的地方,工具栏/目录(含 ☰ 按钮)永久不可见。 */
+function _wireReaderUiToggle() {
+  const mask = document.getElementById('readerMask');
+  if (!mask || mask._uiToggleBound) return;
+  mask._uiToggleBound = true;
+  mask.addEventListener('click', function (ev) {
+    if (ev.target.closest && ev.target.closest('.reader-hd, .reader-bar, .reader-toc, .reader-toc-mask')) return;
+    const hidden = document.body.classList.toggle('ui-hidden');
+    if (!hidden) document.body.classList.remove('ui-hint');
+  });
+}
+document.addEventListener('keydown', function (e) {
+  // Ctrl/Cmd+H:强制显隐工具栏(ui-hidden 无法恢复时的兜底出口)
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) {
+    if (!document.body.classList.contains('novel-reading')) return;
+    e.preventDefault();
+    const hidden = document.body.classList.toggle('ui-hidden');
+    if (!hidden) document.body.classList.remove('ui-hint');
+  }
+});
 /* 章节滚动位置记忆:按章节独立保存(切章回跳仍恢复原位置),滚动节流写入 */
 function _wireReaderScrollSave() {
   const main = document.getElementById('readerMain');

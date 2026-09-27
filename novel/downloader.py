@@ -508,6 +508,12 @@ def _iter_chapters(chapters, start, end, done_idx, source, charset, fetcher,
             if text is None:
                 if on_progress:
                     on_progress(i, total, ch["title"], err=True)
+                # 失败也必须补投下一个:否则窗口每失败一次净减 1,连续失败达到
+                # 窗口大小时 while 提前结束,迭代器 it 里剩余章节被静默跳过
+                # (既不抓取也不计入 failed_chapters),成品出现整段缺章。
+                nxt = next(it, None)
+                if nxt is not None:
+                    window[nxt] = pool.submit(_fetch, nxt)
                 continue
             log(f"  ✓ {i}/{total} {ch['title']}")
             if on_progress:

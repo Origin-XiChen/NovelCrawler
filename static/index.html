@@ -2185,13 +2185,13 @@
 <!-- ================== 漫画本地 PDF 阅读器 ================== -->
 <div id="cview-pdfreader" style="display:none; position:absolute; inset:0; background:var(--bg); z-index:var(--z-panel)">
   <div class="reader-bar">
-    <button class="rb" onclick="closeLocalPdf()">‹ 返回</button>
+    <button class="rb" onclick="closeLocalPdf()" title="返回(Esc)">‹ 返回</button>
     <span class="rb-sep"></span>
     <button class="rb" onclick="pdfZoom(-1)" title="缩小">A−</button>
     <button class="rb" onclick="pdfZoom(1)" title="放大">A+</button>
     <span class="rb-sep"></span>
-    <button class="rb" onclick="pdfPrevChapter()">上一话</button>
-    <button class="rb" onclick="pdfNextChapter()">下一话</button>
+    <button class="rb" onclick="pdfPrevChapter()" title="上一话(←)">上一话</button>
+    <button class="rb" onclick="pdfNextChapter()" title="下一话(→)">下一话</button>
     <button class="rb" onclick="pdfToggleToc()">☰ 卷/目录</button>
     <span class="rb-sep"></span>
     <button class="rb" onclick="pdfPrevPage()">‹ 上一页</button>
@@ -2877,7 +2877,7 @@ async function comicDlStart() {
   // 防抖 + 去重:同标题已有活跃任务(running/downloading) → 拒绝
   const title = comicCur.title || '漫画';
   const dup = [..._dlTasks.values()].find(t => t.title === '漫画《' + title + '》' && (t.state === 'running' || t.state === 'downloading' || t.state === 'paused'));
-  if (dup) { notify(`《${title}》已在下载中(任务 ${dup.id.slice(0,8)}…),请勿重复点`, 'err'); return; }
+  if (dup) { notify(`《${title}》已在下载中,请勿重复点`, 'err'); return; }
   const chs = idxs.map(i => comicCur.chapters[i]);
   const source = comicCur.source || 'mangadex';
   const comicId = comicCur.id;
@@ -5106,7 +5106,7 @@ async function _dlPollAll() {
     _dlUpdate(tid, {done: t.done, total: t.total, current: t.current, state: t.state, error: t.error, logs: t.logs, http_status: t.http_status, poll_count: t.poll_count, elapsed: t.elapsed, slow_warn: t.slow_warn, mode: t.mode});
     if (t.state === 'done') { _dlFinish(tid, true, ''); }
     else if (t.state === 'error') { _dlFinish(tid, false, t.error || '未知错误'); }
-    else if (t.state === 'cancelled') { _dlDone(tid); notify('任务已停止', 'err'); }  // 用户停止
+    else if (t.state === 'cancelled') { _dlFinish(tid, false, '已停止'); notify('任务已停止', 'err'); }  // 用户停止(走 _dlFinish 复位按钮/浮窗)
     else _updateCurrentDetail();
   }
   } finally { _dlPollBusy = false; }
@@ -5242,9 +5242,9 @@ async function controlDlTask(tid, action, title) {
     if (!j.ok) throw new Error(j.error || '操作失败');
     notify(`${label}: ${title || ''}`);
     if (action === 'stop') {
-      // 停止:立即从前端任务列表移除(后端 worker 自行结束)
-      _dlDone(tid);
-      if (tid === currentTask) { currentTask = null; }
+      // 停止:立即从前端任务列表移除(后端 worker 自行结束);走 _dlFinish
+      // 以便复位 #btnDl 按钮与 #dlFloat 浮窗(否则按钮永久停留在"⏳ 启动中…")
+      _dlFinish(tid, false, '已停止');
     } else {
       // resume 立即本地恢复 state(不等下一轮轮询),pause 则立即置 paused
       const rec = _dlTasks.get(tid);
