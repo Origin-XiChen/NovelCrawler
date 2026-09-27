@@ -1305,11 +1305,18 @@ window.comicShowView = function (v) {
 window.showView = function () {};
 window.isDesktop = function () { return !!(window.chrome && window.chrome.webview); };
 // 窗口控制:桌面模式带 wid 调 /api/window/*(reader 窗口自身);浏览器模式无窗口概念
+// wid 由宿主在开窗时注入(?wid=readerN);缺失时后端会把它当 "main" —— 那样拖动会
+// 去拖主窗口、关闭会关掉主窗口并连带退出进程,故此处直接拦截并告警。
 window.__READER_WID__ = new URLSearchParams(location.search).get('wid') || '';
 function winPost(path, body) {
   try {
+    var wid = window.__READER_WID__;
+    if (isDesktop() && path.indexOf('/api/window/') === 0 && !wid) {
+      console.warn('[reader] 缺少 wid,已拦截窗口控制请求:', path);
+      return Promise.resolve();
+    }
     return fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify(Object.assign({win: window.__READER_WID__ || undefined}, body || {}))}).catch(function(){});
+                        body: JSON.stringify(Object.assign({win: wid || undefined}, body || {}))}).catch(function(){});
   } catch (e) { return Promise.resolve(); }
 }
 if (isDesktop()) document.body.classList.add('desktop');
@@ -1365,14 +1372,14 @@ document.addEventListener('mousedown', function (e) {
     if (mode === 'comic') {
       comicOpenReader(q.get('source') || '', q.get('comic_id') || '', q.get('title') || '漫画', 'reader');
     } else if (mode === 'novel') {
-      window.bindReaderUiToggle();
       openReader(q.get('file') || '', num('idx'));
+      window.bindReaderUiToggle();
     } else if (mode === 'novel_online') {
-      window.bindReaderUiToggle();
       openReaderOnline(q.get('rurl') || '', q.get('title') || '在线阅读', num('idx'));
-    } else if (mode === 'epub') {
       window.bindReaderUiToggle();
+    } else if (mode === 'epub') {
       openEpubOnline(q.get('rurl') || '', q.get('title') || 'EPUB 在线阅读');
+      window.bindReaderUiToggle();
     } else if (mode === 'pdf') {
       comicOpenLocalPdf(q.get('title') || '漫画', q.get('file') || '');
     } else {

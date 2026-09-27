@@ -850,6 +850,23 @@ class MainWindow:
 
 
 # ---------- 多窗口:阅读器窗口创建与控制 ----------
+def _with_wid(url: str, wid: str) -> str:
+    """给阅读器页面 URL 附加 ?wid=<窗口标识>(供页面回传 /api/window/* 定位自身)。
+
+    保留原有查询参数与 hash;已存在 wid 时以新值覆盖。
+    """
+    try:
+        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+        sp = urlsplit(url)
+        q = [(k, v) for k, v in parse_qsl(sp.query, keep_blank_values=True) if k != "wid"]
+        q.append(("wid", wid))
+        return urlunsplit((sp.scheme, sp.netloc, sp.path, urlencode(q), sp.fragment))
+    except Exception:  # noqa: BLE001
+        # 兜底:URL 异常时退回手工拼接(至少不阻断开窗)
+        sep = "&" if "?" in url else "?"
+        return f"{url}{sep}wid={wid}"
+
+
 def _spawn_reader(url: str) -> None:
     """在 UI 线程创建阅读器窗口(由 WM_APP_OPENREADER 触发,勿在 HTTP 线程直调)。
 
@@ -860,9 +877,14 @@ def _spawn_reader(url: str) -> None:
     wid = f"reader{_READER_SEQ}"
     main = _ALL_WINS.get("main")
     cache_dir = main.cache_dir if main else _MAIN_CACHE_DIR
-    win = MainWindow("阅读器 · 漫画+小说", 980, 1040, url, cache_dir,
+    # 关键:把 wid 注入页面 URL。页面里的 window.__READER_WID__ 取自 ?wid=,
+    # 之后所有 /api/window/* 请求都带 {win: wid} → 后端路由到本窗口。
+    # 若缺这一步,win 会缺省成 "main":拖动会去拖主窗口(阅读器不动),
+    # 关闭 X 会关掉主窗口并连带退出整个消息循环。
+    page_url = _with_wid(url, wid)
+    win = MainWindow("阅读器 · 漫画+小说", 980, 1040, page_url, cache_dir,
                      wid=wid, reader=True)
-    win.wv2 = WebView2(win.hwnd, url, cache_dir,
+    win.wv2 = WebView2(win.hwnd, page_url, cache_dir,
                        on_message=win._on_webmessage,
                        on_ready=lambda w=win: w.show())
     try:

@@ -72,11 +72,18 @@ window.comicShowView = function (v) {
 window.showView = function () {};
 window.isDesktop = function () { return !!(window.chrome && window.chrome.webview); };
 // 窗口控制:桌面模式带 wid 调 /api/window/*(reader 窗口自身);浏览器模式无窗口概念
+// wid 由宿主在开窗时注入(?wid=readerN);缺失时后端会把它当 "main" —— 那样拖动会
+// 去拖主窗口、关闭会关掉主窗口并连带退出进程,故此处直接拦截并告警。
 window.__READER_WID__ = new URLSearchParams(location.search).get('wid') || '';
 function winPost(path, body) {
   try {
+    var wid = window.__READER_WID__;
+    if (isDesktop() && path.indexOf('/api/window/') === 0 && !wid) {
+      console.warn('[reader] 缺少 wid,已拦截窗口控制请求:', path);
+      return Promise.resolve();
+    }
     return fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify(Object.assign({win: window.__READER_WID__ || undefined}, body || {}))}).catch(function(){});
+                        body: JSON.stringify(Object.assign({win: wid || undefined}, body || {}))}).catch(function(){});
   } catch (e) { return Promise.resolve(); }
 }
 if (isDesktop()) document.body.classList.add('desktop');
@@ -90,6 +97,31 @@ window.closeReader = function () {
 window.closeLocalPdf = function () {
   if (isDesktop()) { winPost('/api/window/close'); } else { window.close(); }
 };
+// 小说阅读器:点击正文空白处切换工具栏/目录显隐(沉浸模式)。
+// reader-core._wireReaderUiToggle 只在 index.html 的 DOMContentLoaded 里调用(那时
+// #readerMask 还不存在),独立窗口里没有任何地方调用 → 工具栏一旦隐藏就再也唤不起来。
+// 这里在每次进入小说阅读时显式绑定(绑定是幂等的,靠 _uiToggleBound 去重)。
+window._readerUiToggleBound = false;
+window.bindReaderUiToggle = function () {
+  const mask = document.getElementById('readerMask');
+  if (!mask || mask._uiToggleBound) return;
+  mask._uiToggleBound = true;
+  window._readerUiToggleBound = true;
+  mask.addEventListener('click', function (ev) {
+    if (ev.target.closest && ev.target.closest('.reader-hd, .reader-bar, .reader-toc, .reader-toc-mask')) return;
+    const hidden = document.body.classList.toggle('ui-hidden');
+    if (!hidden) document.body.classList.remove('ui-hint');
+  });
+};
+// 兜底:Esc 之外的快捷键 Ctrl/Cmd+H 强制显隐工具栏
+document.addEventListener('keydown', function (e) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) {
+    if (!document.body.classList.contains('novel-reading')) return;
+    e.preventDefault();
+    const hidden = document.body.classList.toggle('ui-hidden');
+    if (!hidden) document.body.classList.remove('ui-hint');
+  }
+});
 // 拖动:阅读器顶栏 → /api/window/drag(带 win)
 document.addEventListener('mousedown', function (e) {
   if (!isDesktop()) return;
@@ -108,10 +140,13 @@ document.addEventListener('mousedown', function (e) {
       comicOpenReader(q.get('source') || '', q.get('comic_id') || '', q.get('title') || '漫画', 'reader');
     } else if (mode === 'novel') {
       openReader(q.get('file') || '', num('idx'));
+      window.bindReaderUiToggle();
     } else if (mode === 'novel_online') {
       openReaderOnline(q.get('rurl') || '', q.get('title') || '在线阅读', num('idx'));
+      window.bindReaderUiToggle();
     } else if (mode === 'epub') {
       openEpubOnline(q.get('rurl') || '', q.get('title') || 'EPUB 在线阅读');
+      window.bindReaderUiToggle();
     } else if (mode === 'pdf') {
       comicOpenLocalPdf(q.get('title') || '漫画', q.get('file') || '');
     } else {

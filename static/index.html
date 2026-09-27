@@ -747,7 +747,7 @@
   /* 左下角模式警示胶囊已移除(门户角标保留) */
   .chk { display:inline-flex; align-items:center; gap:5px; cursor:pointer; user-select:none; }
   .chk input { accent-color: var(--primary); }
-  /* 本地 PDF 阅读器:布局用 flex,但默认必须保持隐藏(由 _pdfOpen 置为 flex 显示)。
+  /* 本地 PDF 阅读器:布局用 flex,但默认必须保持隐藏(由 comicOpenLocalPdf 置为 flex 显示)。
      直接写 display:flex 会覆盖元素上的内联 display:none,导致 PDF 阅读器常驻遮挡页面。 */
   #cview-pdfreader.active { display:flex; flex-direction:column; }
   .reader-bar .rb {
