@@ -1046,11 +1046,25 @@ async function openEpubOnline(url, title) {
     else if (e.key === 'ArrowRight') readerNext();
   };
   try {
-    // 大 EPUB(几十 MB)下载可能较慢:超时放宽到 180s,并提示用户
-    document.getElementById('readerBody').innerHTML = '<div class="empty">EPUB 正在下载中…(文件较大时需数十秒,请稍候)</div>';
-    const m = await api('/api/epub_online?url=' + encodeURIComponent(url), {silent: true}, 180000);
+    // 大 EPUB(几十 MB)下载可能较慢:超时放宽到 300s,并提示用户。
+    // 提示里带"已等待秒数",让用户知道没死掉(旧文案静止不动,容易被当成卡死)。
+    const body = document.getElementById('readerBody');
+    body.innerHTML = '<div class="empty">EPUB 正在下载中…(文件较大时需数十秒,请稍候)</div>';
+    const t0 = Date.now();
+    const tick = setInterval(() => {
+      const s = Math.round((Date.now() - t0) / 1000);
+      if (s >= 5 && body.querySelector('.empty')) {
+        body.innerHTML = `<div class="empty">EPUB 正在下载并解析中…已等待 ${s} 秒<br><span style="font-size:12px; color:var(--muted)">首次打开需下载整本 EPUB;期间可点屏幕唤出工具栏</span></div>`;
+      }
+    }, 1000);
+    let m;
+    try {
+      m = await api('/api/epub_online?url=' + encodeURIComponent(url), {silent: true}, 300000);
+    } finally {
+      clearInterval(tick);
+    }
     if (!m.ok) throw new Error(m.error || 'EPUB 解析失败');
-    readerChapters = (m.chapters || []).map((c, i) => ({idx: i + 1, title: c.title || ('第' + (i + 1) + '章')}));
+    readerChapters = (m.chapters || []).map((c, i) => ({idx: i + 1, title: c.title || ('第' + (i + 1) + '章'), volume: c.volume || ''}));
     if (!readerChapters.length) { document.getElementById('readerBody').innerHTML = '<div class="empty">EPUB 无章节内容</div>'; return; }
     let saved = 1;
     try { saved = JSON.parse(localStorage.getItem(READ_KEY) || '{}')[url] || 1; } catch (e) {}
@@ -1082,18 +1096,9 @@ function _refreshBgTaskFlag() {
   const has = [..._dlTasks.values()].some(t => t.state === 'running' || t.state === 'downloading' || t.state === 'paused');
   document.body.classList.toggle('has-bg-task', has);
 }
-/* 小说阅读器:点击正文切换 UI 显隐(仿漫画沉浸);工具栏/目录内点击不触发 */
-function _wireReaderUiToggle() {
-  const mask = document.getElementById('readerMask');
-  if (!mask || mask._uiToggleBound) return;
-  mask._uiToggleBound = true;
-  mask.addEventListener('click', (ev) => {
-    if (ev.target.closest('.reader-hd, .reader-bar, .reader-toc, .reader-toc-mask')) return;
-    const hidden = document.body.classList.toggle('ui-hidden');
-    // 首次点出工具栏后去掉提示
-    if (!hidden) document.body.classList.remove('ui-hint');
-  });
-}
+/* 小说阅读器:点击正文切换 UI 显隐(仿漫画沉浸);工具栏/目录内点击不触发。
+   绑定入口在阅读器宿主页 reader.html 的 bindReaderUiToggle()
+   (注意:内嵌回退模式下由宿主页的 boot 分支统一绑定,此处不再自带绑定函数)。 */
 /* 章节滚动位置记忆:按章节独立保存(切章回跳仍恢复原位置),滚动节流写入 */
 function _wireReaderScrollSave() {
   const main = document.getElementById('readerMain');
@@ -1537,9 +1542,6 @@ function readerLineAdj() {  // 行距循环:1.6 / 1.9 / 2.2
   L.lh = seq[(i + 1) % seq.length];
   _saveLayout(L);
   applyReaderLayout();
-}
-function readerFontToggle() {  // 兼容旧调用
-  showReaderFonts();
 }
 function _loadPaper() {
   const p = localStorage.getItem(PAPER_KEY);

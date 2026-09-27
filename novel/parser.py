@@ -353,16 +353,3 @@ def parse_content(html: str, *, strip_ads: bool = True, selector: str | None = N
         text = "\n".join(lines)
 
     return text
-
-
-def normalize_chapter_href(href: str, base_url: str) -> str:
-    """把站内相对链接归一化为绝对 URL。"""
-    if href.startswith("//"):
-        return "https:" + href
-    if href.startswith("/"):
-        return base_url.rstrip("/") + href
-    if href.startswith("http"):
-        return href
-    if not href or href.startswith(("#", "javascript:", "mailto:", "tel:", "?")):
-        return href
-    return urljoin(base_url.rstrip("/") + "/", href)

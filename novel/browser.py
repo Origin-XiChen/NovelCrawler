@@ -98,15 +98,6 @@ def render_html(url: str, headers: dict | None = None, wait_ms: int = 2000,
                     pass
 
 
-def browser_available() -> bool:
-    """检查浏览器引擎是否可用(不实际启动)。"""
-    try:
-        import playwright  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
 _CF_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 

@@ -747,8 +747,9 @@
   /* 左下角模式警示胶囊已移除(门户角标保留) */
   .chk { display:inline-flex; align-items:center; gap:5px; cursor:pointer; user-select:none; }
   .chk input { accent-color: var(--primary); }
-  /* 本地 PDF 阅读器 */
-  #cview-pdfreader { display:flex; flex-direction:column; }
+  /* 本地 PDF 阅读器:布局用 flex,但默认必须保持隐藏(由 _pdfOpen 置为 flex 显示)。
+     直接写 display:flex 会覆盖元素上的内联 display:none,导致 PDF 阅读器常驻遮挡页面。 */
+  #cview-pdfreader.active { display:flex; flex-direction:column; }
   .reader-bar .rb {
     border:none; background:transparent; cursor:pointer; color:var(--text);
     font-size:13px; padding:4px 10px; border-radius:6px; white-space:nowrap;
@@ -3463,8 +3464,6 @@ function addTaskStep(id, text, status) {
   if (t.steps.length > 100) t.steps = t.steps.slice(-100);
 }
 /* 旧气泡详情面板(_renderTaskPanel/二级窗口)已随 #taskPanel 删除,任务面板统一走 taskPanelMask */
-// 任务详情:showTaskDetail 实现在任务面板区(单任务过滤),此处仅保留空实现避免旧调用报错
-function closeTaskDetail() { /* no-op */ }
 function setTaskPct(id, pct) {
   const t = _tasks.get(id);
   if (!t) return;
@@ -3487,15 +3486,6 @@ function removeTask(id, instant) {
   t.el.style.opacity = '0'; t.el.style.transform = 'translateX(20px)';
   setTimeout(() => { t.el.remove(); _tasks.delete(id); }, 320);
 }
-/* 兼容旧调用(旧函数保留,内部转新系统) */
-function showBubble(mode) { addTask('_tmp', '任务', mode || 'blue'); }
-function showBubbleTask(name) { updateTaskLabel('_tmp', name || ''); }
-function showTaskBubble(name) { addTask('_tmp', name || '任务', 'orange'); }
-function updateBubble(p) {
-  const t = _tasks.get('_tmp');
-  if (t) setTaskPct('_tmp', p && p.total ? Math.round(p.done / p.total * 100) : 0);
-}
-function hideBubble() { removeTask('_tmp', true); }
 let bubbleMode = 'blue';
 const SRC_STATUS = {'ok':'#16a34a','empty':'#d97706','error':'#dc2626','no_search':'#8a94a6'};
 const SRC_STATUS_TXT = {'ok':'✓','empty':'空','error':'✗','no_search':'直连'};
@@ -5774,7 +5764,6 @@ if (_sysThemeMq) {
   if (_sysThemeMq.addEventListener) _sysThemeMq.addEventListener('change', onSysTheme);
   else if (_sysThemeMq.addListener) _sysThemeMq.addListener(onSysTheme);
 }
-function currentTheme() { return localStorage.getItem('novelist_theme') || 'auto'; }
 
 // 局域网访问信息 + 二维码(渲染到设置页「手机」分类的局域网字段下)
 async function loadLanInfo() {
@@ -7219,7 +7208,6 @@ loadSources();
 showDevTip('main');           // 启动弹门户使用说明(每会话一次)
 _loadTaskCfg();          // 任务气泡配置(位置/显隐/通知/并发)加载并应用
 initFabDrag();           // 任务气泡可拖动记忆位置
-_wireReaderUiToggle();   // 小说阅读器点击切换工具栏显隐(一次性绑定)
 setInterval(autoCheckUpdates, 1800000);  // 书架定时追更(30分钟)
 loadFiles();
 loadShelf();

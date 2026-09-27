@@ -530,11 +530,6 @@ class WebView2:
         finally:
             oleaut32.SysFreeString(b)
 
-    def execute_script(self, js: str):
-        """注入 JS 到页面。注:本机 Runtime vtable 未实测 ExecuteScript 索引,
-        且与 add_WebMessageReceived 同处 index 25 冲突,当前无调用点,禁用。"""
-        return
-
     def resize(self):
         if not self._ctrl:
             return
@@ -952,34 +947,6 @@ class Api:
             user32.MessageBoxW(None, str(msg), "小说管家", 0x40)
         except Exception:  # noqa: BLE001
             pass
-
-    def get_platform(self) -> str:
-        return sys.platform
-
-    def is_frameless(self) -> bool:
-        return True
-
-    def start_drag(self) -> None:
-        """标题栏按下 → 投递自定义消息,由 UI 线程发起系统原生拖动循环
-        (含 Aero Snap / 最大化后下拉还原)。WebView2 子窗口盖满客户区,主窗口
-        收不到 WM_NCHITTEST,故走消息桥/HTTP → PostMessage → UI 线程
-        ReleaseCapture + WM_NCLBUTTONDOWN(HTCAPTION) 交给系统拖动。"""
-        h = self._win.hwnd
-        if h:
-            user32.PostMessageW(h, WM_APP_MOVERESIZE, HTCAPTION, 0)
-
-    _HT_EDGE = {
-        "left": HTLEFT, "right": HTRIGHT, "top": HTTOP,
-        "bottom": HTBOTTOM, "top-left": HTTOPLEFT, "top-right": HTTOPRIGHT,
-        "bottom-left": HTBOTTOMLEFT, "bottom-right": HTBOTTOMRIGHT,
-    }
-
-    def start_resize(self, edge: str = "") -> None:
-        """窗口边缘按下 → 投递自定义消息,UI 线程发起系统原生缩放循环。"""
-        ht = self._HT_EDGE.get(edge)
-        h = self._win.hwnd
-        if ht and h:
-            user32.PostMessageW(h, WM_APP_MOVERESIZE, ht, 0)
 
     def win_minimize(self) -> None:
         user32.ShowWindow(self._win.hwnd, SW_MINIMIZE)

@@ -71,10 +71,6 @@ def set_main_hwnd(hwnd: int, cache_dir: str = "") -> None:
     if cache_dir:  # 记录本实例 WebView2 缓存目录,退出时据此识别本子进程
         _WV2_CACHE_DIR = os.path.abspath(cache_dir)
 
-def _get_hwnd() -> int:
-    return _WIN_HWND
-
-
 # 多窗口:阅读器窗口的创建与控制钩子(window2.py 启动时注册)
 _WINDOW_CTL_HOOK = None
 _OPEN_READER_HOOK = None
@@ -352,54 +348,9 @@ def _next_task_id() -> str:
 
 
 # ---- auto delay:按 host 智能选择最小安全间隔 ----
-# _host_stats[host] = {'samples': [最近响应ms, ...](最多20), 'last_429_at': ts, 'last_403_at': ts}
-_host_stats: dict[str, dict] = {}
-_auto_lock = threading.Lock()
-
-
-def _compute_auto_delay(url: str) -> float:
-    """根据 host 最近响应/风控样本智能选择最小安全章节间隔(秒)。
-
-    策略:
-      - 60s 内出现 429/403 风控 → 3.0s 保守(防封禁)
-      - 最近 5 个样本平均响应 < 500ms 且无错误 → 0.2s 极速
-      - 平均响应 500-1500ms → 0.5s 快速
-      - 平均响应 > 1500ms → 1.0s 标准
-      - 样本 < 3 → 0.5s 保守起步
-    """
-    from urllib.parse import urlparse
-    import time as _time
-    try: host = urlparse(url).hostname or ''
-    except Exception: host = ''
-    if not host: return 0.5
-    now = _time.time()
-    with _auto_lock:
-        st = _host_stats.get(host)
-    if not st or len(st.get('samples', [])) < 3: return 0.5
-    if (now - (st.get('last_429_at') or 0) < 60) or (now - (st.get('last_403_at') or 0) < 60):
-        return 3.0
-    recent = st['samples'][-5:]
-    avg_ms = sum(recent) / len(recent)
-    if avg_ms < 500: return 0.2
-    if avg_ms < 1500: return 0.5
-    return 1.0
-
-
-def _record_host_perf(url: str, resp_ms: float, status: int | None = None) -> None:
-    """记录某 host 的一次请求性能(响应毫秒)和风控状态,供 auto delay 评估。"""
-    from urllib.parse import urlparse
-    import time as _time
-    try: host = urlparse(url).hostname or ''
-    except Exception: host = ''
-    if not host: return
-    now = _time.time()
-    with _auto_lock:
-        st = _host_stats.setdefault(host, {'samples': [], 'last_429_at': 0.0, 'last_403_at': 0.0})
-        st['samples'].append(resp_ms)
-        if len(st['samples']) > 20: st['samples'] = st['samples'][-20:]
-        if status == 429: st['last_429_at'] = now
-        elif status == 403: st['last_403_at'] = now
-
+# 注:采集侧 _record_host_perf 已随旧抓取链路移除,没有样本写入源,
+# _host_stats 恒为空 → _compute_auto_delay 永远走「样本<3 → 0.5s」保守档。
+# 为避免误导,这里直接用常量间隔,不再保留空的统计/评估体系。
 
 def _prune_tasks() -> None:
     """修剪已完成且前端已读走终态的任务,防止 _tasks 注册表无限增长。
@@ -489,10 +440,10 @@ def _run_download(task_id: str, book: Book, opts: dict) -> None:
                 # 暂停:阻塞等待恢复(期间仍可取消;超时按停止处理)
                 _pause_wait(t)
 
-        # auto:基于源最近的响应/风控样本智能选择最小安全间隔(起步 0.5s,效率更高)
+        # delay:"auto" 统一用 0.5s 安全起步(原按 host 响应自适应已下线,见上方注释)
         delay_raw = opts.get("delay", 1.2)
         if isinstance(delay_raw, str) and delay_raw == "auto":
-            delay = _compute_auto_delay(book.url if hasattr(book, 'url') else '')
+            delay = 0.5
         else:
             try: delay = float(delay_raw)
             except (TypeError, ValueError): delay = 1.2
@@ -3929,7 +3880,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": f"EPUB 下载失败: {err}"}, 502)
         try:
             chapters = parse_epub(path)
-            return self._send_json({"ok": True, "mode": "epub", "title": chapters[0].get("title", "") if chapters else "", "chapters": chapters})
+            # 目录接口只回「标题」,不回正文。
+            # 旧实现把每章 text+html 全量塞进目录 JSON,一本 332 章的书要传 16MB+,
+            # 前端要等整个响应下载并 JSON.parse 完才渲染 → 表现为长期卡在"正在下载中"。
+            # 正文由 /api/epub_online_read 逐章按需拉取(那里才是内容出口)。
+            toc = [{"idx": c.get("idx", i + 1), "title": c.get("title") or f"第{i + 1}章",
+                    "volume": c.get("volume", "") or ""}
+                   for i, c in enumerate(chapters)]
+            return self._send_json({"ok": True, "mode": "epub",
+                                    "title": chapters[0].get("title", "") if chapters else "",
+                                    "count": len(toc), "chapters": toc})
         except Exception as exc:  # noqa: BLE001
             return self._send_json({"error": f"EPUB 解析失败: {exc}"}, 500)
 

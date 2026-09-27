@@ -287,14 +287,6 @@ def load_sources() -> list[dict]:
     return [s for s in load_all_sources() if s.get("enabled", True)]
 
 
-def save_sources_state(states: dict[str, bool]) -> None:
-    """保存内置源的启用状态覆盖。"""
-    with _cfg_lock:
-        cfg = _read_cfg()
-        cfg["source_states"] = states
-        _write_cfg(cfg)
-
-
 def set_source_state(name: str, enabled: bool) -> None:
     """精准设置单个内置源的启用状态,不影响其他源。"""
     with _cfg_lock:

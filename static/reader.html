@@ -741,8 +741,9 @@
   /* 左下角模式警示胶囊已移除(门户角标保留) */
   .chk { display:inline-flex; align-items:center; gap:5px; cursor:pointer; user-select:none; }
   .chk input { accent-color: var(--primary); }
-  /* 本地 PDF 阅读器 */
-  #cview-pdfreader { display:flex; flex-direction:column; }
+  /* 本地 PDF 阅读器:布局用 flex,但默认必须保持隐藏(由 comicOpenLocalPdf 置为 flex 显示)。
+     直接写 display:flex 会覆盖元素上的内联 display:none,导致 PDF 阅读器常驻遮挡页面。 */
+  #cview-pdfreader.active { display:flex; flex-direction:column; }
   .reader-bar .rb {
     border:none; background:transparent; cursor:pointer; color:var(--text);
     font-size:13px; padding:4px 10px; border-radius:6px; white-space:nowrap;
@@ -1322,6 +1323,31 @@ window.closeReader = function () {
 window.closeLocalPdf = function () {
   if (isDesktop()) { winPost('/api/window/close'); } else { window.close(); }
 };
+// 小说阅读器:点击正文空白处切换工具栏/目录显隐(沉浸模式)。
+// reader-core._wireReaderUiToggle 只在 index.html 的 DOMContentLoaded 里调用(那时
+// #readerMask 还不存在),独立窗口里没有任何地方调用 → 工具栏一旦隐藏就再也唤不起来。
+// 这里在每次进入小说阅读时显式绑定(绑定是幂等的,靠 _uiToggleBound 去重)。
+window._readerUiToggleBound = false;
+window.bindReaderUiToggle = function () {
+  const mask = document.getElementById('readerMask');
+  if (!mask || mask._uiToggleBound) return;
+  mask._uiToggleBound = true;
+  window._readerUiToggleBound = true;
+  mask.addEventListener('click', function (ev) {
+    if (ev.target.closest && ev.target.closest('.reader-hd, .reader-bar, .reader-toc, .reader-toc-mask')) return;
+    const hidden = document.body.classList.toggle('ui-hidden');
+    if (!hidden) document.body.classList.remove('ui-hint');
+  });
+};
+// 兜底:Esc 之外的快捷键 Ctrl/Cmd+H 强制显隐工具栏
+document.addEventListener('keydown', function (e) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) {
+    if (!document.body.classList.contains('novel-reading')) return;
+    e.preventDefault();
+    const hidden = document.body.classList.toggle('ui-hidden');
+    if (!hidden) document.body.classList.remove('ui-hint');
+  }
+});
 // 拖动:阅读器顶栏 → /api/window/drag(带 win)
 document.addEventListener('mousedown', function (e) {
   if (!isDesktop()) return;
@@ -1339,10 +1365,13 @@ document.addEventListener('mousedown', function (e) {
     if (mode === 'comic') {
       comicOpenReader(q.get('source') || '', q.get('comic_id') || '', q.get('title') || '漫画', 'reader');
     } else if (mode === 'novel') {
+      window.bindReaderUiToggle();
       openReader(q.get('file') || '', num('idx'));
     } else if (mode === 'novel_online') {
+      window.bindReaderUiToggle();
       openReaderOnline(q.get('rurl') || '', q.get('title') || '在线阅读', num('idx'));
     } else if (mode === 'epub') {
+      window.bindReaderUiToggle();
       openEpubOnline(q.get('rurl') || '', q.get('title') || 'EPUB 在线阅读');
     } else if (mode === 'pdf') {
       comicOpenLocalPdf(q.get('title') || '漫画', q.get('file') || '');

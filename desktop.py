@@ -114,28 +114,9 @@ def main() -> None:
             except Exception:  # noqa: BLE001
                 pass
 
-        def get_platform(self) -> str:
-            return sys.platform
-
-        def is_frameless(self) -> bool:
-            return True
-
         # ---- 无边框自绘标题栏的窗口控制(前端 titlebar 按钮调用) ----
         def win_minimize(self) -> None:
             _win().minimize()
-
-        def start_drag(self) -> None:
-            """(已弃用)系统级拖动现在由 WM_NCHITTEST 子类化自动接管,
-            无需前端调用;保留此方法仅为兼容旧前端。"""
-            try:
-                import ctypes
-                hwnd = ctypes.windll.user32.FindWindowW(None, "小说管家")
-                if hwnd:
-                    ctypes.windll.user32.ReleaseCapture()
-                    # WM_NCLBUTTONDOWN = 0xA1, HTCAPTION = 2(标题栏命中)
-                    ctypes.windll.user32.SendMessageW(hwnd, 0xA1, 2, 0)
-            except Exception:  # noqa: BLE001
-                pass
 
         def win_maximize_toggle(self) -> None:
             w = _win()

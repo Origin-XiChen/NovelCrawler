@@ -114,10 +114,6 @@ class Fetcher:
             return {"http": self.proxy, "https": self.proxy}
         return None
 
-    def _sleep(self) -> None:
-        """请求之间的随机间隔,模拟人类阅读节奏。"""
-        time.sleep(random.uniform(self.min_delay, self.max_delay))
-
     # ------------------------------------------------------------------
     def fetch(
         self,

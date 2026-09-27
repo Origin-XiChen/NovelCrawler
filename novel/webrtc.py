@@ -114,12 +114,6 @@ def encode_phone_hints(hints: dict) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii")
 
 
-def decode_phone_hints(hint_b64: str) -> dict:
-    import json as _json
-    raw = base64.urlsafe_b64decode(hint_b64)
-    return _json.loads(raw.decode("utf-8"))
-
-
 def encode_sdp(sdp: str) -> str:
     """SDP → 压缩 → urlsafe base64。"""
     return base64.urlsafe_b64encode(zlib.compress(sdp.encode("utf-8"))).decode("ascii")
