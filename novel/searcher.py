@@ -13,6 +13,7 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from urllib.parse import urlencode, urlparse
 
@@ -178,6 +179,22 @@ def search_source(
     return results
 
 
+# 聚合搜索的默认全局时间预算(秒):到点即用"已完成源"的结果收口。
+# 实测:4 个可搜索源里 3 个在 11 秒内完成,而最慢的一个会拖到 124 秒 ——
+# 没有这个预算时,整个搜索要等最慢的源,界面会一直停在"正在搜索"。
+# 60 秒是折中值:覆盖"慢但确实有结果"的源,同时给出明确上限;
+# 用户可在设置里调大,设为 0 表示不限时(退回旧行为)。
+SEARCH_TOTAL_TIMEOUT = 60.0
+
+
+def _is_searchable(source: dict) -> bool:
+    """该源是否具备搜索能力(有 search 或 api_rules.search 规则)。
+
+    不具备搜索能力的源(仅下载/正文)不应计入进度分母,也不该占用搜索线程。
+    """
+    return bool(source.get("search")) or bool((source.get("api_rules") or {}).get("search"))
+
+
 def search_all(
     keyword: str,
     fetcher: Fetcher | None = None,
@@ -188,6 +205,8 @@ def search_all(
     on_progress=None,
     skip_names: set | None = None,
     cancel_check=None,
+    total_timeout: float | None = None,
+    include_unsearchable: bool = False,
 ):
     """
     多源聚合搜索:返回所有源的结果(去重)。
@@ -197,6 +216,8 @@ def search_all(
     on_progress: callable(done, total, name, status, books) 每完成一个源回调一次,books 为该源结果
     skip_names: 跳过的源名集合(如短期连续失败的源)
     cancel_check: callable() → bool,每完成一个源后调用;返回 True 则提前结束(暂停/取消)
+    total_timeout: 全局时间预算(秒),None 时用 SEARCH_TOTAL_TIMEOUT;到点后未完成的源标记为 timeout
+    include_unsearchable: True 时在没有可搜索源的情况下也返回 no_search 明细(仅供诊断)
     """
     fetcher = fetcher or Fetcher()
     sources = load_sources()
@@ -204,33 +225,77 @@ def search_all(
         sources = [s for s in sources if s["name"] in source_names]
     if skip_names:
         sources = [s for s in sources if s["name"] not in skip_names]
+
+    # 只有带搜索规则的源才算"搜索源";其余源永远返回 no_search,
+    # 计入分母会让进度失去意义,所以在这里先分流。
+    unsearchable = [s for s in sources if not _is_searchable(s)]
+    sources = [s for s in sources if _is_searchable(s)]
+
     if not sources:
-        # 指定的源不存在/全被禁用
-        empty = {"books": [], "sources": []} if return_meta else []
+        # 指定的源不存在/全被禁用/都没有搜索规则
+        meta = []
+        if include_unsearchable:
+            meta = [{"name": s["name"], "status": "no_search", "count": 0,
+                     "error": "该源没有搜索规则"} for s in unsearchable]
+        empty = {"books": [], "sources": meta} if return_meta else []
         if verbose:
-            print("没有可用的书源(可能全部被禁用或名称不存在)")
+            if unsearchable:
+                print(f"没有可搜索的书源(另有 {len(unsearchable)} 个源不带搜索规则,只能按 URL 下载)")
+            else:
+                print("没有可用的书源(可能全部被禁用或名称不存在)")
         return empty
+
     queries = build_search_queries(keyword)
     if verbose:
         print(f"搜索词: {keyword}")
         print(f"扩展候选词: {' / '.join(queries)}")
-        print(f"启用书源: {', '.join(s['name'] for s in sources)}")
+        print(f"可搜索书源({len(sources)}): {', '.join(s['name'] for s in sources)}")
+        if unsearchable:
+            print(f"另有 {len(unsearchable)} 个源不带搜索规则,已跳过")
 
+    budget = SEARCH_TOTAL_TIMEOUT if total_timeout is None else total_timeout
+    # 0 / 非正数 / inf 一律视为"不限时"(退回旧行为),此时不能把 inf 交给
+    # as_completed —— 它会去做 time()+inf 的等待,部分平台直接 OverflowError。
+    unlimited = (budget is None) or (budget <= 0) or (budget == float("inf"))
+    deadline = None if unlimited else time.monotonic() + budget
     all_books: dict[str, Book] = {}
     source_meta: list[dict] = []
+    total = len(sources)
 
     def _run(s):
         meta = {"name": s["name"], "status": "no_search", "count": 0, "error": ""}
-        if not s.get("search") and not (s.get("api_rules") or {}).get("search"):
-            return [], meta
         books = search_source(s, queries, fetcher, status=meta)
         return books, meta
 
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(sources))) as pool:
-        futures = {pool.submit(_run, s): s["name"] for s in sources}
-        done_count = 0
-        for fut in as_completed(futures):
+    def _collect(books, meta) -> list:
+        """把单个源的结果并入聚合表,返回本次新增的书籍。"""
+        new_books = []
+        for b in books:
+            # 清洗书名(去掉 .txt全集下载 等噪音),按 源+清洗名 聚合去重
+            ct = clean_book_title(b.title)
+            if not ct:
+                continue
+            key = f"{b.source}|{ct}"
+            if key in all_books:
+                continue
+            b.raw_title = b.title  # 保留原始书名
+            b.title = ct
+            all_books[key] = b
+            new_books.append(b)
+        source_meta.append(meta)
+        return new_books
+
+    pool = ThreadPoolExecutor(max_workers=min(max_workers, total))
+    futures = {pool.submit(_run, s): s["name"] for s in sources}
+    done_count = 0
+    timed_out = False
+    handled: set = set()   # 已在主循环处理的 future,收口时不能重复计入
+    try:
+        # 到点即停止等待(as_completed 抛 TimeoutError),不再等最慢的源
+        _wait = None if unlimited else max(0.1, deadline - time.monotonic())
+        for fut in as_completed(futures, timeout=_wait):
             name = futures[fut]
+            handled.add(fut)
             try:
                 books, meta = fut.result()
             except Exception as exc:  # noqa: BLE001
@@ -239,34 +304,60 @@ def search_all(
                 logger.warning("[%s] 搜索线程异常: %s", name, exc)
                 done_count += 1
                 if on_progress:
-                    on_progress(done_count, len(sources), name, "error", [])
+                    on_progress(done_count, total, name, "error", [])
                 continue
-            source_meta.append(meta)
-            new_books = []
-            for b in books:
-                # 清洗书名(去掉 .txt全集下载 等噪音),按 源+清洗名 聚合去重
-                ct = clean_book_title(b.title)
-                if not ct:
-                    continue
-                key = f"{b.source}|{ct}"
-                if key in all_books:
-                    continue
-                b.raw_title = b.title  # 保留原始书名
-                b.title = ct
-                all_books[key] = b
-                new_books.append(b)
+            new_books = _collect(books, meta)
             done_count += 1
             if on_progress:
-                on_progress(done_count, len(sources), name, meta["status"], new_books)
+                on_progress(done_count, total, name, meta["status"], new_books)
             if verbose and books:
                 print(f"  ✓ [{name}] 找到 {len(books)} 条")
             if cancel_check and cancel_check():
-                logger.info("搜索被暂停/取消,提前结束(已处理 %d/%d)", done_count, len(sources))
+                logger.info("搜索被暂停/取消,提前结束(已处理 %d/%d)", done_count, total)
                 break
+    except FuturesTimeoutError:
+        timed_out = True
+        logger.info("搜索总耗时超过 %.0f 秒,用已完成 %d/%d 个源的结果收口",
+                    budget, done_count, total)
+    finally:
+        # 不等待剩余线程:它们会在后台自行结束(各自有请求超时),结果不再需要
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    if timed_out:
+        for fut, name in futures.items():
+            if fut.cancelled() or fut in handled:
+                continue
+            if fut.done():
+                # 恰好在截止时刻返回的源,结果照常并入(不丢)
+                try:
+                    books, meta = fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    meta = {"name": name, "status": "error", "count": 0,
+                            "error": str(exc)[:150]}
+                    source_meta.append(meta)
+                    done_count += 1
+                    if on_progress:
+                        on_progress(done_count, total, name, "error", [])
+                    continue
+                new_books = _collect(books, meta)
+                done_count += 1
+                if on_progress:
+                    on_progress(done_count, total, name, meta["status"], new_books)
+            else:
+                meta = {"name": name, "status": "timeout", "count": 0,
+                        "error": f"超过 {budget:.0f} 秒未返回,已跳过"}
+                source_meta.append(meta)
+                done_count += 1
+                if on_progress:
+                    on_progress(done_count, total, name, "timeout", [])
+        if verbose:
+            print(f"  ! 到点收口:已完成 {done_count}/{total} 个源")
 
     books = list(all_books.values())
     if return_meta:
-        return {"books": books, "sources": source_meta}
+        return {"books": books, "sources": source_meta,
+                "total_sources": total, "done_sources": done_count,
+                "timed_out": timed_out, "skipped_unsearchable": len(unsearchable)}
     return books
 
 

@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>漫画+小说 · 新界面设计预览(V0.20 提案)</title>
+<style>
+/* ==========================================================================
+   设计令牌 · 单一来源。所有界面只允许使用这里的语义变量。
+   命名:@表面 / 文本 / 描边 / 品牌 / 语义 / 间距 / 圆角 / 字号 / 阴影 / 动效
+   ========================================================================== */
+:root{
+  color-scheme: light;
+
+  /* 表面:暖纸色系。paper=应用底,surface=卡片,surface2=内嵌块,surface3=悬停/选中底 */
+  --paper:#F7F5F1; --surface:#FFFFFF; --surface2:#FBF9F6; --surface3:#F1EDE7;
+
+  /* 文本:ink 正文 17.8:1,ink2 次要 7.0:1,ink3 三级 5.0:1 */
+  --ink:#17181A; --ink2:#55595E; --ink3:#6B7075;
+
+  /* 描边:line 仅作装饰分隔(1.4:1);控件边框用 line-strong(3.65:1,满足 1.4.11) */
+  --line:#E7E2DA; --line-strong:#8C8579;
+
+  /* 品牌:深墨绿。白字 5.97:1 */
+  --brand:#2C6E63; --brand-hover:#235A51; --brand-soft:#EAF2EF; --on-brand:#FFFFFF;
+
+  /* 模式强调:小说=沙褐(4.66:1),漫画=鼠尾草(5.08:1);底色只用浅色填充+ink 文字 */
+  --novel:#8E562F; --novel-soft:#F4EADE;
+  --comic:#376C4C; --comic-soft:#E6EFE7;
+
+  /* 语义 */
+  --success:#2F7A4F; --warn:#9A6208; --warn-soft:#FAF0DC;
+  --danger:#B3261E; --danger-soft:#FBEAE8;
+
+  /* 间距:4/8 节奏 */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px;
+
+  /* 圆角 */
+  --r1:8px; --r2:10px; --r3:14px; --r4:18px; --r-pill:999px;
+
+  /* 字号:桌面 13/14 为主,标题逐级放大 */
+  --f1:11px; --f2:12px; --f3:13px; --f4:14px; --f5:16px; --f6:20px; --f7:24px; --f8:30px;
+
+  /* 阴影:克制,只用于浮层与卡片层级 */
+  --sh1:0 1px 2px rgba(23,24,26,.05), 0 1px 1px rgba(23,24,26,.03);
+  --sh2:0 10px 30px rgba(23,24,26,.12);
+  --ring:0 0 0 3px rgba(44,110,99,.25);
+
+  --dur:160ms; --ease:cubic-bezier(.2,.8,.2,1);
+  --rail-w:236px; --top-h:56px;
+}
+[data-theme="dark"]{
+  color-scheme: dark;
+  --paper:#17181A; --surface:#202225; --surface2:#26292C; --surface3:#2C3034;
+  --ink:#F2F0EC; --ink2:#B9B6B0; --ink3:#96938D;
+  --line:#33373B; --line-strong:#7A8078;
+  --brand:#5FB39F; --brand-hover:#7CC7B4; --brand-soft:rgba(95,179,159,.16); --on-brand:#0F1113;
+  --novel:#D2A276; --novel-soft:rgba(210,162,118,.15);
+  --comic:#89BB9C; --comic-soft:rgba(137,187,156,.15);
+  --success:#7FC79A; --warn:#E0B062; --warn-soft:rgba(224,176,98,.15);
+  --danger:#F08A80; --danger-soft:rgba(240,138,128,.15);
+  --sh1:0 1px 2px rgba(0,0,0,.4);
+  --sh2:0 12px 32px rgba(0,0,0,.55);
+  --ring:0 0 0 3px rgba(95,179,159,.35);
+}
+
+/* ==========================================================================
+   基础
+   ========================================================================== */
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font:400 var(--f4)/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+       "Microsoft YaHei UI","Microsoft YaHei","Noto Sans SC",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4,p{margin:0}
+button,input,select,textarea{font:inherit; color:inherit}
+::selection{background:var(--brand-soft); color:var(--ink)}
+:focus-visible{outline:none; box-shadow:var(--ring); border-radius:var(--r1)}
+@media (prefers-reduced-motion: reduce){ *{animation-duration:.01ms !important; transition-duration:.01ms !important} }
+
+/* 图标:统一 1.6 描边、currentColor、20px,尺寸令牌 */
+.ic{width:20px; height:20px; flex:none; stroke:currentColor; fill:none;
+    stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round}
+.ic--sm{width:16px; height:16px}
+.ic--lg{width:24px; height:24px}
+
+/* ==========================================================================
+   应用骨架:侧栏 + 顶栏 + 视图
+   ========================================================================== */
+.app{display:grid; grid-template-columns:var(--rail-w) 1fr; height:100vh; overflow:hidden}
+
+/* 侧栏 */
+.rail{
+  display:flex; flex-direction:column; gap:var(--s4);
+  padding:var(--s4) var(--s3); border-right:1px solid var(--line);
+  background:var(--surface); min-height:0;
+}
+.brand{display:flex; align-items:center; gap:var(--s3); padding:var(--s1) var(--s2) 0}
+.brand__mark{
+  width:34px; height:34px; border-radius:10px; flex:none;
+  background:linear-gradient(145deg,var(--brand-soft),var(--surface3));
+  border:1px solid var(--line); display:grid; place-items:center; color:var(--brand);
+}
+.brand__name{font-size:var(--f4); font-weight:650; letter-spacing:.01em}
+.brand__sub{font-size:var(--f1); color:var(--ink3); margin-top:1px}
+
+/* 模式切换:分段控件(比两个彩色大卡更轻,同时保留"两个世界"的心智) */
+.segmented{display:grid; grid-template-columns:1fr 1fr; gap:2px; padding:3px;
+  background:var(--surface3); border-radius:var(--r2); border:1px solid var(--line)}
+.segmented button{
+  display:flex; align-items:center; justify-content:center; gap:6px;
+  height:32px; border:0; background:transparent; border-radius:7px;
+  font-size:var(--f3); font-weight:600; color:var(--ink2); cursor:pointer;
+  transition:background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.segmented button:hover{color:var(--ink)}
+.segmented button[aria-pressed="true"]{background:var(--surface); color:var(--ink); box-shadow:var(--sh1)}
+body[data-mode="comic"] .segmented button[aria-pressed="true"]{color:var(--comic)}
+body[data-mode="book"]  .segmented button[aria-pressed="true"]{color:var(--novel)}
+
+.nav{display:flex; flex-direction:column; gap:2px; min-height:0; overflow:auto}
+.nav__label{font-size:var(--f1); font-weight:600; color:var(--ink3); letter-spacing:.06em;
+  padding:var(--s3) var(--s2) var(--s1)}
+.nav__item{
+  display:flex; align-items:center; gap:10px; height:36px; padding:0 10px;
+  border:0; background:transparent; border-radius:var(--r1); cursor:pointer;
+  font-size:var(--f3); font-weight:500; color:var(--ink2); text-align:left; width:100%;
+  transition:background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.nav__item:hover{background:var(--surface3); color:var(--ink)}
+.nav__item[aria-current="page"]{background:var(--surface3); color:var(--ink); font-weight:600}
+.nav__item[aria-current="page"] .ic{color:var(--brand)}
+.nav__count{margin-left:auto; font-size:var(--f1); font-variant-numeric:tabular-nums;
+  color:var(--ink3); background:var(--surface3); border-radius:var(--r-pill); padding:1px 7px; min-width:22px; text-align:center}
+.nav__item[aria-current="page"] .nav__count{background:var(--surface); color:var(--ink2)}
+.rail__foot{margin-top:auto; display:flex; flex-direction:column; gap:var(--s2);
+  padding-top:var(--s3); border-top:1px solid var(--line)}
+.rail__storage{font-size:var(--f1); color:var(--ink3); line-height:1.6; padding:0 var(--s2)}
+.meter{height:4px; border-radius:var(--r-pill); background:var(--surface3); overflow:hidden; margin-top:5px}
+.meter > i{display:block; height:100%; background:var(--brand); border-radius:inherit}
+
+/* 主区 */
+.main{display:flex; flex-direction:column; min-width:0; min-height:0}
+.topbar{
+  height:var(--top-h); flex:none; display:flex; align-items:center; gap:var(--s3);
+  padding:0 var(--s5) 0 var(--s6); border-bottom:1px solid var(--line); background:var(--surface);
+}
+.crumb{display:flex; align-items:center; gap:var(--s2); font-size:var(--f3); color:var(--ink3); min-width:0}
+.crumb b{color:var(--ink); font-weight:600; font-size:var(--f4)}
+.search-inline{flex:1; max-width:520px; margin-left:auto}
+.topbar__actions{display:flex; align-items:center; gap:var(--s2); margin-left:var(--s3)}
+.winctl{display:flex; gap:2px; margin-left:var(--s3); padding-left:var(--s3); border-left:1px solid var(--line)}
+.winctl button{width:30px; height:28px; border:0; background:transparent; border-radius:6px;
+  color:var(--ink3); cursor:pointer; display:grid; place-items:center}
+.winctl button:hover{background:var(--surface3); color:var(--ink)}
+.winctl button[data-close]:hover{background:var(--danger); color:#fff}
+
+.view{flex:1; overflow:auto; padding:var(--s5) var(--s6) 104px; scroll-behavior:smooth}
+.view[hidden]{display:none}
+
+/* ==========================================================================
+   通用控件
+   ========================================================================== */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:34px; padding:0 var(--s4); border-radius:var(--r2); cursor:pointer;
+  border:1px solid var(--line-strong); background:var(--surface); color:var(--ink);
+  font-size:var(--f3); font-weight:600; white-space:nowrap;
+  transition:background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform 90ms var(--ease);
+}
+.btn:hover{background:var(--surface3)}
+.btn:active{transform:translateY(1px)}
+.btn--primary{background:var(--brand); border-color:var(--brand); color:var(--on-brand)}
+.btn--primary:hover{background:var(--brand-hover); border-color:var(--brand-hover)}
+.btn--ghost{border-color:transparent; background:transparent; color:var(--ink2)}
+.btn--ghost:hover{background:var(--surface3); color:var(--ink)}
+.btn--danger{border-color:transparent; background:var(--danger-soft); color:var(--danger)}
+.btn--danger:hover{background:var(--danger); color:#fff}
+.btn--sm{height:28px; padding:0 10px; font-size:var(--f2); border-radius:var(--r1)}
+.btn--icon{width:34px; height:34px; padding:0; border-color:transparent; background:transparent; color:var(--ink2)}
+.btn--icon:hover{background:var(--surface3); color:var(--ink)}
+.btn--icon[aria-expanded="true"]{background:var(--surface3); color:var(--ink)}
+.btn:disabled{opacity:.45; cursor:not-allowed; transform:none}
+
+.field{display:flex; flex-direction:column; gap:6px}
+.field > label{font-size:var(--f2); font-weight:600; color:var(--ink2)}
+.field > .hint{font-size:var(--f1); color:var(--ink3)}
+.input,.select{
+  height:34px; padding:0 10px; border-radius:var(--r2);
+  border:1px solid var(--line-strong); background:var(--surface); color:var(--ink);
+  font-size:var(--f3); width:100%; min-width:0;
+  transition:border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.input::placeholder{color:var(--ink3)}
+.input:hover,.select:hover{border-color:var(--ink3)}
+.input:focus,.select:focus{border-color:var(--brand); box-shadow:var(--ring); outline:none}
+.select{appearance:none; padding-right:28px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236B7075' stroke-width='1.6' stroke-linecap='round'><path d='M4 6l4 4 4-4'/></svg>");
+  background-repeat:no-repeat; background-position:right 8px center}
+
+.switch{position:relative; display:inline-flex; align-items:center; gap:10px; cursor:pointer; font-size:var(--f3)}
+.switch input{position:absolute; opacity:0; width:0; height:0}
+.switch i{width:36px; height:20px; border-radius:var(--r-pill); background:var(--line-strong);
+  transition:background var(--dur) var(--ease); position:relative; flex:none}
+.switch i::after{content:""; position:absolute; inset:2px auto 2px 2px; width:16px; border-radius:50%;
+  background:#fff; transition:transform var(--dur) var(--ease)}
+.switch input:checked + i{background:var(--brand)}
+.switch input:checked + i::after{transform:translateX(16px)}
+.switch input:focus-visible + i{box-shadow:var(--ring)}
+
+.chip{display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 8px;
+  border-radius:var(--r-pill); font-size:var(--f1); font-weight:600; letter-spacing:.01em;
+  background:var(--surface3); color:var(--ink2); white-space:nowrap}
+.chip--novel{background:var(--novel-soft); color:var(--novel)}
+.chip--comic{background:var(--comic-soft); color:var(--comic)}
+.chip--brand{background:var(--brand-soft); color:var(--brand)}
+.chip--warn{background:var(--warn-soft); color:var(--warn)}
+.chip--danger{background:var(--danger-soft); color:var(--danger)}
+.chip--ok{background:var(--brand-soft); color:var(--success)}
+.dot{width:6px; height:6px; border-radius:50%; background:currentColor; flex:none}
+
+.card{background:var(--surface); border:1px solid var(--line); border-radius:var(--r3); box-shadow:var(--sh1)}
+.card__hd{display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4);
+  border-bottom:1px solid var(--line)}
+.card__hd h3{font-size:var(--f4); font-weight:650}
+.card__bd{padding:var(--s4)}
+
+.section{margin-bottom:var(--s6)}
+.section__hd{display:flex; align-items:center; gap:var(--s3); margin-bottom:var(--s3)}
+.section__hd h2{font-size:var(--f5); font-weight:650; letter-spacing:.005em}
+.section__hd .sub{font-size:var(--f2); color:var(--ink3)}
+.section__hd .spacer{flex:1}
+
+.progress{height:6px; border-radius:var(--r-pill); background:var(--surface3); overflow:hidden}
+.progress > i{display:block; height:100%; border-radius:inherit; background:var(--brand);
+  transition:width var(--dur) var(--ease)}
+.progress--warn > i{background:var(--warn)}
+.progress--danger > i{background:var(--danger)}
+
+.skeleton{background:linear-gradient(90deg,var(--surface3) 25%,var(--surface2) 37%,var(--surface3) 63%);
+  background-size:400% 100%; animation:shimmer 1.4s ease-in-out infinite; border-radius:var(--r1)}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+
+.empty{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--s3);
+  padding:var(--s7) var(--s5); text-align:center; color:var(--ink3)}
+.empty__ico{width:52px; height:52px; border-radius:16px; display:grid; place-items:center;
+  background:var(--surface3); color:var(--ink3)}
+.empty h4{font-size:var(--f4); font-weight:650; color:var(--ink)}
+.empty p{font-size:var(--f3); max-width:42ch}
+
+/* ==========================================================================
+   视图 1:首页(把"门户大卡"降级为可访问的入口卡)
+   ========================================================================== */
+.hero{display:grid; grid-template-columns:1fr 1fr; gap:var(--s4); margin-bottom:var(--s6)}
+.door{
+  position:relative; display:flex; flex-direction:column; gap:var(--s3);
+  padding:var(--s5); border-radius:var(--r4); cursor:pointer; text-align:left;
+  border:1px solid var(--line); background:var(--surface); box-shadow:var(--sh1);
+  transition:transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.door:hover{transform:translateY(-2px); box-shadow:var(--sh2); border-color:var(--line-strong)}
+.door__head{display:flex; align-items:center; gap:var(--s3)}
+.door__ico{width:44px; height:44px; border-radius:12px; display:grid; place-items:center; flex:none}
+.door--novel .door__ico{background:var(--novel-soft); color:var(--novel)}
+.door--comic .door__ico{background:var(--comic-soft); color:var(--comic)}
+.door__title{font-size:var(--f5); font-weight:650}
+.door__desc{font-size:var(--f3); color:var(--ink2)}
+.door__foot{display:flex; align-items:center; gap:var(--s2); margin-top:auto}
+.door__go{margin-left:auto; display:inline-flex; align-items:center; gap:6px;
+  font-size:var(--f3); font-weight:600}
+.door--novel .door__go{color:var(--novel)}
+.door--comic .door__go{color:var(--comic)}
+.kbd{font:600 var(--f1)/1 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ink3);
+  border:1px solid var(--line); border-bottom-width:2px; border-radius:5px; padding:3px 5px}
+
+.tiles{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:var(--s3)}
+.tile{display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4);
+  border:1px solid var(--line); border-radius:var(--r3); background:var(--surface);
+  cursor:pointer; text-align:left; transition:background var(--dur) var(--ease), border-color var(--dur) var(--ease)}
+.tile:hover{background:var(--surface2); border-color:var(--line-strong)}
+.tile__ico{width:36px; height:36px; border-radius:10px; background:var(--brand-soft);
+  color:var(--brand); display:grid; place-items:center; flex:none}
+.tile__t{font-size:var(--f3); font-weight:600}
+.tile__d{font-size:var(--f1); color:var(--ink3)}
+
+.continue{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--s3)}
+.cont-card{display:flex; gap:var(--s3); padding:var(--s3); border:1px solid var(--line);
+  border-radius:var(--r3); background:var(--surface); cursor:pointer;
+  transition:border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease)}
+.cont-card:hover{border-color:var(--line-strong); box-shadow:var(--sh1)}
+.cont-card__cov{width:44px; height:60px; border-radius:7px; flex:none; overflow:hidden;
+  display:grid; place-items:center; font-weight:700; font-size:var(--f5); color:#fff}
+.cont-card__b{min-width:0; flex:1; display:flex; flex-direction:column; gap:5px}
+.cont-card__t{font-size:var(--f3); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.cont-card__m{font-size:var(--f1); color:var(--ink3)}
+.cont-card__p{margin-top:auto}
+
+/* ==========================================================================
+   视图 2/5:书架(封面网格)/ 搜索(行列表)
+   ========================================================================== */
+.toolbar{display:flex; align-items:center; gap:var(--s2); margin-bottom:var(--s4); flex-wrap:wrap}
+.toolbar .input{height:32px; max-width:280px}
+.toolbar .select{height:32px; width:auto; min-width:132px}
+.toolbar__spacer{flex:1}
+.seg-view{display:flex; gap:2px; padding:2px; background:var(--surface3); border-radius:var(--r1)}
+.seg-view button{width:30px; height:26px; border:0; border-radius:6px; background:transparent;
+  color:var(--ink3); cursor:pointer; display:grid; place-items:center}
+.seg-view button[aria-pressed="true"]{background:var(--surface); color:var(--ink); box-shadow:var(--sh1)}
+
+.cover-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:var(--s4)}
+.cover-card{position:relative; border:1px solid var(--line); border-radius:var(--r3);
+  background:var(--surface); overflow:hidden; cursor:pointer;
+  transition:box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease)}
+.cover-card:hover{box-shadow:var(--sh2); border-color:var(--line-strong); transform:translateY(-2px)}
+.cover-card__img{position:relative; aspect-ratio:3/4; display:grid; place-items:center;
+  font-size:40px; font-weight:700; color:#fff; letter-spacing:.02em;
+  background:var(--surface3)}
+.cover-card__img img{width:100%; height:100%; object-fit:cover; display:block}
+.cover-card__overlay{position:absolute; inset:0; display:flex; flex-direction:column; justify-content:flex-end;
+  gap:6px; padding:var(--s3); opacity:0; background:linear-gradient(180deg,transparent 40%,rgba(12,13,14,.72));
+  transition:opacity var(--dur) var(--ease)}
+.cover-card:hover .cover-card__overlay,.cover-card:focus-within .cover-card__overlay{opacity:1}
+.cover-card__overlay .btn{height:30px; font-size:var(--f2); justify-content:center}
+.cover-card__badge{position:absolute; top:var(--s2); left:var(--s2); z-index:1;
+  background:rgba(12,13,14,.66); color:#fff; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,.16)}
+.cover-card__badge.chip--warn{background:rgba(154,98,8,.92); color:#fff}
+.cover-card__badge.chip--danger{background:rgba(179,38,30,.92); color:#fff}
+.cover-card__badge.chip--ok{background:rgba(44,110,99,.92); color:#fff}
+.cover-card__badge.chip--comic{background:rgba(55,108,76,.92); color:#fff}
+.cover-card__fav{position:absolute; top:var(--s2); right:var(--s2); z-index:1; width:28px; height:28px;
+  border-radius:50%; border:0; background:rgba(255,255,255,.92); color:var(--ink2); cursor:pointer;
+  display:grid; place-items:center; box-shadow:var(--sh1)}
+.cover-card__fav[aria-pressed="true"]{color:var(--warn)}
+.cover-card__bd{padding:var(--s2) 10px 10px}
+.cover-card__t{font-size:var(--f3); font-weight:600; line-height:1.4;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:2.8em}
+.cover-card__m{font-size:var(--f1); color:var(--ink3); margin-top:3px;
+  display:flex; align-items:center; gap:6px; min-width:0}
+.cover-card__m span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.cover-card__p{margin-top:8px}
+
+.rowlist{display:flex; flex-direction:column; gap:var(--s2)}
+.row{display:flex; gap:var(--s4); align-items:center; padding:var(--s3);
+  border:1px solid var(--line); border-radius:var(--r3); background:var(--surface);
+  transition:border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease)}
+.row:hover{border-color:var(--line-strong); box-shadow:var(--sh1)}
+.row__cov{width:52px; height:70px; border-radius:7px; flex:none; display:grid; place-items:center;
+  font-weight:700; font-size:var(--f6); color:#fff; overflow:hidden}
+.row__cov img{width:100%; height:100%; object-fit:cover}
+.row__b{flex:1; min-width:0; display:flex; flex-direction:column; gap:4px}
+.row__t{font-size:var(--f4); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.row__meta{display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap; font-size:var(--f2); color:var(--ink3)}
+.row__ops{display:flex; align-items:center; gap:var(--s2); flex:none}
+.row__note{font-size:var(--f1); color:var(--ink3)}
+
+.kebab{position:relative}
+.menu{position:absolute; right:0; top:calc(100% + 6px); z-index:20; min-width:168px; padding:var(--s1);
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r2); box-shadow:var(--sh2)}
+.menu[hidden]{display:none}
+.menu button{display:flex; align-items:center; gap:var(--s2); width:100%; height:32px; padding:0 10px;
+  border:0; background:transparent; border-radius:6px; font-size:var(--f3); color:var(--ink); cursor:pointer; text-align:left}
+.menu button:hover{background:var(--surface3)}
+.menu button[data-tone="danger"]{color:var(--danger)}
+.menu hr{margin:var(--s1) 0; border:0; border-top:1px solid var(--line)}
+
+/* ==========================================================================
+   任务:右下角停靠 + 展开面板(替代"任务气泡+FAB 两套模型")
+   ========================================================================== */
+.dock{position:fixed; right:var(--s5); bottom:var(--s5); z-index:40; width:340px;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r3); box-shadow:var(--sh2);
+  overflow:hidden}
+.dock__hd{display:flex; align-items:center; gap:var(--s2); padding:10px var(--s3);
+  background:var(--surface2); border-bottom:1px solid var(--line); cursor:pointer}
+.dock__hd h3{font-size:var(--f3); font-weight:650}
+.dock__body{max-height:0; overflow:hidden; transition:max-height var(--dur) var(--ease)}
+.dock[data-open="true"] .dock__body{max-height:340px; overflow:auto}
+.task{display:flex; flex-direction:column; gap:6px; padding:10px var(--s3); border-bottom:1px solid var(--line)}
+.task:last-child{border-bottom:0}
+.task__top{display:flex; align-items:center; gap:var(--s2)}
+.task__name{font-size:var(--f3); font-weight:600; flex:1; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.task__sub{font-size:var(--f1); color:var(--ink3)}
+.task__ops{display:flex; gap:4px; flex:none}
+
+/* ==========================================================================
+   设置:二级导航 + 分组卡 + 吸底保存栏
+   ========================================================================== */
+.settings{display:grid; grid-template-columns:200px 1fr; gap:var(--s5); align-items:start}
+.subnav{position:sticky; top:0; display:flex; flex-direction:column; gap:2px}
+.subnav button{display:flex; align-items:center; gap:10px; height:34px; padding:0 10px; border:0;
+  background:transparent; border-radius:var(--r1); color:var(--ink2); font-size:var(--f3);
+  font-weight:500; cursor:pointer; text-align:left}
+.subnav button:hover{background:var(--surface3); color:var(--ink)}
+.subnav button[aria-current="true"]{background:var(--surface); color:var(--ink); font-weight:650;
+  box-shadow:var(--sh1); border:1px solid var(--line)}
+.setgroup{margin-bottom:var(--s4)}
+.setgroup__hd{padding:var(--s3) var(--s4) 0}
+.setgroup__hd h3{font-size:var(--f4); font-weight:650}
+.setgroup__hd p{font-size:var(--f2); color:var(--ink3); margin-top:2px}
+.setgrid{display:grid; grid-template-columns:1fr 1fr; gap:var(--s4); padding:var(--s4)}
+.setgrid .full{grid-column:1 / -1}
+.savebar{position:sticky; bottom:8px; z-index:5; display:flex; align-items:center; gap:var(--s3);
+  padding:var(--s3) var(--s4); margin-top:var(--s4);
+  background:color-mix(in srgb,var(--surface) 92%,transparent); backdrop-filter:blur(8px);
+  border:1px solid var(--line); border-radius:var(--r3); box-shadow:var(--sh1)}
+.savebar__note{font-size:var(--f2); color:var(--ink3); flex:1}
+
+/* ==========================================================================
+   原型工具条(仅演示用,不进产品)
+   ========================================================================== */
+.demo-bar{position:fixed; left:50%; bottom:12px; transform:translateX(-50%); z-index:60;
+  display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:var(--r-pill);
+  background:color-mix(in srgb,var(--surface) 88%,transparent); backdrop-filter:blur(10px);
+  border:1px solid var(--line); box-shadow:var(--sh2); font-size:var(--f1); color:var(--ink3)}
+.demo-bar b{color:var(--ink2); font-weight:600; margin-right:2px}
+.demo-bar button{height:24px; padding:0 8px; border-radius:var(--r-pill); border:1px solid var(--line);
+  background:var(--surface); color:var(--ink2); cursor:pointer; font-size:var(--f1)}
+.demo-bar button:hover,.demo-bar button[aria-pressed="true"]{background:var(--brand-soft); color:var(--brand); border-color:transparent}
+
+/* 规范页 */
+.spec-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:var(--s3)}
+.swatch{border:1px solid var(--line); border-radius:var(--r2); overflow:hidden; background:var(--surface)}
+.swatch__c{height:52px}
+.swatch__m{padding:8px 10px; font-size:var(--f1); color:var(--ink2); line-height:1.5}
+.swatch__m b{display:block; color:var(--ink); font-size:var(--f2); font-weight:600}
+.spec-table{width:100%; border-collapse:collapse; font-size:var(--f2)}
+.spec-table th,.spec-table td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--line)}
+.spec-table th{color:var(--ink3); font-weight:600}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:var(--f2)}
+
+@media (max-width:1180px){
+  :root{--rail-w:68px}
+  .brand__name,.brand__sub,.nav__label,.nav__count,.rail__storage,.segmented span,.nav__text{display:none}
+  .segmented{grid-template-columns:1fr}
+  .nav__item{justify-content:center; padding:0}
+  .hero,.continue,.tiles{grid-template-columns:1fr}
+  .settings{grid-template-columns:1fr}
+  .subnav{flex-direction:row; overflow:auto; position:static}
+}
+</style>
+</head>
+<body data-mode="book">
+
+<!-- 图标精灵:同一套 1.6 描边线性图标(自绘,无外部依赖) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 016.5 3H19v15H6.5A2.5 2.5 0 004 20.5V5.5z"/><path d="M4 20.5A2.5 2.5 0 016.5 18H19"/><path d="M8 7h7"/></symbol>
+    <symbol id="i-comic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 15l4.5-4 3.5 3 3-2.5L21 16"/><circle cx="8.5" cy="8.5" r="1.4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 20V8m5 12V4m5 16V10m5 10V6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10m0 0l-3.5-3.5M12 14l3.5-3.5"/><path d="M4 17v2.5h16V17"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5l1.4 2.2 2.5-.6.6 2.5 2.2 1.4-1.3 2.2 1.3 2.2-2.2 1.4-.6 2.5-2.5-.6L12 20.5l-1.4-2.2-2.5.6-.6-2.5L5.3 15l1.3-2.2L5.3 10.6l2.2-1.4.6-2.5 2.5.6z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5l7 2.5v6c0 4.4-3 7.6-7 8.5-4-0.9-7-4.1-7-8.5V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18.5h2"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 4.5l2.3 4.7 5.2.7-3.8 3.6.9 5.1-4.6-2.5-4.6 2.5.9-5.1L4.5 9.9l5.2-.7z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5l10 6.5-10 6.5z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 10-2.7 6"/><path d="M20 5.5V12h-6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9 7V4.5h6V7M6.5 7l.8 12.5h9.4L17.5 7"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.5 2.5 0 00-3.5-3.5L4 16.5z"/><path d="M14.5 6.5l3 3"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.5l8.5 15H3.5z"/><path d="M12 10v4.2M12 17.2v.1"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5A2 2 0 015.5 5.5h4l2 2.5h7a2 2 0 012 2v7a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V6m0 0L8.5 9.5M12 6l3.5 3.5"/><path d="M4 17v2.5h16V17"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-min" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-max" viewBox="0 0 24 24"><rect x="5.5" y="5.5" width="13" height="13" rx="2"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <!-- ============ 侧栏 ============ -->
+  <aside class="rail">
+    <div class="brand">
+      <span class="brand__mark"><svg class="ic ic--lg"><use href="#i-book"/></svg></span>
+      <span>
+        <span class="brand__name">漫画+小说</span>
+        <span class="brand__sub">本地库 · 只存你自己的数据</span>
+      </span>
+    </div>
+
+    <div class="segmented" role="group" aria-label="切换区域">
+      <button type="button" data-mode-btn="book" aria-pressed="true">
+        <svg class="ic ic--sm"><use href="#i-book"/></svg><span>小说</span>
+      </button>
+      <button type="button" data-mode-btn="comic" aria-pressed="false">
+        <svg class="ic ic--sm"><use href="#i-comic"/></svg><span>漫画</span>
+      </button>
+    </div>
+
+    <nav class="nav" aria-label="主导航">
+      <div class="nav__label">浏览</div>
+      <button class="nav__item" data-view="search" aria-current="page">
+        <svg class="ic ic--sm"><use href="#i-search"/></svg><span class="nav__text">搜索</span>
+      </button>
+      <button class="nav__item" data-view="shelf">
+        <svg class="ic ic--sm"><use href="#i-library"/></svg><span class="nav__text">书架</span><span class="nav__count" id="cntShelf">3</span>
+      </button>
+      <div class="nav__label">下载</div>
+      <button class="nav__item" data-view="files">
+        <svg class="ic ic--sm"><use href="#i-download"/></svg><span class="nav__text">已下载</span><span class="nav__count" id="cntFiles">4</span>
+      </button>
+      <button class="nav__item" data-view="history">
+        <svg class="ic ic--sm"><use href="#i-clock"/></svg><span class="nav__text">任务记录</span><span class="nav__count">1</span>
+      </button>
+      <div class="nav__label">配置</div>
+      <button class="nav__item" data-view="verify">
+        <svg class="ic ic--sm"><use href="#i-shield"/></svg><span class="nav__text">站点验证</span><span class="nav__count">2</span>
+      </button>
+      <button class="nav__item" data-view="settings">
+        <svg class="ic ic--sm"><use href="#i-settings"/></svg><span class="nav__text">设置</span>
+      </button>
+      <div class="nav__label">演示</div>
+      <button class="nav__item" data-view="home">
+        <svg class="ic ic--sm"><use href="#i-grid"/></svg><span class="nav__text">首页(门户)</span>
+      </button>
+      <button class="nav__item" data-view="spec">
+        <svg class="ic ic--sm"><use href="#i-info"/></svg><span class="nav__text">设计规范</span>
+      </button>
+    </nav>
+
+    <div class="rail__foot">
+      <div class="rail__storage">
+        数据目录 264.5 MB
+        <div class="meter"><i style="width:26%"></i></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ 主区 ============ -->
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb">
+        <span>小说区</span>
+        <svg class="ic ic--sm" style="width:14px;height:14px"><use href="#i-chev-r"/></svg>
+        <b id="crumbTitle">搜索</b>
+      </div>
+      <div class="search-inline">
+        <input class="input" id="globalSearch" placeholder="搜索书名 / 作者,支持拼音与英文(ha li bo te)">
+      </div>
+      <div class="topbar__actions">
+        <button class="btn btn--icon" title="切换深浅色" aria-label="切换深浅色" id="themeBtn">
+          <svg class="ic"><use href="#i-moon"/></svg>
+        </button>
+        <button class="btn btn--icon" title="手机连接" aria-label="手机连接">
+          <svg class="ic"><use href="#i-qr"/></svg>
+        </button>
+        <button class="btn btn--primary" id="searchBtn" style="height:34px">
+          <svg class="ic ic--sm"><use href="#i-search"/></svg><span class="nav__text">搜索</span>
+        </button>
+      </div>
+      <div class="winctl" aria-hidden="true">
+        <button title="最小化"><svg class="ic ic--sm"><use href="#i-min"/></svg></button>
+        <button title="最大化"><svg class="ic ic--sm"><use href="#i-max"/></svg></button>
+        <button data-close title="关闭"><svg class="ic ic--sm"><use href="#i-close"/></svg></button>
+      </div>
+    </header>
+
+    <!-- ---------- 首页 ---------- -->
+    <section class="view" id="v-home" hidden>
+      <div class="section">
+        <div class="section__hd">
+          <h2>继续阅读</h2>
+          <span class="sub">上次停在这里</span>
+        </div>
+        <div class="continue">
+          <div class="cont-card">
+            <div class="cont-card__cov" style="background:var(--novel)">魔</div>
+            <div class="cont-card__b">
+              <div class="cont-card__t">魔女之旅 · 第 128 章</div>
+              <div class="cont-card__m">读到 39% · 3 分钟前</div>
+              <div class="cont-card__p"><div class="progress"><i style="width:39%"></i></div></div>
+            </div>
+          </div>
+          <div class="cont-card">
+            <div class="cont-card__cov" style="background:var(--comic)">白</div>
+            <div class="cont-card__b">
+              <div class="cont-card__t">白圣女与黑牧师 · 第 42 话</div>
+              <div class="cont-card__m">PDF 连续滚动 · 昨天</div>
+              <div class="cont-card__p"><div class="progress"><i style="width:72%"></i></div></div>
+            </div>
+          </div>
+          <div class="cont-card">
+            <div class="cont-card__cov" style="background:var(--ink3)">贤</div>
+            <div class="cont-card__b">
+              <div class="cont-card__t">贤者转生史莱姆 · 下载中</div>
+              <div class="cont-card__m">已完成 6/9 话 · 部分缺失,可补齐</div>
+              <div class="cont-card__p"><div class="progress progress--warn"><i style="width:66%"></i></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section__hd"><h2>进入区域</h2><span class="sub">也可以按 1 / 2 快速进入</span></div>
+        <div class="hero">
+          <button class="door door--novel" onclick="go('shelf')">
+            <div class="door__head">
+              <span class="door__ico"><svg class="ic ic--lg"><use href="#i-book"/></svg></span>
+              <span>
+                <span class="door__title">小说区</span>
+                <div class="door__desc">多源搜索 · 书架 · TXT/EPUB · 在线与离线阅读</div>
+              </span>
+            </div>
+            <div class="door__foot">
+              <span class="chip chip--novel"><span class="dot"></span>11 个书源已启用</span>
+              <span class="chip">书架 3 本</span>
+              <span class="door__go">进入 <svg class="ic ic--sm"><use href="#i-chev-r"/></svg><span class="kbd">1</span></span>
+            </div>
+          </button>
+          <button class="door door--comic" onclick="go('shelf')">
+            <div class="door__head">
+              <span class="door__ico"><svg class="ic ic--lg"><use href="#i-comic"/></svg></span>
+              <span>
+                <span class="door__title">漫画区</span>
+                <div class="door__desc">7 个源聚合 · PDF 打包 · 话级续传与补齐</div>
+              </span>
+            </div>
+            <div class="door__foot">
+              <span class="chip chip--comic"><span class="dot"></span>收藏 3 部</span>
+              <span class="chip chip--warn">1 部待补齐</span>
+              <span class="door__go">进入 <svg class="ic ic--sm"><use href="#i-chev-r"/></svg><span class="kbd">2</span></span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section__hd"><h2>快捷操作</h2></div>
+        <div class="tiles">
+          <button class="tile"><span class="tile__ico"><svg class="ic"><use href="#i-upload"/></svg></span>
+            <span><span class="tile__t">导入本地书</span><div class="tile__d">TXT / EPUB 拖进来即可</div></span></button>
+          <button class="tile"><span class="tile__ico"><svg class="ic"><use href="#i-qr"/></svg></span>
+            <span><span class="tile__t">手机连接</span><div class="tile__d">扫码在手机上接着看</div></span></button>
+          <button class="tile"><span class="tile__ico"><svg class="ic"><use href="#i-folder"/></svg></span>
+            <span><span class="tile__t">打开下载目录</span><div class="tile__d">264.5 MB · 4 本</div></span></button>
+          <button class="tile" onclick="go('settings')"><span class="tile__ico"><svg class="ic"><use href="#i-settings"/></svg></span>
+            <span><span class="tile__t">书源与代理</span><div class="tile__d">11 源启用 · 未配置代理</div></span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 搜索 ---------- -->
+    <section class="view" id="v-search">
+      <div class="toolbar">
+        <div class="chip chip--brand"><span class="dot"></span>已启用 11 个书源</div>
+        <div class="chip">相关性过滤:开</div>
+        <div class="toolbar__spacer"></div>
+        <button class="btn btn--sm"><svg class="ic ic--sm"><use href="#i-refresh"/></svg>只搜可用源</button>
+      </div>
+
+      <div class="rowlist" id="searchRows">
+        <div class="row">
+          <div class="row__cov" style="background:var(--novel)">魔</div>
+          <div class="row__b">
+            <div class="row__t">魔女之旅</div>
+            <div class="row__meta">
+              <span class="chip chip--novel">OPDS</span>
+              <span>321 章 · 已下载 321 章</span>
+              <span>· 白石定规</span>
+            </div>
+            <div class="row__note">命中关键词 · 本地已有完整版本</div>
+          </div>
+          <div class="row__ops">
+            <button class="btn btn--sm btn--primary"><svg class="ic ic--sm"><use href="#i-play"/></svg>阅读</button>
+            <div class="kebab">
+              <button class="btn btn--icon btn--sm" aria-label="更多操作" aria-expanded="false" onclick="toggleMenu(this)">
+                <svg class="ic"><use href="#i-more"/></svg>
+              </button>
+              <div class="menu" hidden>
+                <button><svg class="ic ic--sm"><use href="#i-refresh"/></svg>检查更新</button>
+                <button><svg class="ic ic--sm"><use href="#i-download"/></svg>重新下载</button>
+                <button><svg class="ic ic--sm"><use href="#i-folder"/></svg>打开所在目录</button>
+                <hr>
+                <button data-tone="danger"><svg class="ic ic--sm"><use href="#i-trash"/></svg>从书架移除</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row__cov" style="background:var(--novel)">持</div>
+          <div class="row__b">
+            <div class="row__t">持续狩猎史莱姆三百年,不知不觉就练到 LV MAX</div>
+            <div class="row__meta">
+              <span class="chip chip--novel">OPDS</span><span>202 章 · 未下载</span><span>· 森田季節</span>
+            </div>
+            <div class="row__note">英文/日文原名也能搜到(自动映射)</div>
+          </div>
+          <div class="row__ops">
+            <button class="btn btn--sm btn--primary"><svg class="ic ic--sm"><use href="#i-download"/></svg>下载</button>
+            <button class="btn btn--sm"><svg class="ic ic--sm"><use href="#i-star"/></svg>收藏</button>
+            <div class="kebab">
+              <button class="btn btn--icon btn--sm" aria-label="更多操作" aria-expanded="false" onclick="toggleMenu(this)">
+                <svg class="ic"><use href="#i-more"/></svg>
+              </button>
+              <div class="menu" hidden>
+                <button><svg class="ic ic--sm"><use href="#i-book"/></svg>在线阅读</button>
+                <button><svg class="ic ic--sm"><use href="#i-list"/></svg>选择章节下载</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row__cov" style="background:var(--surface3); color:var(--ink2)">三</div>
+          <div class="row__b">
+            <div class="row__t">三体</div>
+            <div class="row__meta"><span class="chip">笔趣阁365</span><span>约 900 章 · 限流等待中</span><span>· 刘慈欣</span></div>
+            <div class="row__note" style="color:var(--warn)">该源限流,15 秒后自动重试(不会重复下载)</div>
+          </div>
+          <div class="row__ops">
+            <button class="btn btn--sm btn--primary" disabled><svg class="ic ic--sm"><use href="#i-download"/></svg>下载</button>
+            <div class="kebab">
+              <button class="btn btn--icon btn--sm" aria-label="更多操作" aria-expanded="false" onclick="toggleMenu(this)">
+                <svg class="ic"><use href="#i-more"/></svg>
+              </button>
+              <div class="menu" hidden><button><svg class="ic ic--sm"><use href="#i-refresh"/></svg>换源重试</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:var(--s4); background:var(--surface2)">
+        <div class="card__bd" style="display:flex; gap:var(--s3); align-items:center; font-size:var(--f2); color:var(--ink2)">
+          <svg class="ic ic--sm" style="color:var(--ink3)"><use href="#i-info"/></svg>
+          <span>支持拼音(shi lai mu)与英文名(tensei shitara slime);结果按相关性过滤"无视关键词的推荐源"。</span>
+          <div style="flex:1"></div>
+          <button class="btn btn--sm btn--ghost">试试推荐关键词</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 书架(封面网格) ---------- -->
+    <section class="view" id="v-shelf" hidden>
+      <div class="toolbar">
+        <input class="input" placeholder="在书架中筛选" aria-label="在书架中筛选">
+        <select class="select" aria-label="排序">
+          <option>最近阅读</option><option>加入时间</option><option>书名</option><option>下载进度</option>
+        </select>
+        <div class="toolbar__spacer"></div>
+        <div class="seg-view" role="group" aria-label="视图样式">
+          <button aria-pressed="true" aria-label="网格"><svg class="ic ic--sm"><use href="#i-grid"/></svg></button>
+          <button aria-pressed="false" aria-label="列表"><svg class="ic ic--sm"><use href="#i-list"/></svg></button>
+        </div>
+        <button class="btn btn--sm" id="batchBtn">批量选择</button>
+      </div>
+
+      <div class="cover-grid">
+        <article class="cover-card" tabindex="0">
+          <span class="cover-card__badge chip chip--ok">已完整</span>
+          <button class="cover-card__fav" aria-pressed="true" aria-label="取消收藏"><svg class="ic ic--sm"><use href="#i-star"/></svg></button>
+          <div class="cover-card__img" style="background:var(--novel)">魔</div>
+          <div class="cover-card__overlay">
+            <button class="btn btn--primary"><svg class="ic ic--sm"><use href="#i-play"/></svg>继续阅读</button>
+            <button class="btn btn--sm" style="background:var(--surface)"><svg class="ic ic--sm"><use href="#i-refresh"/></svg>检查更新</button>
+          </div>
+          <div class="cover-card__bd">
+            <div class="cover-card__t">魔女之旅</div>
+            <div class="cover-card__m"><span>OPDS · 321 章</span></div>
+            <div class="cover-card__p"><div class="progress"><i style="width:100%"></i></div></div>
+          </div>
+        </article>
+
+        <article class="cover-card" tabindex="0">
+          <span class="cover-card__badge chip">未下载</span>
+          <button class="cover-card__fav" aria-pressed="false" aria-label="加入收藏"><svg class="ic ic--sm"><use href="#i-star"/></svg></button>
+          <div class="cover-card__img" style="background:var(--novel)">持</div>
+          <div class="cover-card__overlay">
+            <button class="btn btn--primary"><svg class="ic ic--sm"><use href="#i-download"/></svg>下载全书</button>
+            <button class="btn btn--sm" style="background:var(--surface)"><svg class="ic ic--sm"><use href="#i-book"/></svg>在线阅读</button>
+          </div>
+          <div class="cover-card__bd">
+            <div class="cover-card__t">持续狩猎史莱姆三百年,不知不觉就练到 LV MAX</div>
+            <div class="cover-card__m"><span>OPDS · 202 章</span></div>
+          </div>
+        </article>
+
+        <article class="cover-card" tabindex="0">
+          <span class="cover-card__badge chip chip--warn">缺 3 章</span>
+          <button class="cover-card__fav" aria-pressed="false" aria-label="加入收藏"><svg class="ic ic--sm"><use href="#i-star"/></svg></button>
+          <div class="cover-card__img" style="background:var(--novel)">史</div>
+          <div class="cover-card__overlay">
+            <button class="btn btn--primary"><svg class="ic ic--sm"><use href="#i-refresh"/></svg>补齐缺失</button>
+            <button class="btn btn--sm" style="background:var(--surface)"><svg class="ic ic--sm"><use href="#i-play"/></svg>阅读已有</button>
+          </div>
+          <div class="cover-card__bd">
+            <div class="cover-card__t">史莱姆转生。大贤者成为精灵养女的宠物了</div>
+            <div class="cover-card__m"><span>OPDS · 77/80 章</span></div>
+            <div class="cover-card__p"><div class="progress progress--warn"><i style="width:96%"></i></div></div>
+          </div>
+        </article>
+
+        <article class="cover-card" tabindex="0">
+          <div class="cover-card__img skeleton" style="border-radius:0"></div>
+          <div class="cover-card__bd">
+            <div class="skeleton" style="height:14px; margin-bottom:6px"></div>
+            <div class="skeleton" style="height:12px; width:60%"></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ---------- 漫画收藏 ---------- -->
+    <section class="view" id="v-comic" hidden>
+      <div class="toolbar">
+        <div class="chip chip--comic"><span class="dot"></span>收藏 3 部</div>
+        <div class="chip chip--warn">1 部待补齐</div>
+        <div class="toolbar__spacer"></div>
+        <select class="select" aria-label="筛选源"><option>全部源(7)</option><option>拷贝漫画</option><option>MangaDex</option></select>
+        <button class="btn btn--sm"><svg class="ic ic--sm"><use href="#i-refresh"/></svg>检查更新</button>
+      </div>
+      <div class="cover-grid">
+        <article class="cover-card" tabindex="0">
+          <span class="cover-card__badge chip chip--comic">拷贝</span>
+          <button class="cover-card__fav" aria-pressed="false" aria-label="加入收藏"><svg class="ic ic--sm"><use href="#i-star"/></svg></button>
+          <div class="cover-card__img" style="background:var(--comic)">白</div>
+          <div class="cover-card__overlay">
+            <button class="btn btn--primary"><svg class="ic ic--sm"><use href="#i-play"/></svg>继续阅读</button>
+            <button class="btn btn--sm" style="background:var(--surface)"><svg class="ic ic--sm"><use href="#i-download"/></svg>下载新话</button>
+          </div>
+          <div class="cover-card__bd">
+            <div class="cover-card__t">白聖女與黑牧師</div>
+            <div class="cover-card__m"><span>已下载 42/60 话</span></div>
+            <div class="cover-card__p"><div class="progress"><i style="width:70%"></i></div></div>
+          </div>
+        </article>
+        <article class="cover-card" tabindex="0">
+          <span class="cover-card__badge chip">MD</span>
+          <div class="cover-card__img" style="background:var(--comic)">白</div>
+          <div class="cover-card__overlay">
+            <button class="btn btn--primary"><svg class="ic ic--sm"><use href="#i-download"/></svg>下载</button>
+          </div>
+          <div class="cover-card__bd">
+            <div class="cover-card__t">白圣女与黑牧师</div>
+            <div class="cover-card__m"><span>manhuadb · 未下载</span></div>
+          </div>
+        </article>
+        <article class="cover-card" tabindex="0">
+          <span class="cover-card__badge chip chip--warn">缺 3 话</span>
+          <div class="cover-card__img" style="background:var(--ink3)">贤</div>
+          <div class="cover-card__overlay">
+            <button class="btn btn--primary"><svg class="ic ic--sm"><use href="#i-refresh"/></svg>补齐缺失(3 话)</button>
+          </div>
+          <div class="cover-card__bd">
+            <div class="cover-card__t">贤者转生史莱姆与养女开始全新生活</div>
+            <div class="cover-card__m"><span>manhuadb · 6/9 话</span></div>
+            <div class="cover-card__p"><div class="progress progress--warn"><i style="width:66%"></i></div></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ---------- 任务记录 ---------- -->
+    <section class="view" id="v-history" hidden>
+      <div class="toolbar">
+        <div class="seg-view" role="group" aria-label="任务状态筛选" style="padding:2px 4px; gap:2px">
+          <button aria-pressed="true" style="width:auto; padding:0 10px">全部 12</button>
+          <button aria-pressed="false" style="width:auto; padding:0 10px">进行中 1</button>
+          <button aria-pressed="false" style="width:auto; padding:0 10px">部分完成 1</button>
+          <button aria-pressed="false" style="width:auto; padding:0 10px">失败 1</button>
+        </div>
+        <div class="toolbar__spacer"></div>
+        <button class="btn btn--sm btn--ghost">清空已结束</button>
+      </div>
+      <div class="rowlist">
+        <div class="row">
+          <div class="row__cov" style="background:var(--comic)">贤</div>
+          <div class="row__b">
+            <div class="row__t">贤者转生史莱姆与养女开始全新生活</div>
+            <div class="row__meta"><span class="chip chip--warn"><svg class="ic" style="width:12px;height:12px"><use href="#i-alert"/></svg>部分完成</span><span>完成 6/9 话</span>
+              <span>缺失:第 7 话(图片不全 4/5)、第 8 话(超时)、第 9 话(超时)</span></div>
+            <div class="progress progress--warn" style="max-width:420px; margin-top:4px"><i style="width:66%"></i></div>
+          </div>
+          <div class="row__ops">
+            <button class="btn btn--sm btn--primary"><svg class="ic ic--sm"><use href="#i-refresh"/></svg>补齐缺失</button>
+            <button class="btn btn--sm">打开目录</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row__cov" style="background:var(--comic)">白</div>
+          <div class="row__b">
+            <div class="row__t">白聖女與黑牧師</div>
+            <div class="row__meta"><span class="chip chip--brand">进行中</span><span>第 43 话 · 12/28 页</span>
+              <span>· 0.15s/页 · 预计 4 分钟</span></div>
+            <div class="progress" style="max-width:420px; margin-top:4px"><i style="width:43%"></i></div>
+          </div>
+          <div class="row__ops">
+            <button class="btn btn--sm"><svg class="ic ic--sm"><use href="#i-pause"/></svg>暂停</button>
+            <button class="btn btn--sm btn--danger"><svg class="ic ic--sm"><use href="#i-stop"/></svg>取消</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row__cov" style="background:var(--danger-soft); color:var(--danger)">三</div>
+          <div class="row__b">
+            <div class="row__t">三体</div>
+            <div class="row__meta"><span class="chip chip--danger">失败</span>
+              <span>该源限流(HTTP 429),已自动退避,1 分钟后可重试</span></div>
+          </div>
+          <div class="row__ops">
+            <button class="btn btn--sm btn--primary"><svg class="ic ic--sm"><use href="#i-refresh"/></svg>重试</button>
+            <button class="btn btn--sm btn--ghost">换源</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 已下载 ---------- -->
+    <section class="view" id="v-files" hidden>
+      <div class="toolbar">
+        <div class="chip"><span class="dot"></span>264.5 MB</div>
+        <div class="chip">4 本小说 · 3 部漫画</div>
+        <div class="toolbar__spacer"></div>
+        <button class="btn btn--sm"><svg class="ic ic--sm"><use href="#i-folder"/></svg>打开目录</button>
+        <button class="btn btn--sm"><svg class="ic ic--sm"><use href="#i-upload"/></svg>上传到手机</button>
+      </div>
+      <div class="rowlist">
+        <div class="row">
+          <div class="row__cov" style="background:var(--novel)">魔</div>
+          <div class="row__b"><div class="row__t">魔女之旅[wenku8本地].txt</div>
+            <div class="row__meta"><span>3.2 MB</span><span>321 章</span><span>· 昨天 22:14</span></div></div>
+          <div class="row__ops">
+            <button class="btn btn--sm btn--primary"><svg class="ic ic--sm"><use href="#i-play"/></svg>阅读</button>
+            <div class="kebab"><button class="btn btn--icon btn--sm" aria-label="更多操作" aria-expanded="false" onclick="toggleMenu(this)"><svg class="ic"><use href="#i-more"/></svg></button>
+              <div class="menu" hidden><button><svg class="ic ic--sm"><use href="#i-book"/></svg>导出 EPUB</button>
+                <button><svg class="ic ic--sm"><use href="#i-folder"/></svg>打开所在目录</button><hr>
+                <button data-tone="danger"><svg class="ic ic--sm"><use href="#i-trash"/></svg>删除文件</button></div></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row__cov" style="background:var(--comic)">白</div>
+          <div class="row__b"><div class="row__t">白聖女與黑牧師·第 1-42 话.pdf</div>
+            <div class="row__meta"><span class="chip chip--comic">PDF</span><span>182 MB</span><span>连续滚动</span><span>· 3 天前</span></div></div>
+          <div class="row__ops">
+            <button class="btn btn--sm btn--primary"><svg class="ic ic--sm"><use href="#i-play"/></svg>阅读</button>
+            <button class="btn btn--sm btn--ghost" aria-label="更多"><svg class="ic"><use href="#i-more"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 设置 ---------- -->
+    <section class="view" id="v-settings" hidden>
+      <div class="settings">
+        <nav class="subnav" aria-label="设置分类">
+          <button aria-current="true" data-set="general"><svg class="ic ic--sm"><use href="#i-settings"/></svg>通用</button>
+          <button data-set="book"><svg class="ic ic--sm"><use href="#i-book"/></svg>小说</button>
+          <button data-set="comic"><svg class="ic ic--sm"><use href="#i-comic"/></svg>漫画</button>
+          <button data-set="verify"><svg class="ic ic--sm"><use href="#i-shield"/></svg>站点验证</button>
+          <button data-set="phone"><svg class="ic ic--sm"><use href="#i-phone"/></svg>手机</button>
+        </nav>
+        <div style="padding-bottom:72px">
+          <div class="card setgroup">
+            <div class="setgroup__hd"><h3>网络与抓取</h3><p>影响搜索与下载的出口与节奏</p></div>
+            <div class="setgrid">
+              <div class="field full">
+                <label for="proxy">代理地址</label>
+                <input class="input" id="proxy" placeholder="留空 = 直连;例:http://127.0.0.1:7890">
+                <span class="hint">验证浏览器与抓取会使用同一出口 IP(Cloudflare 的 cf_clearance 与 IP 绑定)</span>
+              </div>
+              <div class="field"><label for="delay">章节间隔(秒)</label>
+                <input class="input" id="delay" value="1.2" data-dirty><span class="hint">越小越快,越容易被限流;建议 ≥ 0.8</span></div>
+              <div class="field"><label for="ssl">SSL 证书</label>
+                <select class="select" id="ssl"><option>校验(推荐)</option><option>跳过(仅调试)</option></select></div>
+            </div>
+          </div>
+
+          <div class="card setgroup">
+            <div class="setgroup__hd"><h3>存储</h3><p>所有数据都在你自己的电脑上</p></div>
+            <div class="setgrid">
+              <div class="field full"><label for="outdir">默认输出目录</label>
+                <div style="display:flex; gap:8px; min-width:0; flex-wrap:wrap">
+                  <input class="input" id="outdir" style="flex:1; min-width:220px" value="D:\Novelist\downloads" data-dirty>
+                  <button class="btn">选择…</button><button class="btn"><svg class="ic ic--sm"><use href="#i-folder"/></svg>打开</button>
+                </div></div>
+              <div class="field"><label>数据目录</label>
+                <div class="input" style="display:flex; align-items:center; color:var(--ink3)">…\Novelist\_ui\data</div></div>
+              <div class="field"><label>已占用</label>
+                <div class="input" style="display:flex; align-items:center; gap:8px">
+                  <span style="flex:1">264.5 MB</span><span class="chip">下载 262 MB</span><span class="chip">缓存 2 MB</span></div></div>
+            </div>
+          </div>
+
+          <div class="card setgroup">
+            <div class="setgroup__hd"><h3>外观</h3><p>主题跟随系统,也可手动指定</p></div>
+            <div class="setgrid">
+              <div class="field"><label for="theme">主题</label>
+                <select class="select" id="theme"><option>跟随系统</option><option>浅色</option><option>深色</option></select></div>
+              <div class="field"><label for="fs">阅读字号</label>
+                <select class="select" id="fs"><option>标准</option><option>较大</option><option>特大</option></select></div>
+              <div class="field full">
+                <label class="switch"><input type="checkbox" checked><i></i>减少动态效果(尊重系统设置)</label>
+                <label class="switch" style="margin-top:8px"><input type="checkbox"><i></i>侧栏默认折叠</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="savebar">
+            <span class="savebar__note" id="dirtyNote">没有未保存的修改</span>
+            <button class="btn btn--ghost">恢复默认</button>
+            <button class="btn btn--primary" id="saveBtn" disabled>保存设置</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 站点验证 ---------- -->
+    <section class="view" id="v-verify" hidden>
+      <div class="card" style="margin-bottom:var(--s4)">
+        <div class="card__bd" style="display:flex; gap:var(--s3); align-items:flex-start">
+          <span class="tile__ico" style="background:var(--brand-soft)"><svg class="ic"><use href="#i-shield"/></svg></span>
+          <div style="flex:1">
+            <div style="font-weight:650; font-size:var(--f4)">自动验证可用</div>
+            <div style="font-size:var(--f3); color:var(--ink2); margin-top:2px">
+              点「发起验证」会打开内置浏览器窗口,完成人机验证后自动保存 cookies(约 7 天有效,按域名复用)。
+            </div>
+            <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap">
+              <span class="chip chip--ok"><span class="dot"></span>内核:msedge</span>
+              <span class="chip">驱动:内置(首次使用自动解压)</span>
+              <span class="chip">出口 IP 与抓取一致</span>
+            </div>
+          </div>
+          <button class="btn btn--sm">重新体检</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:var(--s4)">
+        <div class="card__bd" style="display:flex; gap:var(--s2); align-items:flex-end">
+          <div class="field" style="flex:1"><label for="vfName">服务名称(可选)</label>
+            <input class="input" id="vfName" placeholder="例:包子漫画 / OPDS 网盘"></div>
+          <div class="field" style="flex:2"><label for="vfUrl">需要验证的网址</label>
+            <input class="input" id="vfUrl" placeholder="https://cn.bzmgcn.com/search?q=…"></div>
+          <button class="btn btn--primary"><svg class="ic ic--sm"><use href="#i-shield"/></svg>发起验证</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section__hd"><h2>待验证</h2><span class="sub">请求遇到 403/401 时自动登记</span></div>
+        <div class="rowlist">
+          <div class="row">
+            <span class="tile__ico" style="background:var(--warn-soft); color:var(--warn)"><svg class="ic ic--sm"><use href="#i-alert"/></svg></span>
+            <div class="row__b"><div class="row__t">包子漫画</div>
+              <div class="row__meta"><span class="mono">cn.bzmgcn.com</span><span>目标:<span class="mono">/search?q=白圣女与黑牧师</span></span>
+                <span class="chip chip--warn">HTTP 403</span></div></div>
+            <div class="row__ops">
+              <button class="btn btn--sm btn--primary">验证</button>
+              <button class="btn btn--sm">粘贴 Cookie</button>
+              <button class="btn btn--sm btn--ghost">忽略</button>
+            </div>
+          </div>
+          <div class="row">
+            <span class="tile__ico" style="background:var(--warn-soft); color:var(--warn)"><svg class="ic ic--sm"><use href="#i-alert"/></svg></span>
+            <div class="row__b"><div class="row__t">拷贝漫画</div>
+              <div class="row__meta"><span class="mono">cn.baozimhcn.com</span><span class="chip chip--danger">IP 级封锁</span>
+                <span>站点要求更新 APP · 建议换源或用代理</span></div></div>
+            <div class="row__ops">
+              <button class="btn btn--sm">换源</button>
+              <button class="btn btn--sm btn--ghost">忽略</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section__hd"><h2>已验证</h2><span class="sub">到期前无需再验证</span></div>
+        <div class="rowlist">
+          <div class="row">
+            <span class="tile__ico" style="background:var(--brand-soft); color:var(--success)"><svg class="ic ic--sm"><use href="#i-check"/></svg></span>
+            <div class="row__b"><div class="row__t">OPDS 图书馆</div>
+              <div class="row__meta"><span class="mono">opds.wol.moe</span><span>6 个 cookies</span><span>剩余 5 天</span></div></div>
+            <div class="row__ops"><button class="btn btn--sm btn--danger">删除</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 设计规范 ---------- -->
+    <section class="view" id="v-spec" hidden>
+      <div class="section">
+        <div class="section__hd"><h2>颜色令牌</h2><span class="sub">全部通过了 WCAG 对比度实测(见下表)</span></div>
+        <div class="spec-grid" id="swatches"></div>
+      </div>
+      <div class="section">
+        <div class="section__hd"><h2>对比度实测</h2><span class="sub">正文要求 ≥4.5:1,控件边框 ≥3:1</span></div>
+        <div class="card"><div class="card__bd" style="padding:0">
+          <table class="spec-table"><thead><tr><th>组合</th><th>实测</th><th>要求</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr><td>正文 ink / surface</td><td class="mono">17.77:1</td><td>4.5</td><td><span class="chip chip--ok">通过</span></td></tr>
+            <tr><td>次要 ink2 / surface</td><td class="mono">7.05:1</td><td>4.5</td><td><span class="chip chip--ok">通过</span></td></tr>
+            <tr><td>三级 ink3 / surface</td><td class="mono">5.00:1</td><td>4.5</td><td><span class="chip chip--ok">通过</span></td></tr>
+            <tr><td>白字 / 主按钮 brand</td><td class="mono">5.97:1</td><td>4.5</td><td><span class="chip chip--ok">通过</span></td></tr>
+            <tr><td>小说强调 / 卡底</td><td class="mono">5.02:1</td><td>4.5</td><td><span class="chip chip--ok">通过</span></td></tr>
+            <tr><td>漫画强调 / 卡底</td><td class="mono">5.24:1</td><td>4.5</td><td><span class="chip chip--ok">通过</span></td></tr>
+            <tr><td>控件边框 / surface</td><td class="mono">3.65:1</td><td>3.0</td><td><span class="chip chip--ok">通过</span></td></tr>
+            <tr><td><b>旧版:白字 / #34C759</b></td><td class="mono">2.22:1</td><td>4.5</td><td><span class="chip chip--danger">不达标</span></td></tr>
+            <tr><td><b>旧版:白字 / #FF9500</b></td><td class="mono">2.20:1</td><td>4.5</td><td><span class="chip chip--danger">不达标</span></td></tr>
+            <tr><td><b>旧版:白字 / #007AFF</b></td><td class="mono">4.02:1</td><td>4.5</td><td><span class="chip chip--warn">小字不达标</span></td></tr>
+          </tbody></table>
+        </div></div>
+      </div>
+      <div class="section">
+        <div class="section__hd"><h2>字阶与间距</h2><span class="sub">4/8 节奏;标题与正文最多跨 2 级</span></div>
+        <div class="card"><div class="card__bd" style="display:grid; gap:12px">
+          <div style="font-size:var(--f8); font-weight:650">30 · 页面主标题</div>
+          <div style="font-size:var(--f7); font-weight:650">24 · 区块标题</div>
+          <div style="font-size:var(--f6); font-weight:650">20 · 卡片大标题</div>
+          <div style="font-size:var(--f5); font-weight:600">16 · 卡片标题</div>
+          <div style="font-size:var(--f4)">14 · 正文(默认)</div>
+          <div style="font-size:var(--f3); color:var(--ink2)">13 · 控件与列表次要文字</div>
+          <div style="font-size:var(--f2); color:var(--ink3)">12 · 辅助说明</div>
+          <div style="font-size:var(--f1); color:var(--ink3)">11 · 徽标与角标(仅大写/短词)</div>
+          <div style="display:flex; gap:8px; align-items:flex-end; margin-top:8px">
+            <span class="mono">4</span><div style="width:4px;height:24px;background:var(--brand)"></div>
+            <span class="mono">8</span><div style="width:8px;height:24px;background:var(--brand)"></div>
+            <span class="mono">12</span><div style="width:12px;height:24px;background:var(--brand)"></div>
+            <span class="mono">16</span><div style="width:16px;height:24px;background:var(--brand)"></div>
+            <span class="mono">24</span><div style="width:24px;height:24px;background:var(--brand)"></div>
+            <span class="mono">32</span><div style="width:32px;height:24px;background:var(--brand)"></div>
+            <span class="mono">48</span><div style="width:48px;height:24px;background:var(--brand)"></div>
+          </div>
+        </div></div>
+      </div>
+    </section>
+
+    <!-- ---------- 任务停靠 ---------- -->
+    <div class="dock" id="dock" data-open="true">
+      <div class="dock__hd" onclick="document.getElementById('dock').dataset.open = document.getElementById('dock').dataset.open === 'true' ? 'false' : 'true'">
+        <svg class="ic ic--sm"><use href="#i-download"/></svg>
+        <h3>任务</h3>
+        <span class="chip chip--brand" style="height:20px">1 进行中</span>
+        <span class="chip chip--warn" style="height:20px">1 待补齐</span>
+        <span style="margin-left:auto; color:var(--ink3)"><svg class="ic ic--sm"><use href="#i-chev-r"/></svg></span>
+      </div>
+      <div class="dock__body">
+        <div class="task">
+          <div class="task__top"><span class="task__name">白聖女與黑牧師 · 第 43 话</span>
+            <div class="task__ops">
+              <button class="btn btn--icon btn--sm" aria-label="暂停"><svg class="ic ic--sm"><use href="#i-pause"/></svg></button>
+              <button class="btn btn--icon btn--sm" aria-label="取消"><svg class="ic ic--sm"><use href="#i-stop"/></svg></button>
+            </div></div>
+          <div class="progress"><i style="width:43%"></i></div>
+          <div class="task__sub">12/28 页 · 0.15 秒/页 · 约 4 分钟</div>
+        </div>
+        <div class="task">
+          <div class="task__top"><span class="task__name">贤者转生史莱姆 · 缺 3 话</span>
+            <div class="task__ops"><button class="btn btn--sm btn--primary" style="height:24px">补齐</button></div></div>
+          <div class="progress progress--warn"><i style="width:66%"></i></div>
+          <div class="task__sub">完成 6/9 话;第 7 话缺 1 页,第 8/9 话超时</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 原型工具条 -->
+<div class="demo-bar">
+  <b>设计预览</b>
+  <button data-jump="home">首页</button>
+  <button data-jump="search" aria-pressed="true">搜索</button>
+  <button data-jump="shelf">书架</button>
+  <button data-jump="comic">漫画收藏</button>
+  <button data-jump="history">任务记录</button>
+  <button data-jump="files">已下载</button>
+  <button data-jump="settings">设置</button>
+  <button data-jump="verify">站点验证</button>
+  <button data-jump="spec">设计规范</button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var VIEWS = {
+    home: "首页", search: "搜索", shelf: "书架", comic: "漫画收藏",
+    history: "任务记录", files: "已下载", settings: "设置",
+    verify: "站点验证", spec: "设计规范"
+  };
+  var viewEls = {};
+  Object.keys(VIEWS).forEach(function (k) {
+    var el = document.getElementById("v-" + k);
+    if (el) viewEls[k] = el;
+  });
+
+  function go(name) {
+    if (!viewEls[name]) return;
+    Object.keys(viewEls).forEach(function (k) {
+      viewEls[k].hidden = k !== name;
+    });
+    document.querySelectorAll(".nav__item").forEach(function (b) {
+      b.setAttribute("aria-current", b.dataset.view === name ? "page" : "false");
+      if (b.dataset.view !== name) b.removeAttribute("aria-current");
+      else b.setAttribute("aria-current", "page");
+    });
+    document.querySelectorAll("[data-jump]").forEach(function (b) {
+      b.setAttribute("aria-pressed", b.dataset.jump === name ? "true" : "false");
+    });
+        document.getElementById("crumbTitle").textContent = VIEWS[name];
+    // 专注型页面(设置/规范)收起任务停靠,避免遮挡表单
+    var dock = document.getElementById("dock");
+    if (dock) dock.dataset.open = (name === "settings" || name === "spec") ? "false" : "true";
+    // 漫画收藏是独立视图,切到它时同步模式强调色
+    if (name === "comic") setMode("comic");
+    if (name === "shelf" || name === "home" || name === "search") setMode("book");
+    document.querySelector(".view:not([hidden])").scrollTop = 0;
+  }
+  window.go = go;
+
+  function setMode(mode) {
+    document.body.dataset.mode = mode;
+    document.querySelectorAll("[data-mode-btn]").forEach(function (b) {
+      b.setAttribute("aria-pressed", b.dataset.modeBtn === mode ? "true" : "false");
+    });
+  }
+  document.querySelectorAll("[data-mode-btn]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      setMode(b.dataset.modeBtn);
+      go(b.dataset.modeBtn === "comic" ? "comic" : "shelf");
+    });
+  });
+  document.querySelectorAll(".nav__item").forEach(function (b) {
+    b.addEventListener("click", function () { go(b.dataset.view); });
+  });
+  document.querySelectorAll("[data-jump]").forEach(function (b) {
+    b.addEventListener("click", function () { go(b.dataset.jump); });
+  });
+
+  // 深/浅色主题
+  var themeBtn = document.getElementById("themeBtn");
+  function applyTheme(t) {
+    document.documentElement.dataset.theme = t;
+    themeBtn.innerHTML = '<svg class="ic"><use href="#i-' + (t === "dark" ? "sun" : "moon") + '"/></svg>';
+  }
+  themeBtn.addEventListener("click", function () {
+    applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+  });
+
+  // 更多操作菜单
+  window.toggleMenu = function (btn) {
+    var menu = btn.parentElement.querySelector(".menu");
+    var open = !menu.hidden;
+    document.querySelectorAll(".menu").forEach(function (m) { m.hidden = true; });
+    document.querySelectorAll("[aria-expanded='true']").forEach(function (b) {
+      if (b !== btn) b.setAttribute("aria-expanded", "false");
+    });
+    menu.hidden = open;
+    btn.setAttribute("aria-expanded", open ? "false" : "true");
+  };
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest(".kebab")) {
+      document.querySelectorAll(".menu").forEach(function (m) { m.hidden = true; });
+      document.querySelectorAll("[aria-expanded='true']").forEach(function (b) {
+        b.setAttribute("aria-expanded", "false");
+      });
+    }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
+      document.querySelectorAll(".menu").forEach(function (m) { m.hidden = true; });
+    }
+  });
+
+  // 设置:脏标记 → 吸底保存栏
+  var dirty = new Set();
+  function refreshDirty() {
+    var note = document.getElementById("dirtyNote");
+    var save = document.getElementById("saveBtn");
+    if (dirty.size) {
+      note.textContent = "已修改 " + dirty.size + " 项";
+      note.style.color = "var(--warn)";
+      save.disabled = false;
+    } else {
+      note.textContent = "没有未保存的修改";
+      note.style.color = "";
+      save.disabled = true;
+    }
+  }
+  document.querySelectorAll("[data-dirty]").forEach(function (el) {
+    el.addEventListener("input", function () { dirty.add(el.id); refreshDirty(); });
+  });
+  document.getElementById("saveBtn").addEventListener("click", function () {
+    dirty.clear();
+    refreshDirty();
+  });
+
+  // 设置二级导航
+  document.querySelectorAll("[data-set]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll("[data-set]").forEach(function (x) { x.removeAttribute("aria-current"); });
+      b.setAttribute("aria-current", "true");
+    });
+  });
+
+  // 规范页色卡
+  var SW = [
+    ["--brand", "#2C6E63", "品牌 / 主按钮"],
+    ["--brand-soft", "#EAF2EF", "品牌浅底"],
+    ["--novel", "#8E562F", "小说强调"],
+    ["--novel-soft", "#F4EADE", "小说卡底"],
+    ["--comic", "#376C4C", "漫画强调"],
+    ["--comic-soft", "#E6EFE7", "漫画卡底"],
+    ["--ink", "#17181A", "正文"],
+    ["--ink2", "#55595E", "次要文字"],
+    ["--ink3", "#6B7075", "三级文字"],
+    ["--paper", "#F7F5F1", "应用背景"],
+    ["--surface", "#FFFFFF", "卡片"],
+    ["--surface3", "#F1EDE7", "悬停/选中"],
+    ["--line", "#E7E2DA", "分隔线"],
+    ["--line-strong", "#8C8579", "控件边框"],
+    ["--success", "#2F7A4F", "成功"],
+    ["--warn", "#9A6208", "警告"],
+    ["--danger", "#B3261E", "危险"],
+    ["--danger-soft", "#FBEAE8", "危险浅底"]
+  ];
+  document.getElementById("swatches").innerHTML = SW.map(function (s) {
+    return '<div class="swatch"><div class="swatch__c" style="background:var(' + s[0] + ')"></div>' +
+      '<div class="swatch__m"><b>' + s[2] + '</b><span class="mono">' + s[0] + ' · ' + s[1] + '</span></div></div>';
+  }).join("");
+
+  // 截图模式:?clean=1 隐藏演示工具条
+  if (location.search.indexOf("clean") >= 0) {
+    var bar = document.querySelector(".demo-bar");
+    if (bar) bar.remove();
+  }
+  applyTheme("light");
+  go("search");
+})();
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+

@@ -183,6 +183,9 @@ from novel.paths import CONFIG_PATH, resolve_out_dir
 DEFAULT_SETTINGS: dict = {
     "proxy": "",
     "delay": 1.2,
+    # 聚合搜索的全局等待上限(秒):到点用已完成源的结果收口,未返回的源标记"超时"。
+    # 0 = 不限时(退回旧行为:等所有源)。默认 60,兼顾"慢源也有结果"与"别等到 2 分钟"。
+    "search_timeout": 60,
     "out_dir": "downloads",
     "verify_ssl": True,
     "lan_access": False,   # 允许局域网访问(手机/其他设备),需重启生效
@@ -527,3 +530,4 @@ def parse_source_rule_text(text: str) -> dict:
         except json.JSONDecodeError as exc:
             raise ValueError(f"JSON 解析失败: {exc}") from exc
     return rule
+

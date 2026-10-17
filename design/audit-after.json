@@ -1,0 +1,931 @@
+{
+  "summary": {
+    "unnamed": 13,
+    "mouseOnly": 120,
+    "inlineStyleEls": 350,
+    "inlineStyleChars": 15948,
+    "onclickAttr": 227,
+    "ariaLabelCount": 9,
+    "fontSizeLiterals": 115,
+    "fontSizeDistinct": 12,
+    "colorLiterals": 193,
+    "emojiChars": 14,
+    "interactive": 207,
+    "tabindexPositive": 0
+  },
+  "views": {
+    "launcher": {
+      "totalEls": 1319,
+      "inlineStyleEls": 350,
+      "inlineStyleChars": 15830,
+      "emojiChars": 4,
+      "innerHTMLElCount": 0,
+      "onclickAttr": 227,
+      "ariaLabelCount": 9,
+      "focusVisibleRules": 0,
+      "tabindexPositive": 0,
+      "interactive": 207,
+      "unnamed": [
+        {
+          "tag": "select",
+          "cls": "",
+          "html": "<select id=\"opdsService\" style=\"flex:1; min-width:150px\" onchange=\"opdsSwitchService()\"></select>"
+        }
+      ],
+      "mouseOnlyClicks": [
+        {
+          "tag": "div",
+          "cls": "set-nav active",
+          "txt": "通用"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "小说"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "漫画"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "验证"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "手机"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item active",
+          "txt": "搜索"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "书架\n4"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "已下载\n0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "任务记录\n0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "暂停任务 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "书源筛选\n11"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item active",
+          "txt": "搜索"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "收藏 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "已下载 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "任务记录 0"
+        },
+        {
+          "tag": "div",
+          "cls": "creader-body",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask show",
+          "txt": "📖 漫画+小说 · 使用说明\n\n本工具为本地应用,小说 /"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "👋 新手指引✕\n    \n      欢迎使用 Novel"
+        },
+        {
+          "tag": "div",
+          "cls": "reader-body",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "fab-rect",
+          "txt": "▤ 任务页面"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "任务✕\n    \n      ⚙ 任务相关设置\n      "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "确认✕\n    \n      \n      \n       "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "🛠 地址修正 · 选择要应用的源✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "下载 EPUB✕\n    \n      \n        \n"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "书源搜索状态\n      \n      ✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "书源筛选\n      已选 11 个\n      \n    "
+        },
+        {
+          "tag": "div",
+          "cls": "reader-toc-mask",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "−\n    100%\n    +\n    ⛶ 适应\n    "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "📒 书签与笔记 · ✕"
+        }
+      ],
+      "cssRules": 592,
+      "fontSizeLiterals": 115,
+      "colorLiterals": 193,
+      "fontSizeDistinct": 12,
+      "fontSizeTop": [
+        [
+          "12px",
+          40
+        ],
+        [
+          "13px",
+          29
+        ],
+        [
+          "14px",
+          15
+        ],
+        [
+          "11px",
+          13
+        ],
+        [
+          "20px",
+          4
+        ],
+        [
+          "15px",
+          4
+        ],
+        [
+          "16px",
+          3
+        ],
+        [
+          "18px",
+          2
+        ],
+        [
+          "24px",
+          2
+        ],
+        [
+          "10px",
+          1
+        ]
+      ]
+    },
+    "book-search": {
+      "totalEls": 1319,
+      "inlineStyleEls": 350,
+      "inlineStyleChars": 15830,
+      "emojiChars": 4,
+      "innerHTMLElCount": 0,
+      "onclickAttr": 227,
+      "ariaLabelCount": 9,
+      "focusVisibleRules": 0,
+      "tabindexPositive": 0,
+      "interactive": 207,
+      "unnamed": [
+        {
+          "tag": "button",
+          "cls": "l-btn comic",
+          "html": "<button class=\"l-btn comic\" onclick=\"enterMode('comic')\">\n        <span class=\"lb-emoji\"><svg class=\"ico\" aria-hidden=\"t"
+        },
+        {
+          "tag": "button",
+          "cls": "l-btn book",
+          "html": "<button class=\"l-btn book\" onclick=\"enterMode('book')\">\n        <span class=\"lb-emoji\"><svg class=\"ico\" aria-hidden=\"tru"
+        },
+        {
+          "tag": "button",
+          "cls": "btn-sm",
+          "html": "<button class=\"btn-sm\" style=\"margin-left:8px\" onclick=\"showSettings()\"><svg class=\"ico\" aria-hidden=\"true\"><use href=\"#"
+        },
+        {
+          "tag": "select",
+          "cls": "",
+          "html": "<select id=\"opdsService\" style=\"flex:1; min-width:150px\" onchange=\"opdsSwitchService()\"></select>"
+        }
+      ],
+      "mouseOnlyClicks": [
+        {
+          "tag": "div",
+          "cls": "set-nav active",
+          "txt": "通用"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "小说"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "漫画"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "验证"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "手机"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item active",
+          "txt": "搜索"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "书架\n4"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "已下载\n0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "任务记录\n0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "暂停任务 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "书源筛选\n11"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item active",
+          "txt": "搜索"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "收藏 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "已下载 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "任务记录 0"
+        },
+        {
+          "tag": "div",
+          "cls": "creader-body",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask show",
+          "txt": "📖 漫画+小说 · 使用说明\n\n本工具为本地应用,小说 /"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "👋 新手指引✕\n    \n      欢迎使用 Novel"
+        },
+        {
+          "tag": "div",
+          "cls": "reader-body",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "fab-rect",
+          "txt": "▤ 任务页面"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "任务✕\n    \n      ⚙ 任务相关设置\n      "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "确认✕\n    \n      \n      \n       "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "🛠 地址修正 · 选择要应用的源✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "下载 EPUB✕\n    \n      \n        \n"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "书源搜索状态\n      \n      ✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "书源筛选\n      已选 11 个\n      \n    "
+        },
+        {
+          "tag": "div",
+          "cls": "reader-toc-mask",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "−\n    100%\n    +\n    ⛶ 适应\n    "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "📒 书签与笔记 · ✕"
+        }
+      ],
+      "cssRules": 592,
+      "fontSizeLiterals": 115,
+      "colorLiterals": 193,
+      "fontSizeDistinct": 12,
+      "fontSizeTop": [
+        [
+          "12px",
+          40
+        ],
+        [
+          "13px",
+          29
+        ],
+        [
+          "14px",
+          15
+        ],
+        [
+          "11px",
+          13
+        ],
+        [
+          "20px",
+          4
+        ],
+        [
+          "15px",
+          4
+        ],
+        [
+          "16px",
+          3
+        ],
+        [
+          "18px",
+          2
+        ],
+        [
+          "24px",
+          2
+        ],
+        [
+          "10px",
+          1
+        ]
+      ]
+    },
+    "book-shelf": {
+      "totalEls": 1319,
+      "inlineStyleEls": 350,
+      "inlineStyleChars": 15830,
+      "emojiChars": 9,
+      "innerHTMLElCount": 0,
+      "onclickAttr": 227,
+      "ariaLabelCount": 9,
+      "focusVisibleRules": 0,
+      "tabindexPositive": 0,
+      "interactive": 207,
+      "unnamed": [
+        {
+          "tag": "button",
+          "cls": "l-btn comic",
+          "html": "<button class=\"l-btn comic\" onclick=\"enterMode('comic')\">\n        <span class=\"lb-emoji\"><svg class=\"ico\" aria-hidden=\"t"
+        },
+        {
+          "tag": "button",
+          "cls": "l-btn book",
+          "html": "<button class=\"l-btn book\" onclick=\"enterMode('book')\">\n        <span class=\"lb-emoji\"><svg class=\"ico\" aria-hidden=\"tru"
+        },
+        {
+          "tag": "button",
+          "cls": "btn-sm",
+          "html": "<button class=\"btn-sm\" style=\"margin-left:8px\" onclick=\"showSettings()\"><svg class=\"ico\" aria-hidden=\"true\"><use href=\"#"
+        },
+        {
+          "tag": "select",
+          "cls": "",
+          "html": "<select id=\"opdsService\" style=\"flex:1; min-width:150px\" onchange=\"opdsSwitchService()\"></select>"
+        }
+      ],
+      "mouseOnlyClicks": [
+        {
+          "tag": "div",
+          "cls": "set-nav active",
+          "txt": "通用"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "小说"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "漫画"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "验证"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "手机"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "搜索"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item active",
+          "txt": "书架\n4"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "已下载\n0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "任务记录\n0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "暂停任务 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "书源筛选\n11"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "搜索"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "收藏 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "已下载 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "任务记录 0"
+        },
+        {
+          "tag": "div",
+          "cls": "creader-body",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask show",
+          "txt": "📖 漫画+小说 · 使用说明\n\n本工具为本地应用,小说 /"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "👋 新手指引✕\n    \n      欢迎使用 Novel"
+        },
+        {
+          "tag": "div",
+          "cls": "reader-body",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "fab-rect",
+          "txt": "▤ 任务页面"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "任务✕\n    \n      ⚙ 任务相关设置\n      "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "确认✕\n    \n      \n      \n       "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "🛠 地址修正 · 选择要应用的源✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "下载 EPUB✕\n    \n      \n        \n"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "书源搜索状态\n      \n      ✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "书源筛选\n      已选 11 个\n      \n    "
+        },
+        {
+          "tag": "div",
+          "cls": "reader-toc-mask",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "−\n    100%\n    +\n    ⛶ 适应\n    "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "📒 书签与笔记 · ✕"
+        }
+      ],
+      "cssRules": 592,
+      "fontSizeLiterals": 115,
+      "colorLiterals": 193,
+      "fontSizeDistinct": 12,
+      "fontSizeTop": [
+        [
+          "12px",
+          40
+        ],
+        [
+          "13px",
+          29
+        ],
+        [
+          "14px",
+          15
+        ],
+        [
+          "11px",
+          13
+        ],
+        [
+          "20px",
+          4
+        ],
+        [
+          "15px",
+          4
+        ],
+        [
+          "16px",
+          3
+        ],
+        [
+          "18px",
+          2
+        ],
+        [
+          "24px",
+          2
+        ],
+        [
+          "10px",
+          1
+        ]
+      ]
+    },
+    "book-settings": {
+      "totalEls": 1321,
+      "inlineStyleEls": 350,
+      "inlineStyleChars": 15948,
+      "emojiChars": 14,
+      "innerHTMLElCount": 0,
+      "onclickAttr": 227,
+      "ariaLabelCount": 9,
+      "focusVisibleRules": 0,
+      "tabindexPositive": 0,
+      "interactive": 207,
+      "unnamed": [
+        {
+          "tag": "button",
+          "cls": "l-btn comic",
+          "html": "<button class=\"l-btn comic\" onclick=\"enterMode('comic')\">\n        <span class=\"lb-emoji\"><svg class=\"ico\" aria-hidden=\"t"
+        },
+        {
+          "tag": "button",
+          "cls": "l-btn book",
+          "html": "<button class=\"l-btn book\" onclick=\"enterMode('book')\">\n        <span class=\"lb-emoji\"><svg class=\"ico\" aria-hidden=\"tru"
+        },
+        {
+          "tag": "button",
+          "cls": "btn-sm",
+          "html": "<button class=\"btn-sm\" style=\"margin-left:8px\" onclick=\"showSettings()\"><svg class=\"ico\" aria-hidden=\"true\"><use href=\"#"
+        },
+        {
+          "tag": "select",
+          "cls": "",
+          "html": "<select id=\"opdsService\" style=\"flex:1; min-width:150px\" onchange=\"opdsSwitchService()\"></select>"
+        }
+      ],
+      "mouseOnlyClicks": [
+        {
+          "tag": "div",
+          "cls": "set-nav active",
+          "txt": "通用"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "小说"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "漫画"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "验证"
+        },
+        {
+          "tag": "div",
+          "cls": "set-nav",
+          "txt": "手机"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "搜索"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item active",
+          "txt": "书架\n4"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "已下载\n0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "任务记录\n0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "暂停任务 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "书源筛选\n11"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "搜索"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "收藏 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "已下载 0"
+        },
+        {
+          "tag": "div",
+          "cls": "nav-item",
+          "txt": "任务记录 0"
+        },
+        {
+          "tag": "div",
+          "cls": "creader-body",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask show",
+          "txt": "📖 漫画+小说 · 使用说明\n\n本工具为本地应用,小说 /"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "👋 新手指引✕\n    \n      欢迎使用 Novel"
+        },
+        {
+          "tag": "div",
+          "cls": "reader-body",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "fab-rect",
+          "txt": "▤ 任务页面"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "任务✕\n    \n      ⚙ 任务相关设置\n      "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "确认✕\n    \n      \n      \n       "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "🛠 地址修正 · 选择要应用的源✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "下载 EPUB✕\n    \n      \n        \n"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "书源搜索状态\n      \n      ✕"
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "书源筛选\n      已选 11 个\n      \n    "
+        },
+        {
+          "tag": "div",
+          "cls": "reader-toc-mask",
+          "txt": ""
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "−\n    100%\n    +\n    ⛶ 适应\n    "
+        },
+        {
+          "tag": "div",
+          "cls": "modal-mask",
+          "txt": "📒 书签与笔记 · ✕"
+        }
+      ],
+      "cssRules": 592,
+      "fontSizeLiterals": 115,
+      "colorLiterals": 193,
+      "fontSizeDistinct": 12,
+      "fontSizeTop": [
+        [
+          "12px",
+          40
+        ],
+        [
+          "13px",
+          29
+        ],
+        [
+          "14px",
+          15
+        ],
+        [
+          "11px",
+          13
+        ],
+        [
+          "20px",
+          4
+        ],
+        [
+          "15px",
+          4
+        ],
+        [
+          "16px",
+          3
+        ],
+        [
+          "18px",
+          2
+        ],
+        [
+          "24px",
+          2
+        ],
+        [
+          "10px",
+          1
+        ]
+      ]
+    }
+  }
+}

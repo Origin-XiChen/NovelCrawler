@@ -268,7 +268,7 @@ from novel.config import (
 )
 from novel.downloader import download_book, fetch_toc, safe_filename
 from novel.fetcher import Fetcher
-from novel.paths import APP_DATA_DIR, COMIC_OUT_DIR
+from novel.paths import APP_DATA_DIR, COMIC_OUT_DIR, OPDS_COOKIES_PATH
 from novel.parser import parse_content, parse_toc
 from novel.reader import chapter_count, read_chapter, read_meta
 from novel.searcher import Book, book_from_url, search_all
@@ -1405,9 +1405,11 @@ class Handler(BaseHTTPRequestHandler):
         _sync_fetcher()
         all_src = load_all_sources()
         # 精简字段,避免把 search 配置细节暴露过多
+        from novel.searcher import _is_searchable
         for s in all_src:
             s.setdefault("custom", False)
-            s["search_ok"] = s.get("search") is not None
+            # 与搜索时的口径保持一致:search 或 api_rules.search 任一存在即可参与搜索
+            s["search_ok"] = _is_searchable(s)
         from novel.paths import APP_DATA_DIR, _DEFAULT_OUT
         return self._send_json({
             "sources": all_src,
@@ -1689,6 +1691,7 @@ class Handler(BaseHTTPRequestHandler):
         task = {"tid": tid, "q": keyword, "src": srcs, "state": "running", "done": 0,
                 "total": 0, "sources": [], "result": None, "error": "",
                 "skipped": len(bad), "new_books": [], "paused": False,
+                "searchable": 0, "enabled": 0, "timed_out": False,
                 "added": time.time(), "started": time.time()}
         _search_tasks[tid] = task
 
@@ -1709,11 +1712,22 @@ class Handler(BaseHTTPRequestHandler):
 
         def _run():
             try:
+                # 搜索等待上限:设置里的 search_timeout(秒),0/空 = 不限时
+                try:
+                    _st = float((load_settings().get("search_timeout") or 0))
+                except (TypeError, ValueError):
+                    _st = 0.0
+                _budget = _st if _st > 0 else float("inf")
                 res = search_all(keyword, fetcher=_fetcher, verbose=False,
                                  source_names=srcs or None, return_meta=True,
                                  on_progress=_progress, skip_names=bad or None,
-                                 cancel_check=_cancel_check, max_workers=6)
+                                 cancel_check=_cancel_check, max_workers=6,
+                                 total_timeout=_budget)
                 task["result"] = res
+                # 记录"可搜索源/启用源"口径,供界面说明进度分母为何小于启用数
+                task["searchable"] = res.get("total_sources", 0)
+                task["enabled"] = res.get("total_sources", 0) + res.get("skipped_unsearchable", 0)
+                task["timed_out"] = bool(res.get("timed_out"))
                 task["state"] = "paused" if task.get("paused") else "done"
             except Exception as exc:  # noqa: BLE001
                 task["state"] = "error"
@@ -1742,6 +1756,10 @@ class Handler(BaseHTTPRequestHandler):
             "state": task["state"], "done": task["done"], "total": task["total"],
             "sources": task["sources"], "error": task["error"],
             "paused": task.get("paused", False), "books": books,
+            "skipped": task.get("skipped", 0),
+            "searchable": task.get("searchable", 0),
+            "enabled": task.get("enabled", 0),
+            "timed_out": bool(task.get("timed_out", False)),
         })
 
     def _api_search_result(self, qs: dict):
@@ -2470,7 +2488,7 @@ class Handler(BaseHTTPRequestHandler):
                               + "。可到「设置 → 验证中心」用「系统浏览器打开 + 粘贴 Cookie」"
                                 "方式完成验证(免依赖)。"),
                 }, 501)
-            cookie_path = os.path.join(ROOT, "opds_cookies.json")
+            cookie_path = OPDS_COOKIES_PATH
             proxy = (load_settings().get("proxy") or "").strip() or None
             # 后台线程执行(有头窗口),这里等待完成
             result = {}
@@ -2500,7 +2518,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             # 搜索接口:wenku8 对无结果关键词会读取超时(120s+),这里收紧到 35s 快速失败
             xml = fetch(url, timeout=35 if is_search else 20,
-                        cookie_path=os.path.join(ROOT, "opds_cookies.json"))
+                        cookie_path=OPDS_COOKIES_PATH)
             items = parse_catalog(xml)
             out = []
             for it in items:
@@ -4834,4 +4852,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
