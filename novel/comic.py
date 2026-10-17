@@ -34,6 +34,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+from . import throttle as _throttle
+from .downloader import DownloadCancelled
+from .throttle import host_key as _host_key
+
 logger = logging.getLogger("novel.comic")
 
 HEADERS = {
@@ -50,7 +54,16 @@ _COPY_API = "https://api.copy2000.online"
 _COPY_SECRET = "M2FmMDg1OTAzMTEwMzJlZmUwNjYwNTUwYTA1NjNhNTM="
 _COPY_QUALITY = "1500"
 _COPY_IMG_REFERER = "https://www.copymanga.fun/"
+_COPY_GROUP = "copymanga"  # 站级限速桶(API 210 是整站限制)
 _copy_state: dict = {}
+
+
+class CopyBlocked(RuntimeError):
+    """拷贝漫画站级封禁(识别为"破解版 APP 特征"后对该 IP 封约 1 小时)。
+
+    与普通频率限制(210)区分:这种重试无效且会加重封禁,必须直接上报,
+    让用户换源/换代理/等待,而不是原地空转。
+    """
 
 # 动漫之家(Cimoc Dmzjv2 移植)
 _DMZJ_BASE = "https://m.dmzj.com"
@@ -100,8 +113,17 @@ def _proxies() -> dict | None:
 
 
 # ---------------- 通用工具 ----------------
+# 文本类请求(搜索/目录/图片列表)的限速参数:与小说侧 Fetcher 文本档保持一致
+_TEXT_INTERVAL = 0.20
+_TEXT_CONCURRENCY = 4
+
+
 def _get(url: str, timeout: int = 20, retries: int = 2, **kw) -> requests.Response:
-    """GET(带验证中心 403 兜底);网络错误/5xx/429 指数退避重试,最终失败抛异常。"""
+    """GET(带验证中心 403 兜底);网络错误/5xx/429 指数退避重试,最终失败抛异常。
+
+    自带按域名自适应限速(并发闸门 + 最小间隔):同一站点不会被并发猛打;
+    命中 429/503 时按 Retry-After 对该站退避(这是"访问过于频繁"的直接对策)。
+    """
     headers = dict(HEADERS)
     headers.update(kw.pop("headers", {}) or {})
     proxies = kw.pop("proxies", None)
@@ -109,38 +131,53 @@ def _get(url: str, timeout: int = 20, retries: int = 2, **kw) -> requests.Respon
         proxies = _proxies()
     method = kw.pop("method", "GET").upper()
     req_fn = requests.post if method == "POST" else requests.get
+    cancel_check = kw.pop("cancel_check", None)
+    group = kw.pop("group", None)
     last: Exception | None = None
     for i in range(retries + 1):
         try:
-            r = req_fn(url, headers=headers, timeout=timeout, proxies=proxies, **kw)
+            with _throttle.acquire(url, group=group, interval=_TEXT_INTERVAL,
+                                   concurrency=_TEXT_CONCURRENCY,
+                                   cancel_check=cancel_check):
+                r = req_fn(url, headers=headers, timeout=timeout, proxies=proxies, **kw)
+            # 429/503:服务端明确限流 → 退避后再重试(等待由限速闸门兜住)
+            if r.status_code in (429, 503):
+                ra = _throttle.retry_after_seconds(r.headers)
+                _throttle.penalty(url, group=group, cooldown=5.0, retry_after=ra)
+                last = RuntimeError(f"HTTP {r.status_code}(访问过频/限流): {url}")
+                continue
             # Cloudflare/站点验证:403 时自动带验证中心 cookies 重试(小说侧同款方案),
             # 无有效 cookies 则登记到验证中心(前端"验证中心"手动验证一次后自动生效)
             if r.status_code in (401, 403):
                 from .verify import add_pending, get_cookies
+                _throttle.penalty(url, group=group, cooldown=2.0)
                 ret = get_cookies(url)
                 if ret is not None:
                     ck, vua = ret  # cf_clearance 绑定验证时 UA
                     try:
-                        r2 = req_fn(url, headers={**headers, "User-Agent": vua}, cookies=ck,
-                                    timeout=timeout, proxies=proxies, **kw)
+                        with _throttle.acquire(url, group=group, cancel_check=cancel_check):
+                            r2 = req_fn(url, headers={**headers, "User-Agent": vua}, cookies=ck,
+                                        timeout=timeout, proxies=proxies, **kw)
                         if r2.status_code < 400:
+                            _throttle.reward(url, group=group)
                             return r2
                     except requests.RequestException:
                         pass
                     from .verify import remove as vremove  # 带 cookies 仍失败:记录失效
                     vremove(url)
                 add_pending(url, name="漫画")
-            if r.status_code >= 500 or r.status_code == 429:
+            if r.status_code >= 500:
                 last = RuntimeError(f"HTTP {r.status_code}: {url}")
                 if i < retries:
-                    time.sleep(1.5 * (i + 1))
+                    _throttle.sleep_cancellable(1.5 * (i + 1), cancel_check)
                 continue
+            _throttle.reward(url, group=group)
             r.raise_for_status()
             return r
         except requests.RequestException as exc:
             last = exc
             if i < retries:
-                time.sleep(1.5 * (i + 1))
+                _throttle.sleep_cancellable(1.5 * (i + 1), cancel_check)
     raise last or RuntimeError(f"请求失败: {url}")
 
 
@@ -204,6 +241,11 @@ def _md_chapters(manga_id: str, langs: tuple = ("zh", "zh-hk", "zh-cn", "en")) -
         for c in data.get("data") or []:
             a = c.get("attributes") or {}
             if a.get("externalUrl"):
+                continue
+            # pages==0:该话图源不在 MangaDex 服务器上(官方授权站外托管),
+            # at-home 接口必然 404;留在目录里只会让这一话永远失败(下漏的来源),
+            # 直接剔除,避免用户选中一话却下不下来。
+            if a.get("pages") == 0:
                 continue
             cid = c.get("id", "")
             if cid in seen:
@@ -277,44 +319,89 @@ def _copy_headers() -> dict:
     }
 
 
-def _copy_get(path: str, params: dict | None = None, retries: int = 3) -> dict:
-    """拷贝漫画 GET(带签名与代理);210 访问过频时按提示等待后重试。"""
+def _copy_get(path: str, params: dict | None = None, retries: int = 4) -> dict:
+    """拷贝漫画 GET(带签名与代理);210 访问过频时按提示等待后重试。
+
+    210 是该站的站级限流:命中后按站点提示秒数(或 Retry-After)对拷贝漫画
+    整站退避,并降低后续请求速率(throttle),避免连环 210 导致整话/整卷丢失。
+    """
     last: Exception | None = None
+    url = _COPY_API + path
     for i in range(retries + 1):
         try:
-            r = requests.get(_COPY_API + path, headers=_copy_headers(), params=params or {},
-                             timeout=25, proxies=_proxies())
-            if r.status_code == 210:  # 访问过频
+            with _throttle.acquire(url, group=_COPY_GROUP, interval=0.35,
+                                   concurrency=3):
+                r = requests.get(url, headers=_copy_headers(), params=params or {},
+                                 timeout=25, proxies=_proxies())
+            if r.status_code == 210:  # 访问过频 / 站级封禁
+                raw = r.text or ""
+                body_msg = ""
+                try:
+                    body_msg = str((r.json() or {}).get("message") or "")
+                except Exception:  # noqa: BLE001
+                    pass
+                blob = (body_msg + raw)[:500]
+                # 这个 210 分两种:① 普通频率限制(等几秒即可);② 站级封禁——
+                # 站点识别出"破解版 APP 特征"后对当前 IP 封 1 小时(错误信息里
+                # 要求去官网下正版 APP / 等待 1 小时)。后者重试毫无意义,还会
+                # 加重封禁,所以立刻上报并拉长冷却,让上层换源/换代理。
+                blocked = any(k in blob for k in
+                              ("APP", "破解", "1小時", "1小时", "小時", "小时", "正版"))
+                if blocked:
+                    msg = body_msg.strip() or blob.strip()
+                    _throttle.penalty(url, group=_COPY_GROUP, cooldown=180.0)
+                    raise CopyBlocked(
+                        "拷贝漫画已对该 IP 临时封禁(约 1 小时)并提示需使用正版客户端:\n"
+                        f"  站点原话:{msg[:220]}\n"
+                        "  建议:① 换用其它源(如 MangaDex)继续;② 在设置里配置代理更换出口 IP;"
+                        "③ 等待约 1 小时后重试(本任务已停止重试,不会加重封禁)。")
                 wait = 5
-                m = re.search(r"(\d+)\s*seconds", r.text)
+                m = re.search(r"(\d+)\s*seconds", raw)
                 if m:
                     wait = int(m.group(1))
-                last = RuntimeError(f"拷贝漫画访问过频(210),等待 {wait}s")
-                time.sleep(min(wait, 40))
+                ra = _throttle.retry_after_seconds(r.headers)
+                _throttle.penalty(url, group=_COPY_GROUP, cooldown=wait, retry_after=ra)
+                last = RuntimeError(f"拷贝漫画访问过频(210),等待 {wait}s 后重试")
+                if i < retries:
+                    _throttle.sleep_cancellable(min(wait, 40))
                 continue
             if r.status_code in (401, 403):
                 # Cloudflare/站点验证:带验证中心 cookies 重试,无则登记(小说侧同款方案)
                 from .verify import add_pending, get_cookies
-                ret = get_cookies(_COPY_API + path)
+                _throttle.penalty(url, group=_COPY_GROUP, cooldown=2.0)
+                ret = get_cookies(url)
                 if ret is not None:
                     ck, vua = ret
-                    r2 = requests.get(_COPY_API + path, headers={**_copy_headers(), "User-Agent": vua},
-                                      params=params or {}, cookies=ck,
-                                      timeout=25, proxies=_proxies())
+                    with _throttle.acquire(url, group=_COPY_GROUP):
+                        r2 = requests.get(url, headers={**_copy_headers(), "User-Agent": vua},
+                                          params=params or {}, cookies=ck,
+                                          timeout=25, proxies=_proxies())
                     if r2.status_code not in (401, 403):
                         r = r2
                     else:
                         from .verify import remove as vremove  # 记录失效,重新登记
-                        vremove(_COPY_API + path)
-                        add_pending(_COPY_API + path, name="拷贝漫画")
+                        vremove(url)
+                        add_pending(url, name="拷贝漫画")
                 else:
-                    add_pending(_COPY_API + path, name="拷贝漫画")
+                    add_pending(url, name="拷贝漫画")
+            if r.status_code >= 500:
+                last = RuntimeError(f"拷贝漫画 HTTP {r.status_code}")
+                if i < retries:
+                    _throttle.sleep_cancellable(1.5 * (i + 1))
+                continue
+            _throttle.reward(url, group=_COPY_GROUP)
             r.raise_for_status()
             return r.json()
-        except Exception as exc:  # noqa: BLE001
+        except CopyBlocked:
+            raise  # 站级封禁:不重试,直接上报(重试只会加重封禁)
+        except requests.RequestException as exc:
             last = exc
             if i < retries:
-                time.sleep(1.5 * (i + 1))
+                _throttle.sleep_cancellable(1.5 * (i + 1))
+        except Exception as exc:  # noqa: BLE001  JSON 解析等非网络错误:重试意义有限,仍保留两轮
+            last = exc
+            if i < retries:
+                _throttle.sleep_cancellable(1.5 * (i + 1))
     if last is None:
         last = RuntimeError("拷贝漫画请求失败")
     raise last
@@ -368,19 +455,45 @@ def copymanga_chapters(comic_id: str) -> list[dict]:
 
 
 def copymanga_pages(comic_id: str, ep_id: str) -> list[str]:
-    """拷贝漫画某话图片 URL(按 words 排序 + c1500x 高清替换)。"""
+    """拷贝漫画某话图片 URL(按 words 排序 + c1500x 高清替换)。
+
+    words 是服务端给的"页序数组"。旧实现无条件按 words 回填,一旦 words 不是
+    0..n-1 的完整排列(缺项/重复,限流或改版时都会出现),被重复覆盖的槽位
+    会挤掉另一页、空槽位被静默丢弃 —— 这就是"下重复 + 下漏页"。
+    现在:只有 words 是完整排列时才重排;否则保留服务端原始顺序并告警。
+    """
     data = _copy_get(f"/api/v3/comic/{comic_id}/chapter2/{ep_id}", {"in_mainland": "true"})
     chapter = (data.get("results") or {}).get("chapter") or {}
     contents = chapter.get("contents") or []
     words = chapter.get("words") or []
     urls = [(e or {}).get("url", "") for e in contents]
     hd = [re.sub(r"([./])c\d+x\.[a-zA-Z]+$", rf"\1c{_COPY_QUALITY}x.webp", u) for u in urls]
-    imgs: list[str] = [""] * len(hd)
-    for i, u in enumerate(hd):
-        if (i < len(words) and words[i] is not None and isinstance(words[i], int)
-                and 0 <= words[i] < len(imgs)):
-            imgs[words[i]] = u
-    return [u for u in imgs if u]
+    n = len(hd)
+    if not n:
+        return []
+    valid_words = [w for w in words if isinstance(w, int) and not isinstance(w, bool)
+                   and 0 <= w < n]
+    is_permutation = (len(valid_words) == n and len(set(valid_words)) == n)
+    if is_permutation:
+        imgs: list[str] = [""] * n
+        for i, u in enumerate(hd):
+            if (i < len(words) and isinstance(words[i], int) and not isinstance(words[i], bool)
+                    and 0 <= words[i] < n):
+                imgs[words[i]] = u
+        out = [u for u in imgs if u]
+    else:
+        # words 不可信:保持服务端顺序,宁可不重排也不丢页/错页
+        logger.warning("拷贝漫画 %s 的 words 不是完整排列(contents=%d, words=%d),"
+                       "改为按服务端顺序下载", ep_id, n, len(words))
+        out = [u for u in hd if u]
+    # 去重(保留首次出现),避免同一页被写两次
+    seen: set[str] = set()
+    dedup: list[str] = []
+    for u in out:
+        if u and u not in seen:
+            seen.add(u)
+            dedup.append(u)
+    return dedup
 
 
 # ---------------- 漫画源注册表 ----------------
@@ -632,10 +745,14 @@ def ccmh_chapters(comic_id: str) -> list[dict]:
 
 
 def ccmh_pages(comic_id: str, ep_id: str) -> list[str]:
-    """CC漫画页图 → [url]。移动端为 lazy 分页:阅读页按 ?p=N 分页,每页取 .img>img src。"""
+    """CC漫画页图 → [url]。移动端为 lazy 分页:阅读页按 ?p=N 分页,每页取 .img>img src。
+
+    分页请求失败时**不再静默跳过**(旧实现 continue 会让整话悄悄少几页):
+    重试多轮仍失败则抛错,由下载层把整话判失败并整轮重试。
+    """
     urls = []
     base = f"{_CCMH_BASE}/manhua/{comic_id}/{ep_id}.html"
-    # 第 1 页:提取总页数(最多请求 60 页兜底)
+    # 第 1 页:提取总页数(最多请求 120 页兜底)
     first = _ccmh_get(base, timeout=25)
     if first.status_code != 200:
         raise RuntimeError(f"CC漫画图片列表失败 HTTP {first.status_code}")
@@ -643,12 +760,13 @@ def ccmh_pages(comic_id: str, ep_id: str) -> list[str]:
     for m in re.finditer(r'<a href="\?p=(\d+)">\d+</a>', first.text):
         pages_n = max(pages_n, int(m.group(1)))
     pages_n = min(pages_n, 120)
+    missing_pages: list[int] = []
     for i in range(1, pages_n + 1):
         if i == 1:
             html = first.text
         else:
             html = ""
-            for _try in range(2):  # _get 内部已有退避重试,这里再补偿一轮,仍失败才跳过该页
+            for _try in range(3):  # _get 内部已有退避重试,这里再补偿两轮
                 try:
                     r = _ccmh_get(f"{base}?p={i}", timeout=25)
                     if r.status_code == 200:
@@ -656,8 +774,9 @@ def ccmh_pages(comic_id: str, ep_id: str) -> list[str]:
                         break
                 except Exception:  # noqa: BLE001
                     pass
-                time.sleep(1.5 * (_try + 1))
+                _throttle.sleep_cancellable(1.5 * (_try + 1))
             if not html:
+                missing_pages.append(i)
                 continue
         m = re.search(r'<div class="img[^"]*"[^>]*>\s*<img[^>]*\b(?:src|data-src)\s*=\s*["\']([^"\']+)["\']', html, re.I)
         if not m:
@@ -667,6 +786,9 @@ def ccmh_pages(comic_id: str, ep_id: str) -> list[str]:
             if u.startswith("//"):
                 u = "https:" + u
             urls.append(u)
+    if missing_pages:
+        # 宁可整话重试,也不要产出缺页的 PDF(旧实现静默丢页)
+        raise RuntimeError(f"CC漫画分页拉取失败 {len(missing_pages)} 页: {missing_pages[:10]}")
     return urls
 
 
@@ -1269,11 +1391,15 @@ _fetcher: "Fetcher | None" = None
 
 
 def _get_fetcher() -> "Fetcher":
-    """懒加载共享 fetcher(复用小说防封链路:UA 池/延迟/退避/代理/验证 cookies)。"""
+    """懒加载共享 fetcher(复用小说防封链路:UA 池/延迟/退避/代理/验证 cookies)。
+
+    图片下载的节流主要交给 fetcher 内的按域名自适应限速(throttle):
+    并发闸门 + 最小间隔 + 命中 429/503/210 后整站退避。
+    """
     global _fetcher
     if _fetcher is None:
         from .fetcher import Fetcher
-        _fetcher = Fetcher(min_delay=0.15, max_delay=0.5, max_retries=2)
+        _fetcher = Fetcher(min_delay=0.15, max_delay=0.5, max_retries=3)
     return _fetcher
 
 
@@ -1281,19 +1407,31 @@ def _get_fetcher() -> "Fetcher":
 # 全部轮次后仍有失败 → 整话标记失败(不落盘不记完成),重新下载续传重试直到成功,杜绝静默掉图
 _IMG_RETRY_ROUNDS = 4
 
+# 整话失败后的自动重试轮次与逐轮冷却(限流/网络抖动重试;仍失败才如实上报)
+_CH_PASSES = 3
+_CH_RETRY_WAIT = 6.0
+
 
 def _download_image(url: str, timeout: int = 30,
-                    referer: str = _MD_IMG_REFERER) -> bytes:
+                    referer: str = _MD_IMG_REFERER, cancel_check=None,
+                    group: str | None = None) -> bytes:
     """下载单张漫画图(带源 Referer 防盗链)。
 
-    走共享 fetcher:UA 池轮换 + 随机间隔 + 指数退避重试 + 代理 +
-    401/403 自动带验证中心 cookies。图片走 CDN 不做源冷却。
+    走共享 fetcher:UA 池轮换 + 按域名自适应限速(并发闸门 + 最小间隔 +
+    命中限流退避)+ 指数退避重试 + 代理 + 401/403 自动带验证中心 cookies。
+
+    并且**校验内容确实是图片**(expect_image):站点限流时返回的
+    "访问过于频繁" HTML/JSON 占位页会被判为失败并重试,不会当成漫画页塞进
+    PDF(旧实现只判大小 >1000 字节,错误页会被静默采信)。
     最终失败返回 b""(不抛异常):pool.map 中单图失败不拖垮整批,
-    由上层多轮补下 + 完整性校验决定整话成败。
+    由上层多轮补下 + 整话重试决定成败;用户取消时原样抛出 DownloadCancelled。
     """
     try:
         return _get_fetcher().fetch_bytes(
-            url, headers={"Referer": referer}, timeout=timeout)
+            url, headers={"Referer": referer}, timeout=timeout,
+            cancel_check=cancel_check, group=group, expect_image=True)
+    except DownloadCancelled:
+        raise
     except Exception:  # noqa: BLE001
         return b""
 
@@ -1464,6 +1602,15 @@ def img_referer(source: str = "mangadex") -> str:
     }.get(source, _MD_IMG_REFERER)
 
 
+def _img_group(url: str, source: str) -> str | None:
+    """图片下载的限速分组。
+
+    拷贝漫画的 210(访问过频)是**站级**限制,API 与图片 CDN 同源受限,
+    所以整站图片共用一个限速桶;其他源返回 None 由 throttle 按主机名分桶。
+    """
+    return "copymanga-img" if source == "copymanga" else None
+
+
 def download_comic(
     manga_title: str,
     chapter_list: list[dict],
@@ -1477,6 +1624,7 @@ def download_comic(
     manga_id: str = "",
     mode: str = "per_chapter",
     pdf_quality: str = "hq",
+    stats: dict | None = None,
 ) -> list[str]:
     """下载选中话并打包。
 
@@ -1487,6 +1635,21 @@ def download_comic(
     pdf_quality: PDF 图片质量 original/hq/eco(merged/zip 时图片缓存也按该档压缩)
     断点续传:merged/zip 先把每话图缓存到 <书名目录>/.raw/,全部完成后打包,
     重跑时已缓存的话跳过;per_chapter 保持原"每话 PDF + 已完成话跳过"。
+
+    限流韧性(访问过频下会"下重复/下漏页",故做了这几层保障):
+      * 图片请求走共享 fetcher 的按域名自适应限速(并发闸门 + 最小间隔 +
+        命中 429/503/210 后退避),不再对同一站点全速猛打
+      * 图片内容校验:限流占位页/HTML/JSON 错误页判定为失败并补下,
+        不会把错误页当成漫画页写进 PDF(重复页来源之一)
+      * 图片列表去重:同一页出现两个地址时只保留一个
+      * MangaDex 自定义 CDN 图失败时按文件名回退官方节点
+      * 整话失败不静默丢弃:整轮自动重试 _CH_PASSES 轮(逐轮加长冷却),
+        仍失败才记入 stats["failed"],由上层如实报"完成 N/M 话"
+      * 同话标签重复时自动加 (2)/(3) 后缀,meta 以章节 id 为键,
+        避免同名话互相覆盖(重复下载 + meta 丢话来源)
+
+    stats: 传入 dict 时,函数结束写入 {total, done, failed:[{idx,label,reason}],
+           made, mode} 供调用方如实上报进度/缺失话。
     """
     import time as _t
     from .downloader import safe_filename
@@ -1529,10 +1692,45 @@ def download_comic(
 
     ref = img_referer(source)
     made: list[str] = []
-    failed: list[int] = []
-    total = len(chapter_list)
+    fail_reason: dict[str, str] = {}   # meta 键 → 最终失败原因
+
+    # ---- 选中话按 id 去重:目录里同一话出现两次(站点"短篇合集"常见)会让
+    # merged/zip 装进重复页、meta 互相覆盖 —— 这是"下重复"的直接来源 ----
+    chapters: list[dict] = []
+    seen_ids: set[str] = set()
+    dup_items = 0
+    for ch in chapter_list:
+        cid = str(ch.get("id") or "")
+        if cid and cid in seen_ids:
+            dup_items += 1
+            continue
+        if cid:
+            seen_ids.add(cid)
+        chapters.append(ch)
+    if dup_items:
+        _log(f"  ⚠ 选中话里有 {dup_items} 个重复条目(同章节 id),已合并为一话")
+    total = len(chapters)
+
+    # ---- 每话 spec:唯一标签 / 图缓存目录 / meta 键 ----
+    used_labels: set[str] = set()
+    specs: list[tuple[int, dict, str, str, str]] = []
+    for i, ch in enumerate(chapters, 1):
+        label = _chapter_label(ch, i)
+        if label in used_labels:  # 同名话(不同分组/卷常有同名)加后缀,避免互相覆盖
+            n = 2
+            while f"{label} ({n})" in used_labels:
+                n += 1
+            label = f"{label} ({n})"
+        used_labels.add(label)
+        ch_dir = (os.path.join(raw_dir, f"{i:03d}_{safe_filename(label)}")
+                  if mode != "per_chapter" else "")
+        key = str(ch.get("id") or "") or label
+        specs.append((i, ch, label, ch_dir, key))
+    if len(used_labels) != len(chapters):
+        _log(f"  ⚠ 选中话里有重名标签,已自动加序号区分({len(chapters)} 话)")
+
     done_cnt = len(done_ids)
-    # 分卷元数据:label -> {volume, chapter, title, label, pages, pdf}(断点续传时合并旧 meta)
+    # 分卷元数据:meta 键 -> {label, pdf, volume, chapter, title, pages, cid}
     meta_entries: dict[str, dict] = {}
     meta_prev: dict = {}
     meta_path = os.path.join(book_dir, "meta.json")
@@ -1541,88 +1739,120 @@ def download_comic(
             with open(meta_path, "r", encoding="utf-8") as f:
                 mp = json.load(f)
             if mp.get("mode") == mode and isinstance(mp.get("chapters"), list):
-                meta_prev = {e.get("label", ""): e for e in mp["chapters"]}
+                for e in mp["chapters"]:
+                    # 以章节 id 为键(旧版以 label 为键,重名会互相覆盖 → 这里自动迁移)
+                    k = str(e.get("cid") or e.get("id") or e.get("label") or "")
+                    if k:
+                        meta_prev[k] = e
                 meta_entries = dict(meta_prev)
         except Exception:  # noqa: BLE001
             pass
     chapter_dirs: list[tuple[str, str]] = []  # merged/zip:(话label, 图缓存目录)
-    for i, ch in enumerate(chapter_list, 1):
-        if cancel_check:
-            try:
-                cancel_check()
-            except BaseException:
-                _save_partial()  # 取消/中断前落盘进度,保证断点续传可用
-                raise
-        label = _chapter_label(ch, i)
-        ch_dir = (os.path.join(raw_dir, f"{i:03d}_{safe_filename(label)}")
-                  if mode != "per_chapter" else "")
-        if str(ch.get("id", "")) in done_ids:
-            # 已完成:校验产出完整(缓存图数达标 / PDF 存在),缺图则剔除重下
-            redo = False
+
+    # ---- 校验已完成话的产出完整性,不完整则剔除重下 ----
+    for i, ch, label, ch_dir, key in specs:
+        if key not in done_ids:
+            continue
+        redo = False
+        if mode != "per_chapter":
+            need = done_counts.get(key, 0)
+            have = len(os.listdir(ch_dir)) if os.path.isdir(ch_dir) else 0
+            redo = have < need
+        else:
+            redo = not os.path.isfile(
+                os.path.join(book_dir, f"{safe_filename(label)}.pdf"))
+        if redo:
+            done_ids.discard(key)
+            done_cnt = len(done_ids)
+        else:
             if mode != "per_chapter":
-                need = done_counts.get(str(ch.get("id", "")), 0)
-                have = len(os.listdir(ch_dir)) if os.path.isdir(ch_dir) else 0
-                redo = have < need
-            else:
-                redo = not os.path.isfile(
-                    os.path.join(book_dir, f"{safe_filename(label)}.pdf"))
-            if redo:
-                done_ids.discard(str(ch.get("id", "")))
-                done_cnt = len(done_ids)
-            else:
-                if mode != "per_chapter":
-                    chapter_dirs.append((label, ch_dir))
-                if on_progress:
-                    on_progress(done_cnt, total, label)
-                continue
+                chapter_dirs.append((label, ch_dir))
+            if on_progress:
+                on_progress(done_cnt, total, label)
+
+    todo = [s for s in specs if s[4] not in done_ids]
+
+    def _one_chapter(i: int, ch: dict, label: str, ch_dir: str, key: str):
+        """下载并产出单话;返回 (是否成功, 失败原因)。"""
+        nonlocal done_cnt
         _log(f"  ▶ 第 {i}/{total} 话 {label}:解析图片…")
         try:
             urls = pages(ch["id"], source=source, comic_id=manga_id)
-        except Exception as exc:  # noqa: BLE001
+        except BaseException as exc:  # noqa: BLE001
+            if isinstance(exc, (DownloadCancelled, CopyBlocked)):
+                raise  # 取消 / 站级封禁:整轮终止,不再对同一站继续请求
             _log(f"  ✗ 第 {i} 话图片列表失败: {type(exc).__name__}: {exc}")
-            failed.append(i)
             if on_progress:
                 on_progress(done_cnt, total, label, err=True)
-            continue
+            return False, f"图片列表失败({type(exc).__name__}: {exc})"
         if not urls:
-            _log(f"  ⚠ 第 {i} 话无图片,跳过")
-            failed.append(i)
+            _log(f"  ⚠ 第 {i} 话无图片")
             if on_progress:
                 on_progress(done_cnt, total, label, err=True)
-            continue
-        def _dl_round(items: list[tuple[int, str]]) -> dict[int, bytes]:
-            """并发下载一批图,返回 {序号: bytes};失败/过小(防盗链图)不入结果。"""
+            return False, "图片列表为空"
+        # 去重:同一页出现两个地址会产生重复页
+        seen_u: set[str] = set()
+        uniq: list[str] = []
+        for u in urls:
+            if u and u not in seen_u:
+                seen_u.add(u)
+                uniq.append(u)
+        if len(uniq) != len(urls):
+            _log(f"  ⚠ 第 {i} 话图片列表含 {len(urls) - len(uniq)} 个重复地址,已去重")
+        urls = uniq
+        prev_n = done_counts.get(key, 0)
+        if prev_n and prev_n != len(urls):
+            _log(f"  ⚠ 第 {i} 话页数与此前记录不同({prev_n} → {len(urls)}),以最新列表为准")
+
+        # MangaDex 自定义 CDN 失败 → 官方节点兜底(按文件名对应,避免顺序错位)
+        fb_by_file: dict[str, str] = {}
+        if source == "mangadex" and _md_custom_cdns():
+            try:
+                for u in _md_pages(ch["id"], use_custom_cdn=False):
+                    fb_by_file[u.rsplit("/", 1)[-1]] = u
+            except Exception:  # noqa: BLE001
+                fb_by_file = {}
+
+        pending = list(enumerate(urls))
+
+        def _dl_round(items: list[tuple[int, str]], use_fb: bool = False) -> dict[int, bytes]:
+            """并发下载一批图,返回 {序号: bytes};失败/过小/非图片内容不入结果。"""
             if not items:
                 return {}
-            with ThreadPoolExecutor(max_workers=max(1, int(img_workers))) as pool:
-                datas = list(pool.map(lambda t: _download_image(t[1], referer=ref), items))
-            return {i: d for (i, _u), d in zip(items, datas) if d and len(d) > 1000}
+            grp = _img_group(items[0][1], source)
 
-        # 并发下载图片:自定义 CDN 整话失败回退官方节点,失败图多轮补下,杜绝静默掉图
-        pending = list(enumerate(urls))
+            def _one(t):
+                i2, u = t
+                d = _download_image(u, referer=ref, cancel_check=cancel_check, group=grp)
+                if not d and use_fb:
+                    alt = fb_by_file.get(u.rsplit("/", 1)[-1])
+                    if alt:
+                        d = _download_image(alt, referer=ref, cancel_check=cancel_check,
+                                            group=_img_group(alt, source))
+                return d
+
+            with ThreadPoolExecutor(max_workers=max(1, int(img_workers))) as pool:
+                datas = list(pool.map(_one, items))
+            return {i3: d for (i3, _u), d in zip(items, datas) if d and len(d) > 1000}
+
+        # 并发下载图片:失败图多轮补下,杜绝静默掉图
         img_map = _dl_round(pending)
-        if not img_map and source == "mangadex" and _md_custom_cdns():
+        if not img_map and fb_by_file:
             _log("  ↻ 自定义 CDN 全部失败,回退官方节点重试…")
-            try:
-                urls = _md_pages(ch["id"], use_custom_cdn=False)
-            except Exception:  # noqa: BLE001
-                urls = []
-            pending = list(enumerate(urls))
-            img_map = _dl_round(pending)
+            img_map = _dl_round(pending, use_fb=True)
         for rnd in range(1, _IMG_RETRY_ROUNDS):
-            missing = [(i, u) for i, u in pending if i not in img_map]
+            missing = [(i2, u) for i2, u in pending if i2 not in img_map]
             if not missing:
                 break
             _log(f"  ↻ 第 {rnd} 轮补下失败图({len(missing)} 张)…")
-            _t.sleep(1.5 * rnd)
-            img_map.update(_dl_round(missing))
-        if not urls or len(img_map) < len(urls):
+            _throttle.sleep_cancellable(1.5 * rnd, cancel_check)
+            img_map.update(_dl_round(missing, use_fb=bool(fb_by_file)))
+        if len(img_map) < len(urls):
             _log(f"  ✗ 第 {i} 话图片不全({len(img_map)}/{len(urls)}),"
-                 f"已重试 {_IMG_RETRY_ROUNDS - 1} 轮,重新下载会重试该话")
-            failed.append(i)
+                 f"已补下 {_IMG_RETRY_ROUNDS - 1} 轮,稍后整话自动重试(不落盘、不记完成)")
             if on_progress:
                 on_progress(done_cnt, total, label, err=True)
-            continue
+            return False, f"图片不全({len(img_map)}/{len(urls)})"
         valid = [img_map[k] for k in sorted(img_map)]
         try:
             if mode == "per_chapter":
@@ -1631,8 +1861,8 @@ def download_comic(
                 with open(fpath, "wb") as f:
                     f.write(pdf)
                 made.append(fpath)
-                meta_entries[label] = {
-                    "label": label, "pdf": os.path.basename(fpath),
+                meta_entries[key] = {
+                    "cid": key, "label": label, "pdf": os.path.basename(fpath),
                     "volume": (ch.get("volume") or "").strip(),
                     "chapter": (ch.get("chapter") or "").strip(),
                     "title": (ch.get("title") or "").strip(),
@@ -1648,82 +1878,138 @@ def download_comic(
                     with open(os.path.join(ch_dir, f"img{k:04d}.jpg"), "wb") as f:
                         f.write(_shrink_image(d, pdf_quality))
                 chapter_dirs.append((label, ch_dir))
-                meta_entries[label] = {
-                    "label": label, "pdf": "",
+                meta_entries[key] = {
+                    "cid": key, "label": label, "pdf": "",
                     "volume": (ch.get("volume") or "").strip(),
                     "chapter": (ch.get("chapter") or "").strip(),
                     "title": (ch.get("title") or "").strip(),
                     "pages": len(valid),
                 }
                 _log(f"  ✓ 第 {i}/{total} 话 {label}({len(valid)} 页,已缓存)")
-        except Exception as exc:  # noqa: BLE001
+        except BaseException as exc:  # noqa: BLE001
+            if isinstance(exc, DownloadCancelled):
+                raise
             _log(f"  ✗ 第 {i} 话处理失败: {type(exc).__name__}: {exc}")
-            failed.append(i)
             if on_progress:
                 on_progress(done_cnt, total, label, err=True)
-            continue  # 未落盘未记完成,重新下载可续传重试
-        done_counts[str(ch.get("id", ""))] = len(valid)
-        done_ids.add(str(ch.get("id", "")))
+            return False, f"处理失败({type(exc).__name__}: {exc})"  # 未落盘未记完成,可续传重试
+        done_counts[key] = len(valid)
+        done_ids.add(key)
         done_cnt = len(done_ids)
         if on_progress:
             on_progress(done_cnt, total, label)
         _save_partial()  # 每话落盘:中断任意时刻都能续传
-        if i < total:
-            _t.sleep(0.2)
+        return True, ""
+
+    # ---- 多轮补下:整话失败(限流/网络)时自动重试,不静默丢话 ----
+    for pass_no in range(1, _CH_PASSES + 1):
+        if not todo:
+            break
+        if pass_no > 1:
+            wait = _CH_RETRY_WAIT * (pass_no - 1)
+            _log(f"  ↻ 第 {pass_no} 轮:重试 {len(todo)} 个失败话"
+                 f"(等 {wait:.0f}s 让站点限流冷却)…")
+            _throttle.sleep_cancellable(wait, cancel_check)
+        nxt = []
+        for i, ch, label, ch_dir, key in todo:
+            if cancel_check:
+                try:
+                    cancel_check()
+                except BaseException:
+                    _save_partial()  # 取消/中断前落盘进度,保证断点续传可用
+                    raise
+            try:
+                ok, reason = _one_chapter(i, ch, label, ch_dir, key)
+            except BaseException as exc:  # noqa: BLE001
+                if isinstance(exc, (DownloadCancelled, CopyBlocked)):
+                    _save_partial()
+                    raise  # 站级封禁:立即上报(继续跑只会重复撞墙),已完成的进度仍可续传
+                ok, reason = False, f"{type(exc).__name__}: {exc}"
+                _log(f"  ✗ 第 {i} 话异常: {reason}")
+            if not ok:
+                fail_reason[key] = reason
+                nxt.append((i, ch, label, ch_dir, key))
+        todo = nxt
     _save_partial()
 
-    # ---- merged / zip:全部话就绪后统一打包 ----
-    if mode in ("merged", "zip") and chapter_dirs:
-        try:
-            if mode == "merged":
-                all_imgs: list[bytes] = []
-                for _label, cd in chapter_dirs:
-                    for fn in sorted(os.listdir(cd)):
-                        try:
-                            with open(os.path.join(cd, fn), "rb") as f:
-                                all_imgs.append(f.read())
-                        except OSError:
-                            pass
-                if all_imgs:
-                    pdf = _to_pdf(all_imgs)
-                    fpath = os.path.join(book_dir, f"{safe_filename(manga_title or 'manga')}_合集.pdf")
-                    with open(fpath, "wb") as f:
-                        f.write(pdf)
-                    made.append(fpath)
-                    _pdf_name = os.path.basename(fpath)
-                    for _e in meta_entries.values():
-                        _e["pdf"] = _pdf_name
-                    _log(f"  ✓ 融合打包完成: {os.path.basename(fpath)}(共 {len(all_imgs)} 页)")
-            else:  # zip
-                import zipfile as _zipfile
-                zpath = os.path.join(book_dir, f"{safe_filename(manga_title or 'manga')}.zip")
-                with _zipfile.ZipFile(zpath, "w", _zipfile.ZIP_DEFLATED) as zf:
+    # ---- merged / zip:全部话就绪后统一打包(严格按选中话序,避免续传后页序错乱) ----
+    if mode in ("merged", "zip"):
+        ordered_dirs: list[tuple[str, str]] = []
+        for i, ch, label, ch_dir, key in specs:
+            if key in fail_reason:
+                continue
+            if ch_dir and os.path.isdir(ch_dir) and os.listdir(ch_dir):
+                ordered_dirs.append((label, ch_dir))
+        if len(ordered_dirs) != len(specs):
+            _log(f"  ⚠ 有 {len(specs) - len(ordered_dirs)} 话未产出,"
+                 f"打包仅包含成功的 {len(ordered_dirs)} 话")
+        chapter_dirs = ordered_dirs
+        if chapter_dirs:
+            try:
+                if mode == "merged":
+                    all_imgs: list[bytes] = []
                     for _label, cd in chapter_dirs:
                         for fn in sorted(os.listdir(cd)):
-                            zf.write(os.path.join(cd, fn), f"{safe_filename(_label)}/{fn}")
-                made.append(zpath)
-                _log(f"  ✓ ZIP 打包完成: {os.path.basename(zpath)}({len(chapter_dirs)} 话)")
-        except Exception as exc:  # noqa: BLE001
-            _log(f"  ✗ 融合/ZIP 打包失败: {type(exc).__name__}: {exc}")
-        finally:
-            import shutil as _sh
-            try:
-                if os.path.isdir(raw_dir):
-                    _sh.rmtree(raw_dir)
-            except OSError:
-                pass
-    elif mode in ("merged", "zip"):
-        _log("  ⚠ 无成功下载的话,未生成融合/ZIP 包")
+                            try:
+                                with open(os.path.join(cd, fn), "rb") as f:
+                                    all_imgs.append(f.read())
+                            except OSError:
+                                pass
+                    if all_imgs:
+                        pdf = _to_pdf(all_imgs)
+                        fpath = os.path.join(book_dir, f"{safe_filename(manga_title or 'manga')}_合集.pdf")
+                        with open(fpath, "wb") as f:
+                            f.write(pdf)
+                        made.append(fpath)
+                        _pdf_name = os.path.basename(fpath)
+                        for _e in meta_entries.values():
+                            _e["pdf"] = _pdf_name
+                        _log(f"  ✓ 融合打包完成: {os.path.basename(fpath)}(共 {len(all_imgs)} 页)")
+                else:  # zip
+                    import zipfile as _zipfile
+                    zpath = os.path.join(book_dir, f"{safe_filename(manga_title or 'manga')}.zip")
+                    with _zipfile.ZipFile(zpath, "w", _zipfile.ZIP_DEFLATED) as zf:
+                        for _label, cd in chapter_dirs:
+                            for fn in sorted(os.listdir(cd)):
+                                zf.write(os.path.join(cd, fn), f"{safe_filename(_label)}/{fn}")
+                    made.append(zpath)
+                    _log(f"  ✓ ZIP 打包完成: {os.path.basename(zpath)}({len(chapter_dirs)} 话)")
+            except Exception as exc:  # noqa: BLE001
+                _log(f"  ✗ 融合/ZIP 打包失败: {type(exc).__name__}: {exc}")
+            finally:
+                import shutil as _sh
+                try:
+                    if os.path.isdir(raw_dir):
+                        _sh.rmtree(raw_dir)
+                except OSError:
+                    pass
+        else:
+            _log("  ⚠ 无成功下载的话,未生成融合/ZIP 包")
 
-    if done_cnt >= total:
+    # 全部选中话都成功才清理续传文件(有失败话则保留,便于重跑续传)
+    if done_cnt >= total and not fail_reason:
         try:
             os.remove(partial_path)
         except OSError:
             pass
     # 分卷元数据落盘(per_chapter/merged):供本地 PDF 阅读按卷跳转
-    if mode in ("per_chapter", "merged") and made and meta_entries:
+    if mode in ("per_chapter", "merged") and meta_entries:
         try:
-            chapters = [meta_entries[k] for k in meta_entries]
+            # 严格按"本次选中话序"排列;per_chapter 额外保留历史遗留话(不在本次列表内)
+            chapters: list[dict] = []
+            placed: set[str] = set()
+            for i, ch, label, ch_dir, key in specs:
+                e = meta_entries.get(key)
+                if e and key not in placed:
+                    if mode == "merged" and key in fail_reason:
+                        continue  # 未进 PDF 的话不能出现在目录里(页码会错位)
+                    chapters.append(e)
+                    placed.add(key)
+            if mode == "per_chapter":
+                for k, e in meta_entries.items():
+                    if k not in placed:
+                        chapters.append(e)
+                        placed.add(k)
             if mode == "merged":
                 acc = 0
                 volumes: dict[str, dict] = {}
@@ -1740,7 +2026,9 @@ def download_comic(
                     })
                     acc += e["pages"]
                 for v in vorder:
-                    volumes[v]["last_page"] = acc
+                    # 逐卷收尾页:该卷末话的 last_page(旧实现统一写成总页数,
+                    # 多卷时前面几卷的区间会一直延伸到全书末尾 → 阅读器按卷跳转错位)
+                    volumes[v]["last_page"] = volumes[v]["chapters"][-1]["last_page"]
                 meta = {
                     "mode": "merged",
                     "pdf": chapters[0]["pdf"] if chapters else "",
@@ -1770,8 +2058,25 @@ def download_comic(
             _log(f"  ✓ 已生成分卷元数据 meta.json({len(meta['volumes'])} 卷)")
         except Exception as exc:  # noqa: BLE001
             _log(f"  ⚠ meta.json 写入失败: {exc}")
+
+    failed = [i for i, ch, label, ch_dir, key in specs if key in fail_reason]
     if failed:
-        _log(f"  ⚠ 失败 {len(failed)} 话: {failed[:10]}{'…' if len(failed) > 10 else ''}(可重新下载续传)")
+        shown = "、".join(
+            f"第{i}话({fail_reason[key][:28]})"
+            for i, ch, label, ch_dir, key in specs if key in fail_reason)
+        _log(f"  ⚠ 失败 {len(failed)} 话: {failed[:10]}{'…' if len(failed) > 10 else ''}"
+             f"(已自动重试 {_CH_PASSES} 轮,可重新下载续传)")
+        _log(f"  ⚠ 失败原因: {shown}")
+    if stats is not None:
+        stats.clear()
+        stats.update({
+            "total": total,
+            "done": len([s for s in specs if s[4] in done_ids]),
+            "failed": [{"idx": i, "label": label, "reason": fail_reason[key]}
+                       for i, ch, label, ch_dir, key in specs if key in fail_reason],
+            "made": list(made),
+            "mode": mode,
+        })
     return made
 
 

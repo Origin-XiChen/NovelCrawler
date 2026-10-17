@@ -1007,6 +1007,58 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _selftest_verify() -> int:
+    """隐藏自检入口:--selftest-verify
+
+    打包后用来确认"自动验证"链路真的可用(而不只是 import 成功):
+    playwright 能否导入 → 能否启动系统 Edge/Chrome → 能否打开页面拿到标题。
+    结果写 _selftest.json 到 exe 同目录,并把摘要打到 stdout,便于构建后自动核对。
+    """
+    import json
+    out = {"python": sys.version.split()[0], "frozen": bool(getattr(sys, "frozen", False))}
+    rc = 0
+    try:
+        from novel.browser import capability, ensure_driver, ensure_temp_env
+        cap = capability()
+        out.update(cap)
+        out["driver_used"] = ensure_driver()
+        out["temp_used"] = ensure_temp_env()
+        if not cap.get("playwright"):
+            out["ok"] = False
+            out["error"] = cap.get("error") or "未安装 playwright"
+            rc = 2
+        elif not out["driver_used"]:
+            out["ok"] = False
+            out["error"] = "未找到 Playwright node 驱动"
+            rc = 4
+        else:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                b = p.chromium.launch(channel="msedge", headless=True)
+                page = b.new_page()
+                page.goto("https://example.com", timeout=45000)
+                out["title"] = page.title()
+                out["driver_ok"] = True
+                b.close()
+            out["ok"] = out.get("title", "").startswith("Example")
+            rc = 0 if out["ok"] else 3
+    except Exception as exc:  # noqa: BLE001
+        out["ok"] = False
+        out["error"] = f"{type(exc).__name__}: {exc}"
+        rc = 1
+    try:
+        base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.getcwd()
+        with open(os.path.join(base, "_selftest.json"), "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=1)
+    except OSError:
+        pass
+    try:
+        print(json.dumps(out, ensure_ascii=False))
+    except Exception:  # noqa: BLE001
+        pass
+    return rc
+
+
 def main() -> None:
     # 高分屏(125%/150%/200% 缩放)DPI 感知:避免整窗发虚 + 边缘缩放热区错位。
     # 必须在任何窗口创建前调用;WebView2 子窗口继承进程 DPI 上下文。
@@ -1090,4 +1142,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # 隐藏自检:--selftest-verify(打包后核对内置 Playwright/浏览器链路)
+    if "--selftest-verify" in sys.argv:
+        sys.exit(_selftest_verify())
     main()

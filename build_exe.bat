@@ -1,50 +1,34 @@
 @echo off
 rem ============================================
 rem  Build standalone exe (PyInstaller onefile)
-rem  Desktop mode: 自制窗口(window2.py,Win32+WebView2 COM,脱离 pywebview)
+rem  Desktop mode: 自制窗口(window2.py,Win32+WebView2 COM)
 rem  Output: dist\NovelCrawler\NovelCrawler.exe
 rem  (放在同名文件夹,整个文件夹可直接压缩分发)
+rem
+rem  注意:打包配置**只维护 NovelCrawler.spec**(静态资源/WebView2Loader.dll/
+rem  内置 Playwright 驱动等都在里面);本脚本只负责选解释器 + 调用 spec,
+rem  避免以前 spec 与命令行两份配置不一致的问题。
 rem ============================================
 setlocal
 cd /d "%~dp0"
 
 set "PY=%~dp0.venv\Scripts\python.exe"
+if not exist "%PY%" set "PY=%~dp0bundle314\Scripts\python.exe"
 if not exist "%PY%" set "PY=%USERPROFILE%\.workbuddy\binaries\python\envs\default\Scripts\python.exe"
 
 echo Using Python: %PY%
-"%PY%" -m pip install pyinstaller -q
+"%PY%" -m pip install --disable-pip-version-check -q pyinstaller
+rem 验证中心"自动验证"依赖 playwright(exe 内置);缺了就打不出可用的验证功能
+"%PY%" -c "import playwright" 2>nul
+if errorlevel 1 (
+    echo [warn] 当前构建环境未安装 playwright,自动验证将不可用:
+    echo        "%PY%" -m pip install playwright
+)
 
-"%PY%" -m PyInstaller --noconfirm --clean --onefile --noconsole ^
-  --name NovelCrawler ^
-  --icon "app.ico" ^
+"%PY%" -m PyInstaller --noconfirm --clean ^
   --distpath "dist\NovelCrawler" ^
   --workpath "build\pyinstaller" ^
-  --add-data "static;static" ^
-  --add-data "icon;icon" ^
-  --add-data "%PY%\..\Lib\site-packages\webview\lib\runtimes\win-x64\native\WebView2Loader.dll;webview\lib\runtimes\win-x64\native" ^
-  --hidden-import novel.browser ^
-  --hidden-import novel.verify ^
-  --hidden-import novel.opds ^
-  --hidden-import novel.epub ^
-  --hidden-import novel.searcher ^
-  --hidden-import novel.jsonpath ^
-  --hidden-import novel.fetcher ^
-  --hidden-import novel.downloader ^
-  --hidden-import novel.source_registry ^
-  --hidden-import novel.paths ^
-  --hidden-import novel.tasklog ^
-  --hidden-import novel.notes ^
-  --hidden-import novel.wenku8 ^
-  --hidden-import novel.comic ^
-  --hidden-import novel.hotspot ^
-  --hidden-import novel.tunnel ^
-  --hidden-import novel.webrtc ^
-  --hidden-import novel.signal_mqtt ^
-  --hidden-import novel.camscan ^
-  --hidden-import img2pdf ^
-  --hidden-import qrcode ^
-  --hidden-import cv2 ^
-  window2.py
+  NovelCrawler.spec
 
 if errorlevel 1 (
     echo Build FAILED.

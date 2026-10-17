@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -171,3 +172,75 @@ def clear_pending(host: str) -> bool:
             _save_pending(data)
             return True
     return False
+
+
+# ---- 手动粘贴 Cookie(免 Playwright 兜底流程) ----
+
+# 明显的"这不是 cookie"信号:便于给出人话错误
+_COOKIE_HINT_WORDS = ("user-agent:", "accept:", "referer:", "cookie:", "host:",
+                      "sec-", "authorization:")
+
+
+def parse_cookie_text(text: str) -> tuple[list[dict], str]:
+    """解析用户粘贴的 Cookie 文本(免依赖验证流程)。
+
+    支持三种常见来源:
+      1. DevTools → Network → Request Headers 里的整行:
+         `Cookie: cf_clearance=xxx; sessionid=yyy`
+      2. DevTools → Application → Cookies 表格里逐行复制:
+         `cf_clearance  xxx`(制表符/多空格分隔)或 `cf_clearance=xxx`
+      3. 直接粘贴 `name=value; name2=value2`
+
+    返回 (cookies 列表, 错误提示);解析失败时列表为空。
+    """
+    if not text or not text.strip():
+        return [], "请粘贴 Cookie 内容(形如 name=value; name2=value2)"
+    raw = text.strip()
+    low = raw.lower()
+    # 整段是请求头集合(含 User-Agent 等):只取 Cookie 那一行
+    if "cookie:" in low and (":" in raw.splitlines()[0]):
+        picked = []
+        for line in raw.splitlines():
+            if line.strip().lower().startswith("cookie:"):
+                picked.append(line.split(":", 1)[1].strip())
+        if picked:
+            raw = "; ".join(picked)
+        else:
+            return [], "没找到 Cookie 行:请在 DevTools 的 Network → 请求头里复制「Cookie: …」整行"
+    raw = raw.replace("\r", "\n")
+    parts: list[str] = []
+    for line in raw.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("cookie:"):
+            line = line.split(":", 1)[1].strip()
+        # 表格复制:首列是名字,制表符/多空格分隔
+        # (DevTools → Application → Cookies 复制出来常是多列:
+        #  name \t value \t domain \t path \t expires …,只取前两列,忽略其余)
+        m = re.match(r"^([^\s=;]+)\t+([^\t\n]+)", line)
+        if not m:
+            m = re.match(r"^([^\s=;]+) {1,}([^\s=;]+)$", line)
+        if m and "=" not in m.group(1):
+            parts.append(f"{m.group(1)}={m.group(2).strip()}")
+        else:
+            parts.extend(p for p in line.split(";") if p.strip())
+    cookies: list[dict] = []
+    seen: set[str] = set()
+    for p in parts:
+        p = p.strip()
+        if not p or "=" not in p:
+            continue
+        name, _, value = p.partition("=")
+        name = name.strip().strip("'\"")
+        value = value.strip().strip("'\"").strip()
+        if not name or name in seen:
+            continue
+        if name.lower() in [w.rstrip(":") for w in _COOKIE_HINT_WORDS]:
+            continue  # 误复制了别的请求头
+        seen.add(name)
+        cookies.append({"name": name, "value": value, "domain": "", "path": "/"})
+    if not cookies:
+        return [], ("没有解析到 cookie。请复制形如 `cf_clearance=xxx; sessionid=yyy` 的内容,"
+                    "或 DevTools → Network → 请求头里的「Cookie: …」整行")
+    return cookies, ""

@@ -44,3 +44,7 @@ _QiMiaoMH.java.txt
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# ================= 运行时临时目录 =================
+# 系统 TEMP 不可写时,验证用的浏览器会把工作目录落到这里(见 novel/browser.py)
+/tmp/

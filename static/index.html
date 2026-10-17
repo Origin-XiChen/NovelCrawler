@@ -2807,7 +2807,17 @@ async function comicShowDetail(source, id, title, cover, desc, lang) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const j = await api('/api/comic_toc?id=' + encodeURIComponent(id) + '&source=' + encodeURIComponent(comicCur.source));
-      if (!j.ok) throw new Error(j.error || '加载失败');
+      if (!j.ok) {
+        if (j.blocked) {  // 站级封禁:重试无效,直接给处置建议(换源/代理/等 1 小时)
+          document.getElementById('comicChapList').innerHTML =
+            '<div class="empty" style="text-align:left; line-height:1.9">🚫 ' +
+            esc(j.error || '').replace(/\n/g, '<br>') +
+            '<br><span style="font-size:12px; color:var(--muted)">可点左上角「← 返回」换用其它源(MangaDex 等),或在设置里配置代理后重试。</span><br>' +
+            '<button class="btn-sm" style="margin-top:6px" onclick="retryComicToc()">🔄 我已处理,重新加载</button></div>';
+          return;
+        }
+        throw new Error(j.error || '加载失败');
+      }
       comicCur.chapters = j.chapters || [];
       document.getElementById('cdCount').textContent = '共 ' + comicCur.chapters.length + ' 话';
       renderComicChaps();
@@ -2823,7 +2833,7 @@ async function comicShowDetail(source, id, title, cover, desc, lang) {
         continue;
       }
       document.getElementById('comicChapList').innerHTML =
-        '<div class="empty">话列表加载失败: ' + esc(msg) +
+        '<div class="empty">话列表加载失败: ' + esc(msg).replace(/\n/g, '<br>') +
         '<br><span style="font-size:12px; color:var(--muted)"><button class="btn-sm" style="margin-top:6px" onclick="retryComicToc()">🔄 手动重试</button></span></div>';
       return;
     }
@@ -3101,11 +3111,17 @@ async function loadComicHistory() {
     if (!hist.length) { box.innerHTML = '<div class="empty">暂无漫画下载记录</div>'; return; }
     box.innerHTML = hist.map(h => {
       const ok = h.state === 'ok';
+      const warn = h.state === 'warn';
       const detail = h.detail || h.file || '';
+      const flag = ok
+        ? '<span style="color:var(--success); font-size:11px">✓ 成功</span>'
+        : (warn
+          ? '<span style="color:#b45309; font-size:11px">⚠ 部分完成</span>'
+          : '<span style="color:var(--danger,#ff3b30); font-size:11px">✗ ' + esc((detail || '失败').slice(0, 60)) + '</span>');
       return `
       <div class="comic-row" style="margin-bottom:8px">
         <div style="flex:1; min-width:0">
-          <div class="c-title">${esc(h.title || '')} ${ok ? '<span style="color:var(--success); font-size:11px">✓ 成功</span>' : '<span style="color:var(--danger,#ff3b30); font-size:11px">✗ ' + esc((detail || '失败').slice(0, 60)) + '</span>'}</div>
+          <div class="c-title">${esc(h.title || '')} ${flag}</div>
           <div class="c-meta">${esc(detail || '')} · ${esc(h.time || '')}</div>
         </div>
       </div>`;
@@ -3190,10 +3206,11 @@ function renderTaskHistory(list) {
   if (!list.length) { box.innerHTML = '<div class="empty" style="padding:20px">暂无任务记录</div>'; return; }
   box.innerHTML = list.map(h => {
     const ok = h.state === 'ok';
+    const warn = h.state === 'warn';   // 部分完成(如有话失败但产物已生成)
     const t = new Date(h.ts * 1000).toLocaleString();
-    const color = ok ? '#166534' : '#991b1b';
-    const bg = ok ? '#E1F5EE' : '#FCEBEB';
-    const icon = ok ? '✓' : '✗';
+    const color = ok ? '#166534' : (warn ? '#B45309' : '#991b1b');
+    const bg = ok ? '#E1F5EE' : (warn ? '#FEF3C7' : '#FCEBEB');
+    const icon = ok ? '✓' : (warn ? '⚠' : '✗');
     const canRetry = !ok && h.kind === 'OPDS下载' && h.url;
     return `<div style="display:flex; gap:10px; padding:9px 20px; border-bottom:0.5px solid var(--border); align-items:flex-start">
       <span style="color:${color}; font-weight:700; width:18px; flex-shrink:0">${icon}</span>
@@ -3203,7 +3220,7 @@ function renderTaskHistory(list) {
         ${h.detail ? `<div style="font-size:12px; color:${color}; margin-top:2px">${esc(h.detail)}</div>` : ''}
         ${h.file ? `<div style="font-size:12px; color:var(--muted); margin-top:2px">📄 ${esc(h.file)}${h.size ? ' (' + fmtSize(h.size) + ')' : ''}</div>` : ''}
       </div>
-      <span style="font-size:11px; padding:2px 8px; border-radius:999px; background:${bg}; color:${color}; flex-shrink:0; font-weight:500">${ok ? '成功' : '失败'}</span>
+      <span style="font-size:11px; padding:2px 8px; border-radius:999px; background:${bg}; color:${color}; flex-shrink:0; font-weight:500">${ok ? '成功' : (warn ? '部分完成' : '失败')}</span>
       ${canRetry ? `<button class="btn-sm primary" style="flex-shrink:0" onclick="retryOpdsTask('${jss(h.url)}','${jss(h.title)}','${jss(h.mode || '')}')">🔄 重试</button>` : ''}
     </div>`;
   }).join('');
@@ -4802,13 +4819,19 @@ function gotoVerifySettings() {
   showSettings();
   showSettingsCat('verify');
 }
-/* 设置页内发起验证(与旧 verifyStart 同逻辑,表单用 setVf* id) */
+/* 设置页内发起验证(自动方式);缺 Playwright 时自动切换到「粘贴 Cookie」手动流程 */
 async function verifyStartInSettings() {
   const urlEl = document.getElementById('setVfUrl');
   const nameEl = document.getElementById('setVfName');
   const url = urlEl ? urlEl.value.trim() : '';
   const name = nameEl ? nameEl.value.trim() : '';
   if (!url) { toast('请填写需要验证的网址'); return; }
+  // 已知自动验证不可用:不再白跑一次请求,直接引导手动流程
+  if (_vfCap && !_vfCap.playwright) {
+    vfManualFor(name || url.split('/')[2] || '', url);
+    toast('自动验证不可用(' + (_vfCap.error || '缺少 playwright') + '),已切换到粘贴 Cookie 方式', 5200);
+    return;
+  }
   toast('已打开浏览器窗口,请完成人机验证…', 4000);
   try {
     const r = await api('/api/verify', {
@@ -4817,10 +4840,29 @@ async function verifyStartInSettings() {
     }, 300000);
     if (r.ok) {
       notify('✅ 验证通过: ' + r.host + '(' + r.cookies + ' 个 cookies)', 'ok');
+    } else if (r.need_manual) {
+      // 后端判定自动验证不可用 → 切手动流程,并显示真实原因
+      _vfCap = {playwright: false, error: r.error || ''};
+      renderVerifyPane().then(() => {
+        vfManualFor(name || url.split('/')[2] || '', url);
+        toast(r.error || '自动验证不可用,请改用粘贴 Cookie 方式', 6000);
+      });
+      return;
     } else {
-      toast('验证失败: ' + (r.error || ''));
+      toast('验证失败: ' + (r.error || ''), 5200);
     }
-  } catch (e) { toast('验证失败: ' + e.message); }
+  } catch (e) {
+    const msg = String(e.message || '');
+    if (msg.includes('自动验证不可用') || msg.includes('playwright')) {
+      _vfCap = {playwright: false, error: msg};
+      renderVerifyPane().then(() => {
+        vfManualFor(name || url.split('/')[2] || '', url);
+        toast(msg, 6000);
+      });
+      return;
+    }
+    toast('验证失败: ' + msg, 5200);
+  }
   renderVerifyPane();  // 刷新列表
 }
 function verifyPendingInSettings(host, url) {
@@ -4913,24 +4955,65 @@ async function showSetBookTab(tab) {
   } catch (e) { if (seq === _bkTabSeq) pane.innerHTML = '<div class="empty">加载失败:' + esc(e.message) + '</div>'; }
 }
 /* 验证中心独立分类渲染(书籍/漫画通用);返回 HTML 由调用方写入 */
+let _vfCap = null;  // 缓存的验证能力体检结果
 async function renderVerifyPane() {
   const pane = document.getElementById('setVerifyPane');
   if (!pane) return;
   pane.innerHTML = '<div class="empty">加载中…</div>';
   try {
-    const [jV, jP] = await Promise.all([api('/api/verify_status'), api('/api/verify_pending')]);
-    const verified = (jV.verified || []).map(v => ({host: v.host||v, name: v.name||'', last_ok: v.last_ok||0, expired: !!v.expired}));
+    const [jV, jP, jC] = await Promise.all([
+      api('/api/verify_status'),
+      api('/api/verify_pending'),
+      api('/api/verify_capability', {silent: true}).catch(() => null)
+    ]);
+    _vfCap = jC || null;
+    const verified = (jV.verified || []).map(v => ({host: v.host||v, name: v.name||'', ts: v.ts||v.last_ok||0, expired: !!v.expired}));
     const pending = Array.isArray(jP.pending) ? jP.pending : [];  // 后端返回数组,非对象
+    const autoOK = !!(jC && jC.playwright);
+    const capErr = (jC && jC.error) || '';
+    const channels = (jC && (jC.channels || []).join('/')) || '';
+    const drvSrc = (jC && jC.driver_src) || '';
+    const drvBad = !!(jC && jC.playwright && jC.driver === false);
     pane.innerHTML = `
+    <div id="vfCapBox" style="font-size:12px; line-height:1.8; padding:9px 12px; border-radius:9px; margin-bottom:10px;
+         border:1px solid var(--border); background:${autoOK ? 'rgba(52,199,89,.08)' : 'rgba(255,159,10,.10)'}">
+      ${autoOK
+        ? (drvBad
+          ? `⚠ <b>自动验证不可用</b>:缺少浏览器驱动${capErr ? '(' + esc(capErr) + ')' : ''}。<br>
+             请用下方 <b>手动方式</b>(免依赖)完成验证。`
+          : `✅ <b>自动验证可用</b>:将弹出内置浏览器窗口,完成人机验证后自动保存 cookies${channels ? '(内核:' + esc(channels) + ')' : ''}${drvSrc ? ' · 驱动:' + esc(drvSrc) : ''}。`)
+        : `⚠ <b>自动验证不可用</b>${capErr ? ':' + esc(capErr) : ''}。<br>
+           请用下方 <b>手动方式</b>(免依赖):用系统浏览器打开验证页 → 完成验证 → 粘贴 Cookie 保存。`}
+      <button class="btn-sm" style="margin-left:6px" onclick="renderVerifyPane()">重新体检</button>
+    </div>
     <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; align-items:center">
       <input id="setVfName" placeholder="服务名称(可选)" style="width:130px">
       <input id="setVfUrl" placeholder="需要验证的网址,如 https://www.gutenberg.org/opds/" style="flex:1; min-width:220px" onkeydown="if(event.key==='Enter')verifyStartInSettings()">
-      <button class="btn-sm primary" onclick="verifyStartInSettings()">🛡 发起验证</button>
+      <button class="btn-sm primary" onclick="verifyStartInSettings()" title="${autoOK ? '自动打开浏览器窗口验证' : '自动验证不可用,将切换到手动流程'}">🛡 发起验证</button>
     </div>
     <div style="font-size:12px; color:var(--muted); line-height:1.8; margin-bottom:12px">
-      遇到 403/401(Cloudflare 人机验证、访问受限)的服务在此发起验证:会弹出浏览器窗口,手动完成验证后自动保存 cookies(约 7 天有效),书籍/漫画通用。<br>
+      遇到 403/401(Cloudflare 人机验证、访问受限)的服务在此验证,验证后请求会自动携带 cookies(约 7 天有效),书籍/漫画通用。<br>
       <b>自动登记</b>:搜索/下载时遇到 403/401 的服务会自动出现在下方待验证列表。
     </div>
+    <details id="vfManualBox" ${autoOK ? '' : 'open'} style="border:1px solid var(--border); border-radius:9px; padding:8px 12px; margin-bottom:12px">
+      <summary style="cursor:pointer; font-size:12.5px">🧩 手动方式(免依赖):系统浏览器验证 → 粘贴 Cookie</summary>
+      <div style="font-size:12px; color:var(--muted); line-height:1.9; margin:8px 0">
+        1) 点下面按钮用系统浏览器打开验证页(网址取上面输入框的目标地址);<br>
+        2) 在浏览器里完成人机验证,直到页面能正常显示内容;<br>
+        3) 按 <b>F12</b> → Network(网络)→ 刷新页面 → 点第一个请求 → Headers →
+           复制 <code>Cookie:</code> 那一行整行内容,粘贴到下面;<br>
+        4) 点「校验并保存」—— 后端会带着这组 Cookie 实际请求一次,确认页面对抓取端可读才保存。
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px">
+        <button class="btn-sm" onclick="vfOpenBrowser()">🌐 ① 用系统浏览器打开验证页</button>
+        <button class="btn-sm primary" onclick="vfSaveCookie()">💾 ② 校验并保存 Cookie</button>
+      </div>
+      <textarea id="vfCookie" placeholder="粘贴 Cookie 内容,形如:cf_clearance=xxx; sessionid=yyy(或 DevTools 里「Cookie: …」整行)"
+        style="width:100%; height:74px; border:1px solid var(--border); border-radius:8px; padding:8px; font-size:12px; font-family:monospace; background:var(--card); color:var(--text); resize:vertical"></textarea>
+      <div style="font-size:11.5px; color:var(--muted); margin-top:6px">
+        提示:Cookie 不要外传;若站点用 Cloudflare,复制时别漏 <code>cf_clearance</code>。
+      </div>
+    </details>
     <div style="font-size:13px; font-weight:600; color:var(--warn); margin-bottom:8px">⏳ 待验证(请求遇到 403/401 自动收集)</div>
     ${pending.length ? pending.map(v => {
       const target = (v.url && v.url.startsWith('http')) ? v.url : ('https://' + v.host + '/');
@@ -4939,16 +5022,61 @@ async function renderVerifyPane() {
         <div style="font-weight:600; font-size:13px">${esc(v.name || v.host)}</div>
         <div style="font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${esc(v.host)} · 验证目标: ${esc(target)}</div>
       </div>
-      <button class="btn-sm primary" onclick="verifyPendingInSettings('${jss(v.host)}','${jss(v.url || '')}')">验证</button>
+      <button class="btn-sm primary" onclick="verifyPendingInSettings('${jss(v.host)}','${jss(v.url || '')}')">${autoOK ? '验证' : '手动验证'}</button>
+      <button class="btn-sm" onclick="vfManualFor('${jss(v.host)}','${jss(v.url || '')}')">粘贴 Cookie</button>
       <button class="btn-sm" onclick="verifyIgnoreInSettings('${jss(v.host)}')">忽略</button>
     </div>`; }).join('') : '<div class="empty">暂无待验证的服务</div>'}
     <div style="margin-top:16px; margin-bottom:10px; font-size:13px; font-weight:600">✅ 已验证</div>
     ${verified.length ? verified.map(v => `<div style="display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--border); border-radius:9px; margin-bottom:6px">
       <div style="flex:1; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${esc(v.name || v.host)} <span style="color:var(--muted)">(${esc(v.host)})</span>${v.expired ? ' <span style="font-size:11px; color:var(--danger)">(已过期)</span>' : ''}</div>
-      <span style="font-size:12px; color:${v.expired ? 'var(--danger)' : 'var(--muted)'}">${v.expired ? '需重新验证 · ' : ''}最近验证 ${new Date((v.last_ok||0)*1000).toLocaleDateString()}</span>
+      <span style="font-size:12px; color:${v.expired ? 'var(--danger)' : 'var(--muted)'}">${v.expired ? '需重新验证 · ' : ''}最近验证 ${v.ts ? new Date(v.ts * 1000).toLocaleDateString() : '—'}</span>
       <button class="btn-sm danger" onclick="verifyDelInSettings('${jss(v.host)}')">删除</button>
     </div>`).join('') : '<div class="empty">无已验证站点</div>'}`;
   } catch (e) { pane.innerHTML = '<div class="empty">加载失败:' + esc(e.message) + '</div>'; }
+}
+/* 手动流程:用系统默认浏览器打开验证页 */
+async function vfOpenBrowser() {
+  const url = (document.getElementById('setVfUrl')?.value || '').trim();
+  if (!url.startsWith('http')) { toast('请先填写需要验证的完整网址'); return; }
+  try {
+    const r = await api('/api/verify_open', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({url})}, 20000);
+    toast(r.ok ? '已用系统浏览器打开,完成验证后请复制 Cookie 粘贴到下方' : ('打开失败:' + (r.error || '')), 4200);
+  } catch (e) { toast('打开失败:' + e.message); }
+}
+/* 手动流程:校验并保存粘贴的 Cookie */
+async function vfSaveCookie() {
+  const url = (document.getElementById('setVfUrl')?.value || '').trim();
+  const name = (document.getElementById('setVfName')?.value || '').trim();
+  const cookie = (document.getElementById('vfCookie')?.value || '').trim();
+  if (!url.startsWith('http')) { toast('请先填写需要验证的完整网址'); return; }
+  if (!cookie) { toast('请先粘贴 Cookie 内容'); return; }
+  try {
+    const r = await api('/api/verify_cookie', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({url, name, cookie})}, 120000);
+    if (r.ok) {
+      notify('✅ 验证通过: ' + r.host + '(' + r.cookies + ' 个 cookies)', 'ok');
+      document.getElementById('vfCookie').value = '';
+      document.getElementById('setVfUrl').value = '';
+      document.getElementById('setVfName').value = '';
+      renderVerifyPane();
+    } else {
+      toast('保存失败:' + (r.error || ''), 6000);
+    }
+  } catch (e) { toast('保存失败:' + e.message, 6000); }
+}
+/* 待验证条目的「粘贴 Cookie」入口:预填目标网址并展开手动流程 */
+function vfManualFor(host, url) {
+  const target = (url && url.startsWith('http')) ? url : ('https://' + host + '/');
+  const box = document.getElementById('vfManualBox');
+  if (box) box.open = true;
+  const urlEl = document.getElementById('setVfUrl');
+  const nameEl = document.getElementById('setVfName');
+  if (urlEl) urlEl.value = target;
+  if (nameEl) nameEl.value = host;
+  const ta = document.getElementById('vfCookie');
+  if (ta) ta.focus();
+  toast('已填入验证目标,请用系统浏览器完成验证后粘贴 Cookie', 4200);
 }
 /* 设置页内书源管理操作(切换/测试/导出/导入) */
 async function toggleBookSourceInSettings(name, enabled) {
@@ -5105,6 +5233,7 @@ async function _dlPollAll() {
     try { t = await api('/api/status?id=' + tid, {silent: true}); } catch (e) { continue; }  // 网络抖动忽略
     _dlUpdate(tid, {done: t.done, total: t.total, current: t.current, state: t.state, error: t.error, logs: t.logs, http_status: t.http_status, poll_count: t.poll_count, elapsed: t.elapsed, slow_warn: t.slow_warn, mode: t.mode});
     if (t.state === 'done') { _dlFinish(tid, true, ''); }
+    else if (t.state === 'partial') { _dlFinishPartial(tid, t.error || ''); }  // 部分完成:产物已生成但有话缺失
     else if (t.state === 'error') { _dlFinish(tid, false, t.error || '未知错误'); }
     else if (t.state === 'cancelled') { _dlFinish(tid, false, '已停止'); notify('任务已停止', 'err'); }  // 用户停止(走 _dlFinish 复位按钮/浮窗)
     else _updateCurrentDetail();
@@ -5139,6 +5268,23 @@ function _updateCurrentDetail() {
   if (badge) badge.innerHTML = `<span class="state-badge running"><span class="spin"></span> 下载中</span>`;
 }
 
+// 部分完成:PDF 已生成但有个别话最终失败(如实上报,引导重跑续传)
+function _dlFinishPartial(tid, note) {
+  const rec = _dlTasks.get(tid);
+  _dlDone(tid);
+  if (rec && typeof rec._onFinish === 'function') { try { rec._onFinish(false, note); } catch (e) {} }
+  if (tid === currentTask) {
+    currentTask = null;
+    const btn = document.getElementById('btnDl');
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ 继续下载(补齐)'; }
+    const badge = document.getElementById('stateBadge');
+    if (badge) badge.innerHTML = `<span class="state-badge running">⚠ 部分完成(有缺失话)</span>`;
+    setTimeout(() => { const f = document.getElementById('dlFloat'); if (f) f.classList.remove('show'); }, 6000);
+    _dlNotify(`《${rec ? rec.title : ''}》部分完成,可重跑补齐`, true);
+    loadFiles(); loadShelf();
+    notify('⚠ ' + (note || '有部分话未完成,重新下载可断点续传补齐'), 'err');
+  }
+}
 // 任务结束:移除任务 + 详情弹窗收尾 + 403 引导验证 + 回调
 function _dlFinish(tid, ok, error) {
   const rec = _dlTasks.get(tid);
@@ -5220,6 +5366,7 @@ function _dlRefresh() {
     : `并行 ${runningCount} 本 · 平均 ${_fmtPct(pct)}${anyPaused ? ' · 有暂停' : ''}${anySlow ? ' · ⚠️有任务较慢' : ''}`);
   const steps = tasks.map(([tid, x]) => {
     if (x.state === 'paused') return {text: x.title + ' · 已暂停', status: 'pause', tid};
+    if (x.state === 'partial') return {text: x.title + ' · ⚠ 部分完成(有缺失话,可重跑补齐)', status: 'warn', tid};
     if (x.state === 'error') return {text: x.title + ' · 失败', status: 'err', tid};
     if (isOpds(x)) {
       const hs = x.http_status ? ` · HTTP ${x.http_status}` : '';

@@ -41,6 +41,7 @@ import re
 
 import requests
 
+from . import throttle as _throttle
 from .comic import HEADERS, _get, _proxies
 
 # 已转换的 Cimoc 源规则(从 haleydu/cimoc release-tci 的 Java 源逐一手工转换)
@@ -716,19 +717,19 @@ class CimocSource:
         if parse.get("type") == "js":
             raise RuntimeError(f"{self.name} 图片地址经 JS 混淆,此源暂不可用")
         if parse.get("type") == "lazy":
-            return self._pages_lazy(comic_id, ep_id, conf)
+            return _dedup_urls(self._pages_lazy(comic_id, ep_id, conf))
         r = self._req(conf, {"cid": comic_id, "ep": ep_id})
         html = r.text
         # base64_json(漫画DB):抠 host/pre/img_data(base64 JSON)
         if parse.get("type") == "base64_json":
-            return self._parse_base64_json(html, parse)
+            return _dedup_urls(self._parse_base64_json(html, parse))
         # json(动漫之家):"page_url":[...]
         jre = parse.get("json_regex", "")
         m = re.search(jre, html, re.S) if jre else None
         if m:
             try:
                 urls = json.loads(m.group(1))
-                return [str(u) for u in urls if str(u).startswith("http")]
+                return _dedup_urls([str(u) for u in urls if str(u).startswith("http")])
             except json.JSONDecodeError:
                 return []
         # url_regex(包子漫画):单引号 URL 数组 + 可选域名替换
@@ -743,7 +744,7 @@ class CimocSource:
             if rep:
                 old, new = rep[:2]
                 urls = [u.replace(old, new) for u in urls]
-            return urls
+            return _dedup_urls(urls)
         # regex(漫画牛):通用正则提取。url_regex 匹配转义引号包裹的 URL 时,
         # 用 [^"\\] 跳过反斜杠即可,无需在模式里匹配 \" 字面量。
         if parse.get("type") == "regex":
@@ -761,28 +762,38 @@ class CimocSource:
             if rep:
                 old, new = rep[:2]
                 urls = [u.replace(old, new) for u in urls]
-            return urls
+            return _dedup_urls(urls)
         return []
 
     def _pages_lazy(self, comic_id: str, ep_id: str, conf: dict) -> list[str]:
-        """lazy 分页(CC漫画):先取总页数,再逐页请求提取图片 src。"""
+        """lazy 分页(CC漫画类):先取总页数,再逐页请求提取图片 src。
+
+        分页失败**不再静默跳过**(旧实现 continue → 整话悄悄少页):
+        多轮重试仍失败则抛错,交给下载层整话重试。
+        """
         base_url = _fmt(conf.get("url", ""), {"cid": comic_id, "ep": ep_id, "base": self.base})
         first = _req_plain(base_url, self.rule.get("headers", {}))
         if first is None:
-            return []
+            raise RuntimeError(f"{self.name} 图片列表首页拉取失败")
         html = first.text
         max_p = 1
         for m in re.finditer(conf.get("lazy_pager", ""), html):
             max_p = max(max_p, int(m.group(1)))
         max_p = min(max_p, int(conf.get("max_pages", 120)))
         out = []
+        missing: list[int] = []
         for i in range(1, max_p + 1):
             h = html if i == 1 else None
             if h is None:
-                r = _req_plain(f"{base_url}?p={i}", self.rule.get("headers", {}))
-                if r is None:
-                    continue
-                h = r.text
+                for _try in range(3):
+                    r = _req_plain(f"{base_url}?p={i}", self.rule.get("headers", {}))
+                    if r is not None and r.status_code == 200:
+                        h = r.text
+                        break
+                    _throttle.sleep_cancellable(1.2 * (_try + 1))
+            if h is None:
+                missing.append(i)
+                continue
             sel = conf.get("page_selector", "").split("|")
             attr = conf.get("page_attr", "src").split("|")
             src = ""
@@ -795,14 +806,40 @@ class CimocSource:
                 if src.startswith("//"):
                     src = "https:" + src
                 out.append(src)
+        if missing:
+            raise RuntimeError(f"{self.name} 分页拉取失败 {len(missing)} 页: {missing[:10]}")
         return out
 
 
+def _dedup_urls(urls: list[str]) -> list[str]:
+    """URL 去重(保留首次出现):同一页被多个属性/规则匹配到会产生重复页。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in urls:
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
 def _req_plain(url: str, headers: dict):
-    """无 _get 封装的裸请求(lazy 分页用,避免每页走验证逻辑)。"""
+    """无 _get 封装的裸请求(lazy 分页用,避免每页走验证逻辑)。
+
+    仍走按域名自适应限速(并发 + 最小间隔)并识别 429/503 退避:
+    旧实现完全裸奔,分页连打会触发站点限流 → 分页失败被静默跳过 → 缺页。
+    """
     try:
         h = dict(HEADERS)
         h.update(headers or {})
-        return requests.get(url, headers=h, timeout=20, proxies=_proxies())
+        with _throttle.acquire(url, interval=0.25, concurrency=3):
+            r = requests.get(url, headers=h, timeout=20, proxies=_proxies())
+        if r.status_code in (429, 503):
+            ra = _throttle.retry_after_seconds(r.headers)
+            _throttle.penalty(url, cooldown=5.0, retry_after=ra)
+            return None
+        if r.status_code >= 400:
+            return None
+        _throttle.reward(url)
+        return r
     except requests.RequestException:
         return None

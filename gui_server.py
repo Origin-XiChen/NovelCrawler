@@ -734,18 +734,41 @@ def _run_comic_download(task_id: str, title: str, chapters: list[dict],
             t["indeterminate"] = False
 
     src_name = "MangaDex" if source != "copymanga" else "拷贝漫画"
+    stats: dict = {}
     try:
         made = _comic.download_comic(
             title, chapters, COMIC_OUT_DIR,
             on_log=log, on_progress=progress, cancel_check=cancel_check,
             img_workers=6, source=source, manga_id=comic_id, mode=mode,
             pdf_quality=load_settings().get("pdf_quality") or "hq",
+            stats=stats,
         )
+        failed = stats.get("failed") or []
         if not made:
             t["error"] = "全部话下载失败,未生成 PDF"
             t["state"] = "error"
             t["indeterminate"] = False
             log_task("漫画下载", title, "fail", t["error"])
+            return
+        if failed:
+            # 部分成功必须如实上报:不再把"少了 N 话"的成品当成完成
+            done_n = stats.get("done", 0)
+            total_n = stats.get("total", len(chapters))
+            brief = "、".join(
+                f"第{f.get('idx')}话({(f.get('reason') or '')[:24]})" for f in failed[:5])
+            more = "" if len(failed) <= 5 else f" 等 {len(failed)} 话"
+            t["error"] = (f"完成 {done_n}/{total_n} 话,缺失{brief}{more};"
+                          "产物已生成,重跑可断点续传补齐")
+            t["state"] = "partial"
+            t["indeterminate"] = False
+            t["total"] = total_n
+            t["done"] = done_n
+            t["out_path"] = os.path.dirname(made[0])  # 产物已生成,目录可取
+            log("⚠ " + t["error"])
+            log_task("漫画下载", title, "warn", t["error"],
+                     file=os.path.basename(os.path.dirname(made[0])),
+                     size=sum(os.path.getsize(f) for f in made),
+                     source=src_name, extra={"task_id": task_id})
             return
         t["state"] = "done"
         t["done"] = len(chapters)
@@ -767,11 +790,15 @@ def _run_comic_download(task_id: str, title: str, chapters: list[dict],
         t["state"] = "cancelled"
         log("已取消")
     except Exception as exc:  # noqa: BLE001
-        t["error"] = f"漫画下载失败: {exc}"
+        # 站级封禁等长文错误:日志留全文,任务条/气泡只留首行摘要,避免撑爆 UI
+        full = str(exc)
+        brief = full.strip().splitlines()[0][:160] if full.strip() else type(exc).__name__
+        t["error"] = brief
+        t["error_full"] = full
         t["state"] = "error"
         t["indeterminate"] = False
-        log("✗ " + t["error"])
-        log_task("漫画下载", title, "fail", t["error"])
+        log("✗ 漫画下载失败: " + full)
+        log_task("漫画下载", title, "fail", brief)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1040,6 +1067,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_comic_shelf_backup()
         if path == "/api/verify_status":
             return self._api_verify_status()
+        if path == "/api/verify_capability":
+            return self._api_verify_capability()
         if path == "/api/verify_pending":
             return self._api_verify_pending()
         if path == "/api/source_health":
@@ -1287,6 +1316,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_source_cleanup()
         if parsed.path == "/api/verify":
             return self._api_verify()
+        if parsed.path == "/api/verify_open":
+            return self._api_verify_open()
+        if parsed.path == "/api/verify_cookie":
+            return self._api_verify_cookie()
         if parsed.path == "/api/opds_challenge":
             return self._api_opds_challenge()
         if parsed.path == "/api/source_health":
@@ -2313,9 +2346,20 @@ class Handler(BaseHTTPRequestHandler):
         if not url:
             return self._send_json({"error": "缺少 url"}, 400)
         try:
-            from novel.browser import solve_cloudflare
+            from novel.browser import capability, solve_cloudflare
             from novel.verify import save_cookies, clear_pending
             from novel.config import load_settings
+            cap = capability()
+            if not cap.get("playwright"):
+                # 缺 Playwright:不再回裸的"缺库"错误,直接引导免依赖手动流程
+                # (HTTP 200 + ok=false:这是能力状态而非服务错误,便于前端分支处理)
+                return self._send_json({
+                    "ok": False,
+                    "need_manual": True,
+                    "error": ("自动验证不可用:" + (cap.get("error") or "未安装 playwright")
+                              + "。请改用「系统浏览器打开验证页 + 粘贴 Cookie」方式"
+                                "(无需任何额外依赖),或安装 playwright 后重试。"),
+                })
             proxy = (load_settings().get("proxy") or "").strip() or None  # 与抓取侧同一出口 IP
             result = {}
             def _run():
@@ -2339,10 +2383,72 @@ class Handler(BaseHTTPRequestHandler):
             if "ok" in result and result["ok"]:
                 return self._send_json({"ok": True, "host": result["host"], "cookies": result["n"]})
             err = result.get("error", "")
-            msg = err or "未检测到验证通过:请在浏览器窗口完成验证(页面可正常读取)后再点重试"
+            msg = err or ("未检测到验证通过:请在浏览器窗口里确认页面已能正常打开(不再显示验证页)"
+                          "后再点重试;若页面已正常但仍提示失败,说明该站不下发可用 cookie,"
+                          "请改用「手动方式 → 粘贴 Cookie」或直接在设置里配置代理")
             return self._send_json({"ok": False, "error": msg}, 504)
         except Exception as exc:  # noqa: BLE001
             return self._send_json({"ok": False, "error": f"无法打开浏览器窗口: {exc}"}, 500)
+
+    def _api_verify_capability(self):
+        """GET /api/verify_capability → 自动验证能力体检(前端决定自动/手动流程)。"""
+        try:
+            from novel.browser import capability
+            cap = capability()
+        except Exception as exc:  # noqa: BLE001
+            cap = {"playwright": False, "error": f"{type(exc).__name__}: {exc}"}
+        return self._send_json({"ok": True, **cap})
+
+    def _api_verify_open(self):
+        """POST /api/verify_open {url} → 用系统默认浏览器打开验证页(免依赖流程第一步)。"""
+        try:
+            data = self._body()
+        except Exception:  # noqa: BLE001
+            return self._send_json({"error": "请求体非法"}, 400)
+        url = (data.get("url") or "").strip()
+        if not url.startswith("http"):
+            return self._send_json({"error": "缺少合法的 url"}, 400)
+        try:
+            from novel.browser import open_in_default_browser
+            ok = open_in_default_browser(url)
+            return self._send_json({"ok": bool(ok),
+                                    "error": "" if ok else "系统未能打开浏览器,请手动复制网址访问"})
+        except Exception as exc:  # noqa: BLE001
+            return self._send_json({"ok": False, "error": f"打开浏览器失败: {exc}"}, 500)
+
+    def _api_verify_cookie(self):
+        """POST /api/verify_cookie {url, name, cookie, ua?} → 校验并保存手动粘贴的 Cookie。
+
+        免依赖兜底:用户在系统浏览器里完成人机验证后,把 Cookie 粘贴进来;
+        后端会带这组 Cookie 实际请求目标页确认"真的可读"才落盘(避免假成功)。
+        """
+        try:
+            data = self._body()
+        except Exception:  # noqa: BLE001
+            return self._send_json({"error": "请求体非法"}, 400)
+        url = (data.get("url") or "").strip()
+        name = (data.get("name") or "").strip()
+        cookie_text = data.get("cookie") or ""
+        ua = (data.get("ua") or "").strip()
+        if not url.startswith("http"):
+            return self._send_json({"error": "缺少合法的 url"}, 400)
+        if not cookie_text.strip():
+            return self._send_json({"error": "请粘贴 Cookie 内容"}, 400)
+        try:
+            from novel.browser import probe_cookie_text, UA as _UA
+            from novel.verify import save_cookies, clear_pending
+            from novel.config import load_settings
+            proxy = (load_settings().get("proxy") or "").strip() or None
+            cookies, reason = probe_cookie_text(url, cookie_text, ua=ua or _UA, proxy=proxy)
+            if not cookies:
+                return self._send_json({"ok": False, "error": reason}, 400)
+            host = save_cookies(url, cookies, name, ua=ua or _UA)
+            if not host:
+                return self._send_json({"ok": False, "error": "未能识别该网址的域名"}, 400)
+            clear_pending(host)
+            return self._send_json({"ok": True, "host": host, "cookies": len(cookies)})
+        except Exception as exc:  # noqa: BLE001
+            return self._send_json({"ok": False, "error": f"保存失败: {exc}"}, 500)
 
     def _api_opds_challenge(self):
         """有头浏览器打开 OPDS 地址,让用户手动完成 Cloudflare 验证,保存 cookies。"""
@@ -2354,8 +2460,16 @@ class Handler(BaseHTTPRequestHandler):
         if not url:
             return self._send_json({"error": "缺少 url"}, 400)
         try:
-            from novel.browser import solve_cloudflare
+            from novel.browser import capability, solve_cloudflare
             from novel.config import load_settings
+            cap = capability()
+            if not cap.get("playwright"):
+                return self._send_json({
+                    "ok": False, "need_manual": True,
+                    "error": ("自动验证不可用:" + (cap.get("error") or "未安装 playwright")
+                              + "。可到「设置 → 验证中心」用「系统浏览器打开 + 粘贴 Cookie」"
+                                "方式完成验证(免依赖)。"),
+                }, 501)
             cookie_path = os.path.join(ROOT, "opds_cookies.json")
             proxy = (load_settings().get("proxy") or "").strip() or None
             # 后台线程执行(有头窗口),这里等待完成
@@ -2742,11 +2856,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": "缺少漫画 ID"}, 400)
         src = (qs.get("source") or ["mangadex"])[0].strip()
         # 服务端退避重试:风控(210 访问过频/429/403)等 5s 重试一次,前后端双保险
+        # (站级封禁 CopyBlocked 不重试:重试无效且会加重封禁,直接带着站点原话上报)
+        from novel.comic import CopyBlocked
         last_err = None
         for attempt in range(2):
             try:
                 chs = _comic.chapters(mid, source=src)
                 return self._send_json({"ok": True, "chapters": chs})
+            except CopyBlocked as exc:
+                return self._send_json({"error": str(exc), "blocked": True,
+                                        "hint": "换用其它源或配置代理后可继续"}, 200)
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
                 if attempt == 0 and ("210" in str(exc) or "429" in str(exc) or "过频" in str(exc) or "拦截" in str(exc)):

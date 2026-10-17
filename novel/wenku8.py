@@ -30,6 +30,14 @@ _CHAPTER_LINK_RE = re.compile(r'href="([^"]*?(?:\d{4,}|/\d+/)\.htm)"[^>]*>([^<]{
 _TOC_LINK_RE = re.compile(r'href="(/novel/\d+/\d+/index\.htm)"')
 # 正文容器
 _CONTENT_RE = re.compile(r'<div\s+id="content"[^>]*>([\s\S]*?)</div>')
+# 目录页「卷→章」表格结构:每行 <tr>...
+_TR_RE = re.compile(r"<tr[^>]*>([\s\S]*?)</tr>", re.I)
+# 卷行:<td class="vcss" colspan="4" vid="...">第一卷</td>
+_VCSS_RE = re.compile(r'<td\s+class="vcss"[^>]*>([^<]*)</td>', re.I)
+# 章节单元格:<td class="ccss">...</td>(空位为 &nbsp;)
+_CCSS_RE = re.compile(r'<td\s+class="ccss"[^>]*>([\s\S]*?)</td>', re.I)
+# 章节单元格内的 <a href="NNNNN.htm">标题</a>
+_A_HREF_RE = re.compile(r'<a\s+href="([^"]+)"[^>]*>([^<]+)</a>', re.I)
 # 页脚噪声(本文来自轻小说文库等)
 _FOOTER_NOISE = ("本文来自", "轻小说文库", "http://www.wenku8.com", "www.wenku8.com",
                  "扫图", "录入", "修图", "校对", "转载", "轻之国度")
@@ -82,9 +90,22 @@ def find_toc_url(book_id: str) -> str:
 
 
 def fetch_toc(book_id: str) -> list[dict]:
-    """拉取完整章节列表 [{title, url}, ...](阅读顺序)。"""
+    """拉取完整章节列表 [{title, url, volume?}, ...](阅读顺序)。
+
+    wenku8 目录页是「卷→章」两段式表格:
+      卷行   <td class="vcss" colspan="4" vid="...">第一卷</td>
+      章节行 <td class="ccss"><a href="61148.htm">序章 死亡——然后转生</a></td>
+    同名章节(如每卷都有的「插图」「后记」)靠卷名区分,故此处解析并附上 volume。
+    """
     toc_url = find_toc_url(book_id)
     html = _fetch(toc_url)
+
+    # ---- 优先:按 <tr> 逐行解析「卷→章」结构,保留卷名 ----
+    chapters = _parse_toc_by_volume(html, toc_url)
+    if chapters:
+        return chapters
+
+    # ---- 兜底:老式扁平解析(站点结构变更时) ----
     links = _CHAPTER_LINK_RE.findall(html)
     if not links:
         raise Wenku8Error(f"目录页未解析到章节链接: {toc_url}")
@@ -105,6 +126,35 @@ def fetch_toc(book_id: str) -> list[dict]:
             continue
         seen.add(url)
         chapters.append({"title": title, "url": url})
+    return chapters
+
+
+def _parse_toc_by_volume(html: str, toc_url: str) -> list[dict]:
+    """按表格行解析目录,返回带 volume 的章节列表;结构不符则返回 []。"""
+    base = toc_url.rsplit("/", 1)[0]
+    chapters: list[dict] = []
+    seen: set[str] = set()
+    volume: str | None = None
+    for row in _TR_RE.findall(html):
+        mv = _VCSS_RE.search(row)
+        if mv:
+            volume = mv.group(1).strip() or None
+            continue
+        for cell in _CCSS_RE.findall(row):
+            ma = _A_HREF_RE.search(cell)
+            if not ma:
+                continue
+            href, title = ma.group(1), ma.group(2).strip()
+            if not title or any(n in title for n in ("推一下", "举报")):
+                continue
+            url = href if href.startswith("http") else (
+                href if href.startswith("/") else base + "/" + href)
+            if not url.startswith("http"):
+                url = MAIN_SITE + url
+            if "/book/" in url or url in seen:
+                continue
+            seen.add(url)
+            chapters.append({"title": title, "url": url, "volume": volume})
     return chapters
 
 
@@ -152,13 +202,13 @@ def fetch_chapter_text(url: str, allow_empty: bool = False) -> str:
 
 # 插图 <img> 的 src:兼容双引号/单引号/无引号
 _IMG_SRC_RE = re.compile(r"<img[^>]*\bsrc\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))", re.I)
+# 插图容器:wenku8 彩插页的实际图片都包在 <div class="divimage"> 内
+_DIVIMAGE_RE = re.compile(r'<div\s+class="divimage"[^>]*>([\s\S]*?)</div>', re.I)
 
 
-def fetch_chapter_images(url: str) -> list[str]:
-    """抓取章节页内嵌插图 URL(彩插页:标题为"插图"的章节,每卷 4~23 张)。"""
-    html = _fetch(url)
-    imgs: list[str] = []
-    for m in _IMG_SRC_RE.finditer(html):
+def _collect_imgs(fragment: str, imgs: list[str]) -> None:
+    """从 HTML 片段中收集外链 CDN 图片 URL(去重,保序)。"""
+    for m in _IMG_SRC_RE.finditer(fragment):
         src = (m.group(1) or m.group(2) or m.group(3) or "").strip()
         if not src or src.startswith("data:"):
             continue
@@ -173,6 +223,35 @@ def fetch_chapter_images(url: str) -> list[str]:
             continue
         if src not in imgs:
             imgs.append(src)
+
+
+def fetch_chapter_images(url: str) -> list[str]:
+    """抓取章节页内嵌插图 URL(彩插页:标题为"插图"的章节,每卷 4~23 张)。
+
+    取图范围限定在页面的插图容器内,避免把页面框架/广告/推荐位的图片
+    误当正文插图。优先级:
+      1) <div class="divimage"> 容器内的图(wenku8 彩插实际结构)
+      2) 退回 #content 正文容器内的图
+      3) 两者皆空时,才退回全页扫描(兼容站点改版)
+    """
+    html = _fetch(url)
+    imgs: list[str] = []
+
+    # 1) 优先:divimage 插图容器
+    for block in _DIVIMAGE_RE.findall(html):
+        _collect_imgs(block, imgs)
+    if imgs:
+        return imgs
+
+    # 2) 退回:#content 正文容器
+    m = _CONTENT_RE.search(html)
+    if m:
+        _collect_imgs(m.group(1), imgs)
+    if imgs:
+        return imgs
+
+    # 3) 最终兜底:全页扫描(站点结构变更时仍能取到图)
+    _collect_imgs(html, imgs)
     return imgs
 
 
@@ -247,11 +326,25 @@ def download_local_epub(
         except Exception:  # noqa: BLE001
             collected = []
     # 已完成正文的章节集合;插图章不进集合,重跑时重新抓图
-    done_idx = {
-        c["idx"] for c in collected
-        if isinstance(c.get("idx"), int) and 1 <= c["idx"] <= total
-        and "插图" not in chapters[c["idx"] - 1]["title"]
-    }
+    # 另外剔除「异常空章」:正文与插图皆空的历史条目视为未完成,重跑时重抓
+    # (修复旧版本残留的空白章,如曾出现的 chap43「插图」0 图 0 字)
+    def _is_usable(c: dict) -> bool:
+        if not isinstance(c.get("idx"), int) or not (1 <= c["idx"] <= total):
+            return False
+        if "插图" in chapters[c["idx"] - 1]["title"]:
+            return False
+        if c.get("images"):
+            return True
+        return bool((c.get("text") or "").strip())
+
+    done_idx = {c["idx"] for c in collected if _is_usable(c)}
+    # 丢弃不可用条目(空白章),避免其随 collected 一起写进 EPUB
+    if collected:
+        before = len(collected)
+        collected = [c for c in collected if _is_usable(c)]
+        dropped = before - len(collected)
+        if dropped:
+            _log(f"  ⚠️ 清理 {dropped} 个无效/空白章节缓存,将重新抓取")
     if done_idx:
         _log(f"  ↻ 断点续传:跳过 {len(done_idx)} 章正文(插图章将重抓图片)")
 
@@ -271,15 +364,30 @@ def download_local_epub(
             cancel_check()
         # 插图章节:正文可为空(纯图页),"正文过短"不再判失败,
         # 否则整章被跳过,后续抓图逻辑永远执行不到(插图全部丢失)
+        # 判定:标题含"插图"(常规彩插页);或正文实际为空(纯图页,标题可能不含"插图")
         is_ill = bool(with_images and "插图" in ch["title"])
+        text = ""
         try:
             text = fetch_chapter_text(ch["url"], allow_empty=is_ill)
+        except Wenku8Error:
+            # 正文过短且判定为非插图章:可能是标题命名不规范的纯图页,尝试按插图章重试
+            if not with_images:
+                raise
+            try:
+                text = fetch_chapter_text(ch["url"], allow_empty=True)
+            except Exception as exc:  # noqa: BLE001
+                return None, None, f"{type(exc).__name__}"
+            is_ill = True
         except Exception as exc:  # noqa: BLE001
             return None, None, f"{type(exc).__name__}"
         # 标题:自带"第N章"则直接用,否则补
         ch_title = ch["title"]
         if not re.match(r"^第\s*(\d+|[一二三四五六七八九十百千零两]+)\s*章", ch_title):
             ch_title = f"第{idx}章 {ch_title}"
+        # 卷名:同名章节(每卷的「插图」「后记」等)靠卷名前缀区分,避免阅读器里无法分辨
+        vol = (ch.get("volume") or "").strip()
+        if vol:
+            ch_title = f"{vol} {ch_title}"
         entry: dict = {"idx": idx, "title": ch_title, "text": text}
         if not is_ill:
             return entry, None, None
