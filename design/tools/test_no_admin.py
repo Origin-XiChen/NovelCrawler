@@ -11,6 +11,12 @@
 import os
 import re
 import sys
+
+
+try:  # 中文控制台(cp936)编不出 ✓/⚠ 时会崩,这里只做兜底不改语义
+    sys.stdout.reconfigure(errors="replace")
+except (AttributeError, OSError):
+    pass
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

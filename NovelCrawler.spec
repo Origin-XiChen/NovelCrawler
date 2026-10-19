@@ -11,6 +11,11 @@ _WEBVIEW_DLL = os.path.join(
     "lib", "runtimes", "win-x64", "native", "WebView2Loader.dll",
 )
 
+# 产物:`dist/NovelCrawler/`(onedir)—— NovelCrawler.exe + _internal/ 整个文件夹分发。
+# 注意 --distpath 不要直接指到 dist/NovelCrawler:PyInstaller 会清空输出目录,
+# 而那里面正是用户的书架/配置数据(APP_DATA_DIR = exe 同目录)。
+# build_exe.bat 因此先输出到 build/dist_out,再只把 exe 与 _internal 覆盖过去。
+
 # ---------------- Playwright(验证中心"自动验证"用)打包 ----------------
 # 方案:JS 驱动(playwright/driver/package,约 9MB)直接进 exe;体积最大的
 # node.exe(约 94MB)单独压成 zip 一起进 exe,首次调用验证时解压到数据目录
@@ -124,12 +129,20 @@ pyz = PYZ(a.pure)
 a.binaries = [e for e in a.binaries if os.path.basename(e[0]).lower() != "node.exe"]
 a.datas = [e for e in a.datas if os.path.basename(e[0]).lower() != "node.exe"]
 
+# ---------------- onedir:不再有"启动解压"这一步 ----------------
+# 原来是一次性单文件(onefile):每次启动都要把 249MB 解压到 %TEMP%\_MEIxxxxxx,
+# 这个动作发生在**任何 Python 代码之前**,只要进程可见的 TEMP/TMP 指向标准用户写不进去的
+# 位置(例如系统级 TEMP = C:\WINDOWS\TEMP),启动器就直接弹
+# 「Could not create temporary directory!」,只能以管理员运行绕过;
+# 而且该目录在强杀退出后残留(本程序退出走 TerminateProcess),每次启动还慢几秒。
+# 改成 onedir:依赖与数据放在 exe 同级的 _internal/,启动时零解压 —— 该失败模式从原理上消失。
+# 代码无需改动:gui_server / window2 / browser 取资源都走 sys._MEIPASS,
+# onedir 下它指向 _internal/,语义与原来一致。
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,       # 依赖/数据交给下面的 COLLECT,EXE 只留启动器
     name='NovelCrawler',
     debug=False,
     bootloader_ignore_signals=False,
@@ -141,7 +154,6 @@ exe = EXE(
     # node.exe 不能 UPX 压缩(会破坏可执行文件);留着以防将来重新开启 upx
     upx_exclude=['node.exe', 'playwright_node.zip'],
     version=_VERSION_FILE,
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -149,4 +161,14 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=['app.ico'],
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=['node.exe', 'playwright_node.zip'],
+    name='NovelCrawler',
 )

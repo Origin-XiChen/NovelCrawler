@@ -6,7 +6,13 @@ __pycache__/
 .venv/
 
 # ================= 构建与打包产物 =================
-build/
+# 注意用 build/* 而不是 build/:后者会把整个目录排除掉,导致 build/ 下的**手写构建脚本**
+# 也无法入库(实测如此),而 build_exe.bat 会调用其中的 make_readme_txt.py / audit_exe.py,
+# 全新克隆就会构建不起来。用 build/* 只排除内容,下面再按扩展名把脚本反选回来。
+build/*
+!build/*.py
+!build/*.ps1
+!build/*.spec
 dist/
 *.spec.bak
 
