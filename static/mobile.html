@@ -3273,19 +3273,41 @@ function offPdfB64(title, name) {
   const f = (c.files || []).find(x => x.name === name);
   return f ? f.b64 : '';
 }
+/* data: URL 不能作为顶层导航(Chrome/Edge v60 起无条件拦截,与弹窗拦截无关),
+   移动端对 data: 下载也常加限制 —— 统一转成 Blob URL 再打开/下载 */
+function _pdfBlobUrl(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], {type: 'application/pdf'}));
+}
+function _pdfSaveBlob(url, name) {
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
 function dlOffPdf(title, name) {
   const b64 = offPdfB64(title, name);
   if (!b64) { toast('未找到该话内容'); return; }
-  const a = document.createElement('a');
-  a.href = 'data:application/pdf;base64,' + b64;
-  a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  toast('已开始保存:' + name + '(保存到系统下载目录)');
+  try {
+    const url = _pdfBlobUrl(b64);
+    _pdfSaveBlob(url, name);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    toast('已开始保存:' + name + '(保存到系统下载目录)');
+  } catch (e) { toast('保存失败:' + e.message); }
 }
 function openOffPdf(title, name) {
   const b64 = offPdfB64(title, name);
   if (!b64) { toast('未找到该话内容'); return; }
-  window.open('data:application/pdf;base64,' + b64, '_blank');
+  let url = '';
+  try { url = _pdfBlobUrl(b64); } catch (e) { toast('打开失败:' + e.message); return; }
+  const w = window.open(url, '_blank');
+  if (!w) {
+    // 弹窗被拦 → 直接下载,别让按钮点了没反应
+    _pdfSaveBlob(url, name);
+    toast('弹窗被浏览器拦截,已改为下载该话');
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 function toggleChaps(title) {
   const el = document.getElementById('chaps-' + cssid(title));

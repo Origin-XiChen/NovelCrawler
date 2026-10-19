@@ -4773,7 +4773,8 @@ function loadSettingsPage() {
     set('gsSearchTimeout', s.search_timeout ?? 60);
     set('gsOut', s.out_dir || 'downloads');
     set('gsSsl', s.verify_ssl === false ? 'false' : 'true');
-    set('gsTheme', localStorage.getItem('novelist_theme') || 'auto');
+    let _theme = 'auto'; try { _theme = localStorage.getItem('novelist_theme') || 'auto'; } catch (e) {}
+    set('gsTheme', _theme);
     set('gsLan', s.lan_access ? 'true' : 'false');
     // WebRTC TURN 中继兜底配置回填
     set('gsTurnUrl', s.webrtc_turn_url || '');
@@ -5221,7 +5222,17 @@ function importSourceRuleFromJson(jsonText) {
       .catch(e => toast('导入失败:' + e.message));
   } catch (e) { toast('JSON 解析失败:' + e.message); }
 }
-async function opdsConnectInSettings(url) { if (url) window.open(url, '_blank'); }
+async function opdsConnectInSettings(url) {
+  if (!url) return;
+  // 浏览器会拦截非手势/被策略拦截的弹窗,原来直接 window.open 点了没反应
+  const w = window.open(url, '_blank');
+  if (!w) {
+    showConfirm('弹窗被浏览器拦截,无法新窗口打开该 OPDS 服务。是否在当前页打开?\n' + url,
+      {title: '弹窗被拦截', okText: '在当前页打开', danger: false}).then(go => {
+      if (go) location.href = url;
+    });
+  }
+}
 async function opdsRemoveInSettings(url) {
   // OPDS 服务存于 localStorage(与主页面 OPDS 页签一致)
   let svcs = [];
@@ -6003,7 +6014,8 @@ function applyTheme(theme) {
 }
 if (_sysThemeMq) {
   const onSysTheme = () => {
-    if ((localStorage.getItem('novelist_theme') || 'auto') === 'auto') {
+    let _t = 'auto'; try { _t = localStorage.getItem('novelist_theme') || 'auto'; } catch (e) {}
+    if (_t === 'auto') {
       document.documentElement.dataset.theme = _sysThemeMq.matches ? 'dark' : '';
       const mc = document.querySelector('meta[name="theme-color"]');
       if (mc) mc.setAttribute('content', _sysThemeMq.matches ? '#5FB39F' : '#2C6E63');

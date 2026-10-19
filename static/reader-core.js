@@ -523,7 +523,8 @@ function pdfToggle2page() {
 function pdfToggleFull() {
   const v = document.getElementById('cview-pdfreader');
   if (!v) return;
-  if (!document.fullscreenElement) { if (v.requestFullscreen) v.requestFullscreen(); }
+  // requestFullscreen 返回 Promise,被策略拒绝时要吃掉 rejection(与 comicReaderFullscreen 保持一致)
+  if (!document.fullscreenElement) { if (v.requestFullscreen) v.requestFullscreen().catch(() => {}); }
   else if (document.exitFullscreen) document.exitFullscreen();
 }
 function pdfToggleToc() {
@@ -1524,7 +1525,11 @@ document.addEventListener('wheel', (ev) => {
 document.getElementById('imgZoomWrap').addEventListener('dblclick', () => {
   if (!_imgZoomScale || _imgZoomScale < 0.99) imgZoom100(); else imgZoomFit();
 });
-function openImgZoomSrc() { window.open(_imgZoomUrl, '_blank'); }
+function openImgZoomSrc() {
+  if (!_imgZoomUrl) return;
+  const w = window.open(_imgZoomUrl, '_blank');
+  if (!w) toast('弹窗被浏览器拦截,可在图片上右键「在新标签页中打开」');
+}
 async function copyImgZoom() {
   const src = _imgZoomUrl;
   if (!src) return;
@@ -1571,7 +1576,8 @@ function readerLineAdj() {  // 行距循环:1.6 / 1.9 / 2.2
   applyReaderLayout();
 }
 function _loadPaper() {
-  const p = localStorage.getItem(PAPER_KEY);
+  let p = 'paper';
+  try { p = localStorage.getItem(PAPER_KEY); } catch (e) { /* 存储被禁用 → 用默认纸色 */ }
   return ['paper', 'green', 'sepia', 'night'].includes(p) ? p : 'paper';
 }
 function applyReaderPaper() {
