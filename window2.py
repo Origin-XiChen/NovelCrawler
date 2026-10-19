@@ -21,6 +21,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from ctypes import c_int, c_long, c_uint, c_ulong, c_void_p, c_wchar_p
@@ -559,6 +560,30 @@ _WNDCLASS_REGISTERED = False
 _MAIN_CACHE_DIR = ".webview2-cache"
 
 
+def _webview_cache_dir() -> str:
+    """WebView2 用户数据目录(缓存/登录态)。
+
+    原来固定用 os.getcwd():双击启动时 cwd 是 exe 目录,一旦 exe 装在不允许写入的位置
+    (如 Program Files),或通过「起始位置」指向别处的快捷方式启动,创建就会失败 →
+    WebView2 环境创建失败 → 静默降级成浏览器模式,用户只能靠"以管理员身份运行"绕过。
+    改到数据目录(APP_DATA_DIR 自带"exe 目录不可写就回退 %APPDATA%"的探测),
+    再兜底系统临时目录,于是不再要求 exe 目录可写、也不需要管理员权限。
+    开发模式下 APP_DATA_DIR 就是项目根目录,行为与原来一致(仍是 .webview2-cache)。
+    """
+    for base in (_APP_DATA_DIR, tempfile.gettempdir()):
+        cand = os.path.join(base, _MAIN_CACHE_DIR)
+        try:
+            os.makedirs(cand, exist_ok=True)
+            probe = os.path.join(cand, ".writetest")
+            with open(probe, "w", encoding="utf-8") as f:
+                f.write("ok")
+            os.remove(probe)
+            return cand
+        except OSError:
+            continue
+    return os.path.join(tempfile.gettempdir(), _MAIN_CACHE_DIR)
+
+
 class MainWindow:
     def __init__(self, title: str, width: int, height: int, url: str, cache_dir: str,
                  initial_rect: tuple | None = None,
@@ -876,7 +901,7 @@ def _spawn_reader(url: str) -> None:
     _READER_SEQ += 1
     wid = f"reader{_READER_SEQ}"
     main = _ALL_WINS.get("main")
-    cache_dir = main.cache_dir if main else _MAIN_CACHE_DIR
+    cache_dir = main.cache_dir if main else _webview_cache_dir()
     # 关键:把 wid 注入页面 URL。页面里的 window.__READER_WID__ 取自 ?wid=,
     # 之后所有 /api/window/* 请求都带 {win: wid} → 后端路由到本窗口。
     # 若缺这一步,win 会缺省成 "main":拖动会去拖主窗口(阅读器不动),
@@ -1101,7 +1126,7 @@ def main() -> None:
     if args.dev:
         print(f"[window2] CoInitializeEx(STA): 0x{hr & 0xFFFFFFFF:08X}")
 
-    cache_dir = os.path.join(os.getcwd(), ".webview2-cache")
+    cache_dir = _webview_cache_dir()  # 不再依赖 cwd/exe 目录可写(见函数注释)
     win = MainWindow("小说管家", 1280, 820, url, cache_dir,
                      initial_rect=_validated_win_state())  # 恢复上次窗口尺寸/位置
     gui_server.set_main_hwnd(win.hwnd, cache_dir)  # 主窗口句柄 + 缓存目录(退出时识别子进程)

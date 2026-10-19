@@ -39,9 +39,14 @@ if errorlevel 1 (
 rem 附带一份简短说明,方便测试用户了解
 echo NovelCrawler 小说管家 - 免安装版> "dist\NovelCrawler\使用说明.txt"
 echo.>> "dist\NovelCrawler\使用说明.txt"
-echo 双击 NovelCrawler.exe 即可使用。>> "dist\NovelCrawler\使用说明.txt"
-echo 书架/订阅/下载等数据保存在 exe 同目录。>> "dist\NovelCrawler\使用说明.txt"
+echo 双击 NovelCrawler.exe 即可使用,**不需要管理员权限**。>> "dist\NovelCrawler\使用说明.txt"
+echo 书架/订阅/下载等数据默认保存在 exe 同目录;>> "dist\NovelCrawler\使用说明.txt"
+echo 若该目录不可写(例如放在 Program Files),会自动改用>> "dist\NovelCrawler\使用说明.txt"
+echo %%APPDATA%%\NovelCrawler,并在「设置 - 数据存储位置」中显示实际路径。>> "dist\NovelCrawler\使用说明.txt"
 echo 需要 Edge WebView2 运行时,Windows 10/11 自带。>> "dist\NovelCrawler\使用说明.txt"
+echo.>> "dist\NovelCrawler\使用说明.txt"
+echo 首次运行若出现「未知发布者 / Windows 已保护你的电脑」提示,>> "dist\NovelCrawler\使用说明.txt"
+echo 点「更多信息」-「仍要运行」即可;这不是需要管理员权限。>> "dist\NovelCrawler\使用说明.txt"
 
 echo.
 echo Done. exe is at: dist\NovelCrawler\NovelCrawler.exe
