@@ -37,13 +37,13 @@ try:
             os.makedirs("build", exist_ok=True)
             with zipfile.ZipFile(_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as _z:
                 _z.write(_node, "node.exe")
-            print(f"[spec] 已打包 playwright node 驱动: {_zip} "
+            print(f"[spec] packed playwright node driver: {_zip} "
                   f"({os.path.getsize(_zip) / 1048576:.1f} MB)")
         _pw_datas.append((_zip, "."))
     else:
-        print("[spec] 警告:未找到 playwright/driver/node.exe")
+        print("[spec] warning: playwright/driver/node.exe not found")
 except Exception as _exc:  # noqa: BLE001
-    print(f"[spec] 警告:Playwright 打包跳过({type(_exc).__name__}: {_exc})")
+    print(f"[spec] warning: Playwright packaging skipped ({type(_exc).__name__}: {_exc})")
 
 
 def _write_version_file() -> str:
@@ -85,7 +85,7 @@ def _write_version_file() -> str:
 """ % {"tup": repr(_tup), "ver": _v}
     with open(_path, "w", encoding="utf-8") as _f:
         _f.write(_body)
-    print(f"[spec] 版本资源已生成: {_path}  (v{_v})")
+    print(f"[spec] version resource written: {_path}  (v{_v})")
     return _path
 
 
