@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('desktop', {
     },
   },
   openDir: (name = '') => ipcRenderer.invoke('shell:open-dir', name),
+  openDataDir: () => ipcRenderer.invoke('shell:open-data-dir'),
   notify: (message) => ipcRenderer.invoke('app:notify', message),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   updater: {

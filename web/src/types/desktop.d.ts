@@ -12,6 +12,7 @@ export interface DesktopBridge {
     onMaximizedChange: (cb: (maximized: boolean) => void) => () => void;
   };
   openDir: (name?: string) => Promise<void>;
+  openDataDir: () => Promise<void>;
   notify: (message: string) => Promise<void>;
   updater: {
     check: () => Promise<void>;

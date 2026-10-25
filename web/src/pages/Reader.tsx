@@ -42,15 +42,20 @@ export function ReaderPage() {
   const [error, setError] = useState('');
   const [tocOpen, setTocOpen] = useState(false);
   const [tocQuery, setTocQuery] = useState('');
-  const [fontScale, setFontScale] = useState(() => Number(localStorage.getItem('reader-font') || 1));
-  const [theme, setTheme] = useState<ReaderTheme>(
-    () => (localStorage.getItem('reader-theme') as ReaderTheme) || 'light',
-  );
+  const [fontScale, setFontScale] = useState(() => {
+    const saved = Number(localStorage.getItem('reader-font'));
+    return Number.isFinite(saved) && saved > 0 ? Math.min(1.6, Math.max(0.85, saved)) : 1;
+  });
+  const [theme, setTheme] = useState<ReaderTheme>(() => {
+    const saved = localStorage.getItem('reader-theme');
+    return saved === 'sepia' || saved === 'dark' ? saved : 'light';
+  });
   const seq = useRef(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const epub = isEpub(file);
-  const total = meta?.total ?? 0;
+  // 旧版后端 /api/epub_meta 不返回 total,退回章节数
+  const total = meta?.total ?? meta?.chapters.length ?? 0;
 
   useEffect(() => {
     if (!file) {
@@ -122,8 +127,11 @@ export function ReaderPage() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const tag = (event.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
+      // 焦点在按钮上时空格应触发按钮本身,避免翻页两次
+      if (event.key === ' ' && tag === 'BUTTON') return;
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
         go(idx - 1);
@@ -285,7 +293,7 @@ export function ReaderPage() {
             </div>
             {meta && meta.chapters.length > tocItems.length && !tocQuery ? (
               <div className="reader__toc-hint">
-                共 {meta.chapters.length} 章，仅显示当前附近章节；搜索书名可定位全部。
+                共 {meta.chapters.length} 章，仅显示当前附近章节；搜索章节名可定位全部。
               </div>
             ) : null}
           </aside>

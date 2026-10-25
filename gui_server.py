@@ -1115,7 +1115,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_snapshot_download(qs)
         if path == "/api/source_candidates":
             return self._api_source_candidates()
-            return self._api_shelf_backup()
         if path == "/api/epub_read":
             return self._api_epub_read(qs)
         if path == "/api/epub_asset":
@@ -1404,9 +1403,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/file":
             qs = parse_qs(parsed.query)
             fname = (qs.get("name") or [""])[0].strip()
-            out_dir = get_out_dir()
-            fp = os.path.join(out_dir, os.path.basename(fname))
-            if not os.path.isfile(fp) or os.path.basename(fname) != fname:
+            fp = self._resolve_book_file(fname)
+            if fp is None:
                 return self._send_json({"ok": False, "error": "文件不存在"})
             try:
                 os.remove(fp)
@@ -1976,14 +1974,21 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- 阅读器 ----
     def _resolve_book_file(self, fname: str) -> str | None:
-        """把文件名解析为 out_dir 内的绝对路径(防路径遍历)。"""
+        """把文件名解析为下载目录内的绝对路径(防路径遍历)。
+
+        兼容旧版 downloads/ 根目录残留文件(与 _api_files 的展示范围一致)。
+        """
         if not fname or ".." in fname or "/" in fname or "\\" in fname:
             return None
-        out_dir = os.path.abspath(get_out_dir())
-        fp = os.path.abspath(os.path.join(out_dir, fname))
-        if not fp.startswith(out_dir) or not os.path.isfile(fp):
-            return None
-        return fp
+        roots = [os.path.abspath(get_out_dir())]
+        legacy = os.path.abspath(os.path.join(APP_DATA_DIR, "downloads"))
+        if legacy != roots[0]:
+            roots.append(legacy)
+        for root in roots:
+            fp = os.path.abspath(os.path.join(root, fname))
+            if fp.startswith(root + os.sep) and os.path.isfile(fp):
+                return fp
+        return None
 
     def _api_read_meta(self, qs: dict):
         fname = (qs.get("file") or [""])[0].strip()
@@ -3505,13 +3510,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": "缺少 file"}, 400)
         if ".." in fname or "/" in fname or "\\" in fname:
             return self._send_json({"error": "非法文件名"}, 400)
-        out_dir = get_out_dir()
-        path = os.path.join(out_dir, fname)
-        if not os.path.isfile(path):
+        path = self._resolve_book_file(fname)
+        if path is None:
             return self._send_json({"error": "文件不存在"}, 404)
         try:
             chs = parse_epub(path)
-            return self._send_json({"title": fname, "chapters": [
+            return self._send_json({"title": fname, "total": len(chs), "chapters": [
                 {"idx": c["idx"], "title": c["title"], "path": c.get("path", ""),
                  "volume": c.get("volume", "") or ""} for c in chs]})
         except Exception as exc:
@@ -3911,9 +3915,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": "缺少 file"}, 400)
         if ".." in fname or "/" in fname or "\\" in fname:
             return self._send_json({"error": "非法文件名"}, 400)
-        out_dir = get_out_dir()
-        path = os.path.join(out_dir, fname)
-        if not os.path.isfile(path):
+        path = self._resolve_book_file(fname)
+        if path is None:
             return self._send_json({"error": "文件不存在"}, 404)
         try:
             return self._send_json(read_chapter(path, ch))
@@ -3929,9 +3932,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": "缺少 file/path"}, 400)
         if ".." in fname or "/" in fname or "\\" in fname:
             return self._send_json({"error": "非法文件名"}, 400)
-        out_dir = get_out_dir()
-        path = os.path.join(out_dir, fname)
-        if not os.path.isfile(path):
+        path = self._resolve_book_file(fname)
+        if path is None:
             return self._send_json({"error": "文件不存在"}, 404)
         try:
             data = read_asset(path, asset)
@@ -4239,10 +4241,10 @@ class Handler(BaseHTTPRequestHandler):
         fname = (data.get("file") or "").strip()
         if not fname.lower().endswith(".txt"):
             return self._send_json({"error": "仅支持 TXT 转 EPUB"}, 400)
-        out_dir = get_out_dir()
-        src = os.path.join(out_dir, os.path.basename(fname))
-        if not os.path.isfile(src):
+        src = self._resolve_book_file(fname)
+        if src is None:
             return self._send_json({"error": "文件不存在"}, 404)
+        out_dir = os.path.dirname(src)
         try:
             import re as _re
             from novel.exporter import write_epub
@@ -4772,6 +4774,12 @@ class Handler(BaseHTTPRequestHandler):
             if os.path.isdir(comic_target) or os.path.isfile(comic_target):
                 target = comic_target
                 abs_dir = os.path.dirname(comic_target) if os.path.isfile(comic_target) else comic_target
+            elif not os.path.isfile(target):
+                # 旧版 downloads/ 根目录残留文件
+                legacy_target = os.path.join(APP_DATA_DIR, "downloads", rel)
+                if os.path.isfile(legacy_target):
+                    target = legacy_target
+                    abs_dir = os.path.dirname(legacy_target)
         try:
             import subprocess
             if os.name == "nt":

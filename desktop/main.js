@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('node:fs');
 const path = require('node:path');
 const {
   app,
@@ -100,6 +101,12 @@ function registerIpc() {
       log.warn('调用后端打开目录失败，回退到数据目录', error);
       await shell.openPath(app.getPath('userData'));
     }
+  });
+
+  ipcMain.handle('shell:open-data-dir', async () => {
+    const dir = path.join(app.getPath('userData'), 'data');
+    fs.mkdirSync(dir, { recursive: true });
+    await shell.openPath(dir);
   });
 
   ipcMain.handle('app:notify', (_event, message) => {

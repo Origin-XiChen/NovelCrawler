@@ -105,10 +105,15 @@ async function waitForPing(baseUrl, timeoutMs = 60000) {
   throw new Error(`后端启动超时（${lastError || '无响应'}）`);
 }
 
+const killedBackends = new WeakSet();
+
 function killBackend(child) {
-  if (!child || child.killed) return;
+  if (!child || !child.pid || child.killed || killedBackends.has(child)) return;
+  killedBackends.add(child);
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+    // 必须同步:before-quit / process.exit 后异步子进程来不及执行,
+    // 会留下孤儿后端占用安装目录,导致自动更新安装失败。
+    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
       windowsHide: true,
       stdio: 'ignore',
     });

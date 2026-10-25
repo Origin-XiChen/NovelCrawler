@@ -20,7 +20,7 @@ export function SettingsPage() {
       toast('仅桌面版支持打开数据目录', 'error');
       return;
     }
-    await window.desktop.openDir();
+    await window.desktop.openDataDir();
   };
 
   return (
