@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 
-type Tone = 'default' | 'error';
+type Tone = 'default' | 'error' | 'success' | 'info';
 
 interface ToastItem {
   id: number;
@@ -42,7 +42,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="toast-layer" role="status" aria-live="polite">
         {items.map((item) => (
-          <div key={item.id} className={`toast${item.tone === 'error' ? ' toast--error' : ''}`}>
+          <div key={item.id} className={`toast toast--${item.tone}`}>
             {item.message}
           </div>
         ))}

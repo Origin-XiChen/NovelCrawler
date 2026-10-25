@@ -340,6 +340,27 @@ export function ShelfPage() {
                       下载
                     </button>
                   )}
+                  {!localFile && !fromFile ? (
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      title="不下载，直接在线阅读"
+                      onClick={() =>
+                        navigate(
+                          entry.source === 'OPDS'
+                            ? `/read?epub=${encodeURIComponent(entry.url)}&title=${encodeURIComponent(
+                                entry.title,
+                              )}`
+                            : `/read?url=${encodeURIComponent(entry.url)}&title=${encodeURIComponent(
+                                entry.title,
+                              )}`,
+                        )
+                      }
+                    >
+                      <BookOpen size={14} />
+                      在线阅读
+                    </button>
+                  ) : null}
                   {localFile && !fromFile ? (
                     <button
                       type="button"

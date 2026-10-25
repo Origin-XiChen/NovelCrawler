@@ -18,7 +18,7 @@
 | 🔍 **模糊搜索** | 输入 `harry potter` 自动映射到中文《哈利波特》；支持拼音(如 `ha li bo te`)；内置 60+ 作品中外名映射表，可自行扩充 |
 | 🌐 **多源搜索** | 内置 10 个书源并发搜索、结果聚合去重；单源失败自动跳过；相关性过滤剔除无关推荐；限流自动等待重试 |
 | 📚 **书架收藏** | 搜索时点 ☆ 收藏；书架一键"检查更新"(检测新章节并增量下载) |
-| 📖 **在线阅读器** | 已下载 TXT 网页直接阅读:章节目录、上下章导航、字号调节、记忆进度 |
+| 📖 **在线阅读器** | 本地 TXT/EPUB、在线书源与 OPDS 远程 EPUB:章节目录、笔记与书签、字号调节、记忆进度 |
 | 🔗 **URL 直连** | 填入任意书籍详情页/目录页 URL 即可下载(含未收录站点,自动通用源兜底) |
 | 📕 **EPUB 导出** | TXT / EPUB 两种格式(EPUB 标准库生成,零依赖) |
 | 🎨 **漫画聚合** | 多源漫画搜索/下载,打包 PDF(按话/合集/ZIP 三种模式);在线阅读、独立阅读器窗口、进度记忆 |
@@ -31,15 +31,15 @@
 | ⚙️ **可扩展** | GUI 设置面板管理书源(启用/停用/测试/添加) |
 | 📦 **桌面安装版** | Electron + React 新界面,内置 Python 后端,NSIS 安装包,启动自动检查 GitHub Releases 更新 |
 
-## 桌面版（Electron，v1.0.0）
+## 桌面版（Electron，v1.1.0）
 
 > 普通用户推荐安装版,不需要本机安装 Python。
 
-1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Setup-1.0.0.exe`。
+1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Setup-1.1.0.exe`。
 2. 双击安装。当前构建未做代码签名,Windows SmartScreen 若拦截,点「更多信息」→「仍要运行」。
 3. 启动后自动检查新版本;也可在「设置 → 版本更新」手动检查、下载并重启安装。
 
-安装版 = Electron 壳 + React 新界面 + 内置后端;书架、配置、下载文件保存在用户数据目录(设置页可一键打开)。新界面已覆盖概览、搜索、书架、任务、文件、阅读器、漫画与设置,书源管理、OPDS、手机连接等高级功能可回到「经典界面」使用,数据互通。
+安装版 = Electron 壳 + React 新界面 + 内置后端;书架、配置、下载文件保存在用户数据目录(设置页可一键打开)。新界面已覆盖概览、搜索、书架、任务、文件、阅读器、漫画、书源管理、订阅、OPDS、验证中心、手机连接与设置,打开根地址会自动进入新界面。
 
 ## 源码安装
 
@@ -269,7 +269,11 @@ Novelist/
 ├── start.py             # 一键启动器(找Python/装依赖/选端口/开浏览器)
 ├── main.py              # CLI 入口(交互/搜索/下载)
 ├── gui_server.py        # Web GUI 后端(标准库,零依赖)
-├── static/index.html    # GUI 前端页面(reader-core.js 阅读器共享内核)
+├── web/                 # React + TypeScript 前端源码(构建后输出到 static/app)
+├── desktop/             # Electron 主进程、预加载与安装包配置
+├── static/app/          # React 新界面构建产物(入口 /app/)
+├── static/mobile.html   # 手机阅读页(/mobile)
+├── static/reader.html   # 独立阅读器窗口(/reader.html)
 ├── requirements.txt
 ├── downloads/           # 下载输出目录(运行时生成,不入库)
 └── novel/

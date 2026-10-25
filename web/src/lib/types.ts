@@ -114,11 +114,12 @@ export interface ReaderChapterMeta {
   idx: number;
   title: string;
   volume?: string;
+  path?: string;
 }
 
 export interface ReaderMeta {
   title: string;
-  total: number;
+  total?: number;
   chapters: ReaderChapterMeta[];
 }
 
@@ -133,6 +134,99 @@ export interface Source {
   name: string;
   base?: string;
   enabled?: boolean;
+}
+
+export interface SourceItem extends Source {
+  custom?: boolean;
+  search_ok?: boolean;
+  render?: boolean;
+  charset?: string;
+  search?: Record<string, unknown> | null;
+  api_rules?: Record<string, unknown> | null;
+  verify_ssl?: boolean;
+  [key: string]: unknown;
+}
+
+export interface SourceCandidate {
+  name: string;
+  base: string;
+  status: string;
+  charset?: string;
+  verify_ssl?: boolean;
+  [key: string]: unknown;
+}
+
+export interface SourceSyncStatus {
+  running?: boolean;
+  stage?: string;
+  processed?: number;
+  total?: number;
+  ok?: number;
+  candidates?: number;
+  error?: string;
+  message?: string;
+  sub_name?: string;
+}
+
+export interface SourceHealthStatus {
+  running?: boolean;
+  total?: number;
+  dead?: string[];
+  error?: string;
+}
+
+export interface VerifiedSite {
+  host: string;
+  name?: string;
+  url?: string;
+  ts?: number;
+  last_ok?: number;
+  expired?: boolean;
+}
+
+export interface PendingVerify {
+  host: string;
+  url?: string;
+  name?: string;
+}
+
+export interface VerifyCapability {
+  playwright?: boolean;
+  error?: string;
+  channels?: string[];
+  driver?: boolean;
+  driver_src?: string;
+}
+
+export interface OpdsItem {
+  title: string;
+  href: string;
+  epub: string;
+  cover?: string;
+  desc?: string;
+  is_nav: boolean;
+}
+
+export interface ComicBaseMatch {
+  key: string;
+  name: string;
+  base: string;
+  old_base: string;
+  applied?: boolean;
+}
+
+export interface Subscription {
+  name: string;
+  url: string;
+  file?: string;
+  remark?: string;
+  resolved?: string;
+  added?: number;
+  last_sync?: number | null;
+  status?: string;
+  count?: number;
+  unmatched?: number;
+  pending?: { ts?: number; matches?: ComicBaseMatch[] } | null;
 }
 
 export interface SearchBook {

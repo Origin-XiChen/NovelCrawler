@@ -13,10 +13,12 @@
 1. Fork → 新建分支 → 修改 → 自测 → 提交 PR,一个 PR 聚焦一件事;
 2. 代码约定(与现有风格保持一致):
    - Python:中文注释与日志、`type hints` 尽量齐全、异常兜底用 `except Exception as e: # noqa: BLE001` 并带降级,不引入重量级依赖(能用标准库就用标准库);
-   - 前端:`static/index.html` 为单文件主体,阅读器共享内核在 `static/reader-core.js`;**改动阅读器 DOM/样式后需重跑 `_build_reader.py`** 重新生成 `reader.html`;
+   - 前端:`web/src` 为 React + TypeScript + Vite 源码,构建产物输出到 `static/app/`;阅读器共享内核在 `static/reader-core.js`,**改动阅读器 DOM/样式后需重跑 `_build_reader.py`** 重新生成 `reader.html`;
 3. 自测清单:
    ```bash
    python -m compileall gui_server.py novel/        # 语法
+   npm run typecheck -w web                         # 前端类型
+   npm run build -w web                             # 构建新界面
    node --check static/reader-core.js               # 前端内核
    python start.py --port 8899                      # 冒烟:搜索/下载/阅读主路径
    ```

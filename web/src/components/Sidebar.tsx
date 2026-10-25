@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
+  BookMarked,
   Download,
   FolderOpen,
+  Globe2,
   Images,
   LayoutDashboard,
   Library,
   ListTodo,
   RefreshCw,
+  Rss,
   Search,
   Settings,
+  ShieldCheck,
+  Smartphone,
   Sparkles,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
@@ -161,6 +166,45 @@ export function Sidebar() {
             )}
           </NavLink>
         ))}
+      </nav>
+
+      <nav className="nav-group" aria-label="扩展">
+        <div className="nav-label">扩展</div>
+        <NavLink
+          to="/sources"
+          className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+        >
+          <Globe2 size={17} strokeWidth={1.9} />
+          <span>书源</span>
+        </NavLink>
+        <NavLink
+          to="/subscriptions"
+          className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+        >
+          <Rss size={17} strokeWidth={1.9} />
+          <span>订阅中心</span>
+        </NavLink>
+        <NavLink
+          to="/opds"
+          className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+        >
+          <BookMarked size={17} strokeWidth={1.9} />
+          <span>OPDS 书库</span>
+        </NavLink>
+        <NavLink
+          to="/verify"
+          className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+        >
+          <ShieldCheck size={17} strokeWidth={1.9} />
+          <span>验证中心</span>
+        </NavLink>
+        <NavLink
+          to="/mobile"
+          className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+        >
+          <Smartphone size={17} strokeWidth={1.9} />
+          <span>手机连接</span>
+        </NavLink>
       </nav>
 
       <nav className="nav-group" aria-label="系统">

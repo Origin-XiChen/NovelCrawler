@@ -1,15 +1,16 @@
 import type { LucideIcon } from 'lucide-react';
-import { ExternalLink } from 'lucide-react';
-import { openClassicUi } from '../lib/desktop';
+import { Home } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface PlaceholderProps {
   title: string;
   description: string;
   icon: LucideIcon;
-  features: string[];
 }
 
-export function Placeholder({ title, description, icon: Icon, features }: PlaceholderProps) {
+export function Placeholder({ title, description, icon: Icon }: PlaceholderProps) {
+  const navigate = useNavigate();
+
   return (
     <div className="page">
       <div className="page-head">
@@ -24,25 +25,16 @@ export function Placeholder({ title, description, icon: Icon, features }: Placeh
           <div className="empty__icon">
             <Icon size={22} />
           </div>
-          <div className="empty__title">这个页面正在迁移到新界面</div>
-          <div className="empty__desc">
-            功能与数据都不受影响，迁移完成前可以继续使用经典界面。
-          </div>
-          <div className="source-chips" style={{ justifyContent: 'center', marginTop: 8 }}>
-            {features.map((feature) => (
-              <span key={feature} className="source-chip">
-                {feature}
-              </span>
-            ))}
-          </div>
+          <div className="empty__title">没有找到这个页面</div>
+          <div className="empty__desc">可以返回概览，或使用顶部搜索继续查找。</div>
           <button
             type="button"
             className="btn"
             style={{ marginTop: 14 }}
-            onClick={openClassicUi}
+            onClick={() => navigate('/')}
           >
-            <ExternalLink size={15} />
-            打开经典界面
+            <Home size={15} />
+            返回概览
           </button>
         </div>
       </div>

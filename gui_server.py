@@ -2,13 +2,14 @@
 """
 多源小说爬虫 —— 本地 Web GUI 后端
 ====================================
-使用 Python 标准库 http.server 提供 JSON API,配合 static/index.html 前端。
+使用 Python 标准库 http.server 提供 JSON API,配合 React 新界面(static/app)。
 
 启动:
     python gui_server.py [--port 8765] [--open]
 
 API:
-    GET  /                    → 前端页面
+    GET  /                    → 302 跳转 /app/
+    GET  /app/                → React 新界面
     GET  /api/sources         → 书源列表
     GET  /api/search?q=&src=  → 搜索(src 逗号分隔,可省略)
     GET  /api/book?url=       → 书籍信息 + 章节数
@@ -821,6 +822,13 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "NovelGUI/1.0"
 
     # ---------------- 基础 ----------------
+    def _send_redirect(self, location: str, status: int = 302) -> None:
+        self.send_response(status)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def _send_json(self, obj: dict, status: int = 200) -> None:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -983,8 +991,9 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         qs = parse_qs(parsed.query)
 
-        if path in ("/", "/index.html"):
-            return self._send_file(os.path.join(STATIC_DIR, "index.html"), "text/html; charset=utf-8")
+        if path in ("/", "/index.html", "/static/index.html"):
+            # 经典单页界面已全部迁移到 React 新界面,旧入口统一跳转
+            return self._send_redirect("/app/")
         if path == "/mobile":
             # 手机阅读窗口:轻量移动端页面(局域网扫码后阅读本地书)
             return self._send_file(os.path.join(STATIC_DIR, "mobile.html"), "text/html; charset=utf-8")
@@ -1081,6 +1090,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_comic_shelf(qs)
         if path == "/api/comic_shelf_backup":
             return self._api_comic_shelf_backup()
+        if path == "/api/shelf_backup":
+            return self._api_shelf_backup()
         if path == "/api/verify_status":
             return self._api_verify_status()
         if path == "/api/verify_capability":
@@ -1137,7 +1148,7 @@ class Handler(BaseHTTPRequestHandler):
             if (fp == base or fp.startswith(base + os.sep)) and os.path.isfile(fp):
                 return self._send_file(fp, _static_mime(fp))
         if path in ("/app", "/app/"):
-            # Electron 新界面(React)入口;经典界面仍在 /
+            # React 新界面入口(Electron 与浏览器共用)
             return self._send_file(os.path.join(STATIC_DIR, "app", "index.html"),
                                    "text/html; charset=utf-8")
         if path.startswith("/app/"):
@@ -1504,6 +1515,13 @@ class Handler(BaseHTTPRequestHandler):
                 delay = None
             if delay is None or not math.isfinite(delay) or delay < 0:
                 delay = "auto"  # 非法值也兜底为 auto
+        # 聚合搜索等待上限(秒):0 = 不限时;非法值回退现有值
+        try:
+            search_timeout = int(float(data.get("search_timeout", cur.get("search_timeout", 60))))
+        except (TypeError, ValueError, OverflowError):
+            search_timeout = cur.get("search_timeout", 60)
+        if not math.isfinite(search_timeout) or search_timeout < 0:
+            search_timeout = cur.get("search_timeout", 60)
         old_lan = bool(cur.get("lan_access", False))
         new_lan = bool(data.get("lan_access", cur.get("lan_access", False)))
         # 净化规则:请求未携带时保留现有规则(新设置页不管理该字段,
@@ -1562,6 +1580,7 @@ class Handler(BaseHTTPRequestHandler):
             save_settings({
                 "proxy": data.get("proxy", cur.get("proxy", "")),
                 "delay": delay,
+                "search_timeout": search_timeout,
                 "out_dir": data.get("out_dir", cur.get("out_dir", "downloads")),
                 "verify_ssl": bool(data.get("verify_ssl", cur.get("verify_ssl", True))),
                 "lan_access": new_lan,
