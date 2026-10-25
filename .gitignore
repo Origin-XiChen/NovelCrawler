@@ -21,6 +21,7 @@ dist/
 .workbuddy/
 .recovery/
 .webview2-cache/
+.trae-html-share-packages/
 archive/
 
 # ================= 运行时用户数据(书架/阅读记录/配置,勿公开) =================
@@ -45,6 +46,16 @@ docs/
 # ================= 第三方反编译参考资料(版权风险,仅本地) =================
 _Manhuatai.java.txt
 _QiMiaoMH.java.txt
+
+# ================= Node / Electron =================
+node_modules/
+web/dist/
+desktop/dist/
+release/
+release-*/
+dist-backend/
+static/app/
+*.log
 
 # ================= 操作系统杂项 =================
 Thumbs.db

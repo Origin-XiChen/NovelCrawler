@@ -29,12 +29,22 @@
 | 🧩 **下载完整性** | 漫画下载去重(同 id 话合并)、分页校验(words 顺序校验/缺页报错)、失败话重试与如实汇报("部分完成"可续传补齐),不再静默漏页 |
 | 📄 **章节下载** | 目录倒序/分页/去重自动处理；TXT 断点续传；可指定章节范围 |
 | ⚙️ **可扩展** | GUI 设置面板管理书源(启用/停用/测试/添加) |
-| 📦 **独立 exe** | 双击 `build_exe.bat` 打包(`build_exe_spec.bat` 为等价入口),打包配置统一在 `NovelCrawler.spec` |
+| 📦 **桌面安装版** | Electron + React 新界面,内置 Python 后端,NSIS 安装包,启动自动检查 GitHub Releases 更新 |
 
-## 安装
+## 桌面版（Electron，v1.0.0）
+
+> 普通用户推荐安装版,不需要本机安装 Python。
+
+1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Setup-1.0.0.exe`。
+2. 双击安装。当前构建未做代码签名,Windows SmartScreen 若拦截,点「更多信息」→「仍要运行」。
+3. 启动后自动检查新版本;也可在「设置 → 版本更新」手动检查、下载并重启安装。
+
+安装版 = Electron 壳 + React 新界面 + 内置后端;书架、配置、下载文件保存在用户数据目录(设置页可一键打开)。新界面已覆盖概览、搜索、书架、任务、文件、阅读器、漫画与设置,书源管理、OPDS、手机连接等高级功能可回到「经典界面」使用,数据互通。
+
+## 源码安装
 
 ```bash
-# 需要 Python 3.9+
+# 需要 Python 3.9+；打包桌面版需要 Node.js 20+
 pip install -r requirements.txt
 ```
 

@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Verify version matches tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          DESKTOP=$(node -p "require('./desktop/package.json').version")
+          WEB=$(node -p "require('./web/package.json').version")
+          BACKEND=$(python -c "from novel import __version__; print(__version__)")
+          TAG=${GITHUB_REF_NAME#v}
+          echo "package=$PKG desktop=$DESKTOP web=$WEB backend=$BACKEND tag=$TAG"
+          if [ "$PKG" != "$TAG" ] || [ "$DESKTOP" != "$TAG" ] || [ "$WEB" != "$TAG" ] || [ "$BACKEND" != "$TAG" ]; then
+            echo "::error::版本号不一致：请同步 package.json / desktop / web / novel.__version__ 与 tag"
+            exit 1
+          fi
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build and publish
+        run: npm run dist:publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'

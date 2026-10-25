@@ -290,6 +290,22 @@ else:
 # 图标目录:exe 同目录的 icon/(用户可自定义/替换)
 ICON_DIR = os.path.join(ROOT, "icon")
 
+# 静态文件 MIME 映射(/static 与 Electron 新界面 /app 共用)
+_STATIC_MIME = {
+    ".css": "text/css", ".js": "application/javascript",
+    ".mjs": "application/javascript", ".map": "application/json",
+    ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
+    ".json": "application/json", ".txt": "text/plain; charset=utf-8",
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".svg": "image/svg+xml", ".ico": "image/x-icon",
+    ".webmanifest": "application/manifest+json",
+    ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf",
+}
+
+
+def _static_mime(path: str) -> str:
+    return _STATIC_MIME.get(os.path.splitext(path)[1].lower(), "application/octet-stream")
+
 # 单 exe 首次启动:自动从打包内嵌释放默认图标到 exe 同目录,以后用户可以自由替换
 if getattr(sys, "frozen", False):
     try:
@@ -1120,16 +1136,22 @@ class Handler(BaseHTTPRequestHandler):
             fp = os.path.normpath(os.path.join(STATIC_DIR, path[len("/static/"):]))
             base = os.path.abspath(STATIC_DIR)
             if (fp == base or fp.startswith(base + os.sep)) and os.path.isfile(fp):
-                ext = os.path.splitext(fp)[1].lower()
-                ctype = {
-                    ".css": "text/css", ".js": "application/javascript",
-                    ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
-                    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                    ".gif": "image/gif", ".svg": "image/svg+xml", ".ico": "image/x-icon",
-                    ".webmanifest": "application/manifest+json",
-                    ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf",
-                }.get(ext, "application/octet-stream")
-                return self._send_file(fp, ctype)
+                return self._send_file(fp, _static_mime(fp))
+        if path in ("/app", "/app/"):
+            # Electron 新界面(React)入口;经典界面仍在 /
+            return self._send_file(os.path.join(STATIC_DIR, "app", "index.html"),
+                                   "text/html; charset=utf-8")
+        if path.startswith("/app/"):
+            app_base = os.path.abspath(os.path.join(STATIC_DIR, "app"))
+            rel = path[len("/app/"):]
+            fp = os.path.normpath(os.path.join(app_base, rel))
+            if (fp == app_base or fp.startswith(app_base + os.sep)) and os.path.isfile(fp):
+                return self._send_file(fp, _static_mime(fp))
+            # HashRouter 不需要回退;这里仅为刷新 /app/xxx 深链时兜底
+            if not os.path.splitext(rel)[1]:
+                return self._send_file(os.path.join(app_base, "index.html"),
+                                       "text/html; charset=utf-8")
+            return self._send_json({"error": "not found"}, 404)
         if path.startswith("/icon/"):
             # 用户可替换的图标目录(优先 exe 同目录 icon/,保证单 exe 部署时也能用)
             rel = path[len("/icon/"):]

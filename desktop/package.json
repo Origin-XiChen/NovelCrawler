@@ -1,0 +1,75 @@
+{
+  "name": "@novelcrawler/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "小说管家 Electron 桌面壳",
+  "main": "main.js",
+  "author": "Origin-XiChen",
+  "license": "GPL-3.0",
+  "scripts": {
+    "dev": "electron .",
+    "dist": "electron-builder --win nsis --publish never",
+    "dist:publish": "electron-builder --win nsis --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.originxichen.novelcrawler",
+    "productName": "NovelCrawler",
+    "electronVersion": "33.4.11",
+    "npmRebuild": false,
+    "copyright": "GPL-3.0 · 仅供个人学习与技术研究",
+    "directories": {
+      "output": "../release",
+      "buildResources": "../icon"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "backend.js",
+      "updater.js",
+      "window-state.js",
+      "logger.js",
+      "splash.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist-backend/NovelCrawlerBackend",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "../app.ico",
+      "artifactName": "NovelCrawler-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "小说管家"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Origin-XiChen",
+        "repo": "NovelCrawler",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

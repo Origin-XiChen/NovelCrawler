@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>小说管家</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        -webkit-app-region: drag;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background:
+          radial-gradient(420px 200px at 50% -30%, rgba(95, 179, 159, 0.22), transparent 70%),
+          #17181a;
+        color: #f2f0ec;
+        font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+        user-select: none;
+        overflow: hidden;
+        border: 1px solid #33373b;
+        border-radius: 14px;
+      }
+      .mark {
+        display: grid;
+        place-items: center;
+        width: 46px;
+        height: 46px;
+        border-radius: 14px;
+        background: #5fb39f;
+        color: #0f1113;
+        font-size: 22px;
+        font-weight: 700;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      h1 { margin: 2px 0 0; font-size: 16px; font-weight: 650; letter-spacing: 0.02em; }
+      p { margin: 0; font-size: 12px; color: #b9b6b0; }
+      .bar {
+        width: 168px;
+        height: 3px;
+        margin-top: 6px;
+        border-radius: 999px;
+        background: #2c3034;
+        overflow: hidden;
+      }
+      .bar i {
+        display: block;
+        width: 40%;
+        height: 100%;
+        border-radius: inherit;
+        background: #5fb39f;
+        animation: slide 1.2s ease-in-out infinite;
+      }
+      @keyframes slide {
+        0% { transform: translateX(-110%); }
+        100% { transform: translateX(280%); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mark">书</div>
+    <h1>小说管家</h1>
+    <p>正在启动书源服务…</p>
+    <div class="bar"><i></i></div>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "novelcrawler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "小说管家 · Electron 桌面端",
+  "license": "GPL-3.0",
+  "workspaces": [
+    "desktop",
+    "web"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "npm run dev -w web",
+    "dev:desktop": "npm run dev -w desktop",
+    "typecheck": "npm run typecheck -w web",
+    "build:web": "npm run build -w web",
+    "build:backend": "node scripts/build-backend.mjs",
+    "dist": "npm run build:web && npm run build:backend && npm run dist -w desktop",
+    "dist:publish": "npm run build:web && npm run build:backend && npm run dist:publish -w desktop"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

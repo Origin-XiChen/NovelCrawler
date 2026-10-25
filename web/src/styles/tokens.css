@@ -1,0 +1,111 @@
+/* ============================================================
+   设计令牌：延续旧版「暖纸 + 墨绿」体系，补齐桌面端尺寸与阴影。
+   所有颜色均按 WCAG AA 选取；深色下语义色为浅色，前景用 --on-brand。
+   ============================================================ */
+:root {
+  --bg: #f7f5f1;
+  --card: #ffffff;
+  --secondary: #f1ede7;
+  --border: #e7e2da;
+  --border-strong: #8c8579;
+  --line: #e7e2da;
+  --text: #17181a;
+  --muted: #55595e;
+  --primary: #2c6e63;
+  --primary-dark: #235a51;
+  --primary-50: #eaf2ef;
+  --on-brand: #ffffff;
+  --success: #2f7a4f;
+  --success-50: #e1f5ee;
+  --danger: #b3261e;
+  --danger-50: #fbeae8;
+  --warn: #9a6208;
+  --warn-50: #faf0dc;
+
+  --surface-1: #ffffff;
+  --surface-2: #fbf9f6;
+  --surface-3: #f1ede7;
+  --text-1: #17181a;
+  --text-2: #55595e;
+  --text-3: #6b7075;
+
+  --novel: #8e562f;
+  --novel-soft: #f4eade;
+  --comic: #376c4c;
+  --comic-soft: #e6efe7;
+
+  --shadow-sm: 0 1px 2px rgba(23, 24, 26, 0.05);
+  --shadow: 0 2px 8px rgba(23, 24, 26, 0.06), 0 12px 32px rgba(23, 24, 26, 0.06);
+  --shadow-lg: 0 18px 48px rgba(23, 24, 26, 0.14);
+
+  --fs-caption: 11px;
+  --fs-aux: 12px;
+  --fs-body2: 13px;
+  --fs-body: 14px;
+  --fs-sub: 15px;
+  --fs-title: 17px;
+  --fs-head: 20px;
+  --fs-display: 26px;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  --titlebar-h: 44px;
+  --sidebar-w: 228px;
+  --content-max: 1180px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI",
+    "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg: #17181a;
+  --card: #202225;
+  --secondary: #2c3034;
+  --border: #33373b;
+  --border-strong: #7a8078;
+  --line: #33373b;
+  --text: #f2f0ec;
+  --muted: #b9b6b0;
+  --primary: #5fb39f;
+  --primary-dark: #7cc7b4;
+  --primary-50: rgba(95, 179, 159, 0.16);
+  --on-brand: #0f1113;
+  --success: #7fc79a;
+  --success-50: rgba(127, 199, 154, 0.16);
+  --danger: #f08a80;
+  --danger-50: rgba(240, 138, 128, 0.15);
+  --warn: #e0b062;
+  --warn-50: rgba(224, 176, 98, 0.15);
+
+  --surface-1: #202225;
+  --surface-2: #26292c;
+  --surface-3: #2c3034;
+  --text-1: #f2f0ec;
+  --text-2: #b9b6b0;
+  --text-3: #96938d;
+
+  --novel: #d2a276;
+  --novel-soft: rgba(210, 162, 118, 0.15);
+  --comic: #89bb9c;
+  --comic-soft: rgba(137, 187, 156, 0.15);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
+
+  color-scheme: dark;
+}
