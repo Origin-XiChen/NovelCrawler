@@ -1,6 +1,6 @@
 {
-  "name": "NovelCrawler 手机书库",
-  "short_name": "书库",
+  "name": "小说管家 · 手机书库",
+  "short_name": "小说管家",
   "description": "连接电脑上的 NovelCrawler，在手机上继续阅读小说和漫画",
   "start_url": "./",
   "scope": "./",
@@ -8,7 +8,7 @@
   "background_color": "#f5f3ee",
   "theme_color": "#2f6f5e",
   "icons": [
-    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
   ]
 }

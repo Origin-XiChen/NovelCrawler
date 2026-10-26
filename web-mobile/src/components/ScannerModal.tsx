@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import jsQR from 'jsqr';
 import { ScanLine, X } from 'lucide-react';
 
 interface DetectedBarcode {
@@ -15,6 +16,8 @@ interface Props {
   onClose: () => void;
   onResult: (raw: string) => void;
 }
+
+const CAMERA_HINT = '无法打开摄像头，请检查系统相机权限，或手动输入地址和配对码。';
 
 export default function ScannerModal({ onClose, onResult }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -35,21 +38,29 @@ export default function ScannerModal({ onClose, onResult }: Props) {
 
     const run = async () => {
       if (!window.isSecureContext) {
-        setError('局域网 HTTP 下浏览器不允许调用摄像头。请用手机系统相机扫描电脑二维码，或手动输入地址和配对码。');
-        setStarting(false);
-        return;
-      }
-      const BarcodeDetector = (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
-      if (!BarcodeDetector) {
-        setError('当前浏览器不支持网页扫码。请用手机系统相机扫描，或手动输入。');
+        setError('当前页面不是安全上下文，无法调用摄像头。请手动输入地址和配对码。');
         setStarting(false);
         return;
       }
       if (!navigator.mediaDevices?.getUserMedia) {
-        setError('当前环境无法调用摄像头，请手动输入。');
+        setError(CAMERA_HINT);
         setStarting(false);
         return;
       }
+
+      const BarcodeDetector = (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor })
+        .BarcodeDetector;
+      let detector: BarcodeDetectorLike | null = null;
+      if (BarcodeDetector) {
+        try {
+          detector = new BarcodeDetector({ formats: ['qr_code'] });
+        } catch {
+          detector = null;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' } },
@@ -69,26 +80,43 @@ export default function ScannerModal({ onClose, onResult }: Props) {
         await video.play();
         if (cancelled) return;
         setStarting(false);
-        const detector = new BarcodeDetector({ formats: ['qr_code'] });
+
         const tick = async () => {
           if (cancelled) return;
+          let raw = '';
           try {
-            const codes = await detector.detect(video);
-            const raw = codes[0]?.rawValue || '';
-            if (raw) {
-              cancelled = true;
-              stop();
-              resultRef.current(raw);
-              return;
+            if (detector) {
+              const codes = await detector.detect(video);
+              raw = codes[0]?.rawValue || '';
+            } else if (context) {
+              const width = video.videoWidth;
+              const height = video.videoHeight;
+              if (width && height) {
+                const scale = Math.min(1, 720 / Math.max(width, height));
+                canvas.width = Math.round(width * scale);
+                canvas.height = Math.round(height * scale);
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const frame = context.getImageData(0, 0, canvas.width, canvas.height);
+                raw =
+                  jsQR(frame.data, frame.width, frame.height, {
+                    inversionAttempts: 'dontInvert',
+                  })?.data || '';
+              }
             }
           } catch {
             // 单帧识别失败继续下一帧
+          }
+          if (raw) {
+            cancelled = true;
+            stop();
+            resultRef.current(raw);
+            return;
           }
           if (!cancelled) timer = window.setTimeout(tick, 280);
         };
         void tick();
       } catch {
-        setError('无法打开摄像头，请检查权限，或改用手动输入。');
+        setError(CAMERA_HINT);
         setStarting(false);
       }
     };

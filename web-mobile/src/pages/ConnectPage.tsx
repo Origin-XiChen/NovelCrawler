@@ -26,6 +26,7 @@ import {
   touchServer,
 } from '../lib/connection';
 import { errorMessage } from '../lib/format';
+import { IS_NATIVE } from '../lib/native';
 import type { ServerEntry } from '../lib/types';
 
 function cleanPairQuery() {
@@ -206,7 +207,9 @@ export default function ConnectPage() {
           手动输入地址和配对码
         </button>
         <p className="connect-tip">
-          局域网 HTTP 下请用手机系统相机扫码，二维码会自动打开本页并完成配对。
+          {IS_NATIVE || window.isSecureContext
+            ? '也可以点击上方按钮扫描二维码，或手动输入地址和配对码。'
+            : '局域网 HTTP 下请用手机系统相机扫码，二维码会自动打开本页并完成配对。'}
         </p>
       </section>
 

@@ -31,12 +31,13 @@
 | ⚙️ **可扩展** | GUI 设置面板管理书源(启用/停用/测试/添加) |
 | 📦 **桌面安装版** | Electron + React 新界面,内置 Python 后端,NSIS 安装包,启动自动检查 GitHub Releases 更新 |
 | 📱 **手机书库** | 扫码配对后手机浏览器直连电脑,阅读 TXT/EPUB/漫画 PDF 并记住进度;电脑端更新后手机自动检测并提示刷新 |
+| 🤖 **Android App** | Capacitor 封装的独立安装包,内置扫码配对、相机扫码、原生返回键与 App 内更新检测,仍需连接电脑使用 |
 
-## 桌面版（Electron，v1.2.0）
+## 桌面版（Electron，v1.3.0）
 
 > 普通用户推荐安装版,不需要本机安装 Python。
 
-1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Setup-1.2.0.exe`。
+1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Setup-1.3.0.exe`。
 2. 双击安装。当前构建未做代码签名,Windows SmartScreen 若拦截,点「更多信息」→「仍要运行」。
 3. 启动后自动检查新版本;也可在「设置 → 版本更新」手动检查、下载并重启安装。
 
@@ -50,6 +51,26 @@
 2. 点「生成配对码」,用手机系统相机扫描二维码;也可以手动输入电脑地址和 6 位配对码。
 3. 手机与电脑需连接同一 Wi-Fi。配对后可浏览书库、阅读 TXT/EPUB 小说与漫画 PDF,阅读进度保存在手机本地。
 4. 手机页面随桌面端同步更新:已打开的页面会自动检测电脑端新版本并提示刷新,无需重新配对。
+
+## Android App（Capacitor，v1.3.0）
+
+Android 安装包与手机网页共用同一套界面和接口,电脑仍是下载与整理引擎:
+
+- App 内可直接调用相机扫描电脑上的配对二维码;
+- 启动和回到前台时检查 GitHub Releases 中的新版 APK,设置页也可手动检查;
+- 保留阅读进度、书库、书籍详情与漫画阅读等全部手机端功能;
+- 支持 Android 原生返回键:阅读页返回上一级,书库/我的页面退到后台。
+
+本地构建需要 JDK 21 与 Android SDK 35:
+
+```bash
+cd web-mobile
+npm install
+npm run apk:release
+# 产物: android/app/build/outputs/apk/release/app-release.apk
+```
+
+`npm run apk:debug` 可构建调试包。签名使用 `web-mobile/android/keystore.properties` 与本地 keystore(均已被 `.gitignore` 排除)。发布到 CI 需要配置四个仓库 Secrets:`ANDROID_KEYSTORE_BASE64`(keystore 的 base64)、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`;缺少时 Release 会跳过 APK 任务,不影响桌面端发布。
 
 ## 源码安装
 

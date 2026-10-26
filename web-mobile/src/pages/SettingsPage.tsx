@@ -24,10 +24,14 @@ import {
   touchServer,
 } from '../lib/connection';
 import { errorMessage, relativeTime } from '../lib/format';
+import {
+  currentAppVersion,
+  fetchLatestApk,
+  IS_NATIVE,
+  openApkDownload,
+} from '../lib/native';
 import { clearProgress } from '../lib/progress';
 import type { DeviceList, MobileDevice, ServerEntry } from '../lib/types';
-
-const APP_VERSION = '0.1.0';
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -39,6 +43,12 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const [testing, setTesting] = useState(false);
+  const [appVersion, setAppVersion] = useState(__APP_VERSION__);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  useEffect(() => {
+    void currentAppVersion().then(setAppVersion);
+  }, []);
 
   const loadDevices = useCallback(async () => {
     setDevicesLoading(true);
@@ -71,6 +81,28 @@ export default function SettingsPage() {
       setNotice(ok ? '连接正常，电脑在线。' : '连接失败：电脑可能已关机或退出局域网，请重新扫码配对。');
     } finally {
       setTesting(false);
+    }
+  };
+
+  const checkUpdate = async () => {
+    if (!IS_NATIVE) {
+      setNotice('网页版会随电脑端自动更新，无需单独检查。');
+      return;
+    }
+    setCheckingUpdate(true);
+    setNotice('');
+    try {
+      const update = await fetchLatestApk();
+      if (!update) {
+        setNotice(`当前已是最新版 v${appVersion}。`);
+        return;
+      }
+      setNotice(`发现新版本 v${update.version}，正在打开下载页…`);
+      await openApkDownload(update.url);
+    } catch (cause) {
+      setNotice(`检查更新失败：${errorMessage(cause)}`);
+    } finally {
+      setCheckingUpdate(false);
     }
   };
 
@@ -280,6 +312,34 @@ export default function SettingsPage() {
 
       <section className="settings-section">
         <div className="settings-section__head">
+          <h2>手机 App</h2>
+          <span>v{appVersion}</span>
+        </div>
+        <div className="settings-card">
+          <button
+            type="button"
+            className="settings-item"
+            disabled={checkingUpdate}
+            onClick={() => void checkUpdate()}
+          >
+            <span className="settings-item__icon">
+              <RefreshCw size={19} className={checkingUpdate ? 'spin' : undefined} />
+            </span>
+            <span className="settings-item__main">
+              <b>检查 App 更新</b>
+              <em>{IS_NATIVE ? '从 GitHub 下载新版安装包' : '网页版随电脑端一起更新'}</em>
+            </span>
+            {checkingUpdate ? (
+              <Loader2 size={18} className="spin" />
+            ) : (
+              <ChevronRight size={18} className="muted" />
+            )}
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section__head">
           <h2>我的电脑</h2>
           <span>{servers.length} 台</span>
         </div>
@@ -328,7 +388,7 @@ export default function SettingsPage() {
       </button>
 
       <footer className="settings-about">
-        <div>NovelCrawler 手机版 v{APP_VERSION}</div>
+        <div>NovelCrawler 手机版 v{appVersion}</div>
         <div>
           电脑端 v{active.version || '未知'} · 配对 API {active.api}
         </div>

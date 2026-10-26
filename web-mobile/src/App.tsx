@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
+import AppUpdateBanner from './components/AppUpdateBanner';
 import BottomNav from './components/BottomNav';
+import NativeBackButton from './components/NativeBackButton';
 import BookPage from './pages/BookPage';
 import ComicReaderPage from './pages/ComicReaderPage';
 import ConnectPage from './pages/ConnectPage';
@@ -11,12 +13,14 @@ import SettingsPage from './pages/SettingsPage';
 import { apiGet } from './lib/api';
 import { loadedBuildId } from './lib/build';
 import { getActiveServer } from './lib/connection';
+import { IS_NATIVE } from './lib/native';
 import type { PingResult } from './lib/types';
 
 function PresenceWatcher() {
   const [updateReady, setUpdateReady] = useState(false);
 
   useEffect(() => {
+    if (IS_NATIVE) return;
     const localBuild = loadedBuildId();
     const beat = async () => {
       if (!getActiveServer()) return;
@@ -105,7 +109,9 @@ function SettingsLayout() {
 export default function App() {
   return (
     <HashRouter>
+      <NativeBackButton />
       <PresenceWatcher />
+      <AppUpdateBanner />
       <UnauthorizedBridge />
       <Routes>
         <Route path="/" element={<RootRedirect />} />

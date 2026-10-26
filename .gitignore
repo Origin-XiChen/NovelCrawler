@@ -57,8 +57,23 @@ release-*/
 dist-backend/
 static/app/
 static/mobile-app/
+static/mobile-app-native/
 web-mobile/dist/
 *.log
+
+# ================= Capacitor / Android =================
+web-mobile/android/.gradle/
+web-mobile/android/.idea/
+web-mobile/android/build/
+web-mobile/android/app/build/
+web-mobile/android/local.properties
+web-mobile/android/keystore.properties
+web-mobile/android/app/release/
+web-mobile/android/app/src/main/assets/public/
+web-mobile/android/app/src/main/assets/capacitor.config.json
+web-mobile/android/app/src/main/assets/capacitor.plugins.json
+*.jks
+*.keystore
 
 # ================= 操作系统杂项 =================
 Thumbs.db
