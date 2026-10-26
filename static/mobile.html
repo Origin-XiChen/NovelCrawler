@@ -2720,6 +2720,82 @@ try {
     localStorage.setItem('novelist_sid', sid);
   }
 } catch (e) {}
+// ---------------- 配对令牌:二维码内的 pair 码换长期 token ----------------
+// 电脑开启「局域网访问」后,非本机请求必须带 Bearer token(或 ?token=)。
+// 旧版页面同样支持 /mobile?pair=CODE 自动配对;token 只存在本机浏览器。
+const MOBILE_TOKEN_KEY = 'novelist_mobile_token_v1';
+let MOBILE_TOKEN = '';
+let authNeeded = false;
+try { MOBILE_TOKEN = localStorage.getItem(MOBILE_TOKEN_KEY) || ''; } catch (e) {}
+function setMobileToken(token) {
+  MOBILE_TOKEN = String(token || '');
+  try {
+    if (MOBILE_TOKEN) localStorage.setItem(MOBILE_TOKEN_KEY, MOBILE_TOKEN);
+    else localStorage.removeItem(MOBILE_TOKEN_KEY);
+  } catch (e) {}
+}
+function mobileDeviceName() {
+  const ua = navigator.userAgent || '';
+  if (/Android/i.test(ua)) return 'Android 手机';
+  if (/iPhone/i.test(ua)) return 'iPhone';
+  if (/iPad/i.test(ua)) return 'iPad';
+  if (/Windows/i.test(ua)) return 'Windows 浏览器';
+  if (/Macintosh/i.test(ua)) return 'Mac 浏览器';
+  return '手机浏览器';
+}
+function authHeaders(extra) {
+  const headers = Object.assign({}, extra || {});
+  if (MOBILE_TOKEN) headers.Authorization = 'Bearer ' + MOBILE_TOKEN;
+  return headers;
+}
+function withToken(url) {
+  if (!MOBILE_TOKEN || !url) return url;
+  return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(MOBILE_TOKEN);
+}
+function withTokenHtml(html) {
+  if (!MOBILE_TOKEN || !html) return html;
+  return String(html)
+    .replace(/(\s(?:src|href|poster)\s*=\s*["'])(\/api\/[^"']*)/gi,
+      (m, prefix, path) => prefix + withToken(path))
+    .replace(/url\(\s*(['"]?)(\/api\/[^)'"]*)\1\s*\)/gi,
+      (m, quote, path) => 'url(' + quote + withToken(path) + quote + ')');
+}
+async function pairMobile(code) {
+  try {
+    const r = await fetch('/api/mobile/pair/confirm', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({code: code, device_id: sid, device_name: mobileDeviceName()})
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok && j.token) {
+      setMobileToken(j.token);
+      toast('手机配对成功');
+    } else {
+      toast('配对失败:' + (j.error || ('HTTP ' + r.status)));
+    }
+  } catch (e) {
+    toast('配对失败:' + e.message);
+  }
+}
+// 页面启动时先消费 URL 里的 token / pair 码,再加载书库;失败也放行,
+// 后续接口 401 时给出重新配对提示。
+const AUTH_READY = (function () {
+  if (OFF || NOHTTP) return Promise.resolve();
+  let q;
+  try { q = new URLSearchParams(location.search); } catch (e) { return Promise.resolve(); }
+  const urlToken = q.get('token') || '';
+  if (urlToken) setMobileToken(urlToken);
+  const code = q.get('pair') || q.get('code') || '';
+  const work = /^\d{6}$/.test(code) ? pairMobile(code) : Promise.resolve();
+  return work.then(() => {
+    try {
+      const u = new URL(location.href);
+      ['pair', 'code', 'token', 'v', 'name'].forEach(k => u.searchParams.delete(k));
+      history.replaceState({}, '', u.pathname + (u.search || '') + u.hash);
+    } catch (e) {}
+  });
+})();
 let files = [], comics = [], curTab = 'book';
 let curFile = null, chs = [], idx = 1, fontSize = 17;
 const packKey = 'novelist_mobile_pack';
@@ -3087,15 +3163,25 @@ async function loadList() {
     return;
   }
   try {
+    const safe = p => p.catch(e => {
+      if (authNeeded || /需要配对/.test(e.message || '')) throw e;
+      return null;
+    });
     const [fj, cj] = await Promise.all([
-      api('/api/files').catch(() => ({files: []})),
-      api('/api/comic_files').catch(() => ({items: []}))
+      safe(api('/api/files')),
+      safe(api('/api/comic_files'))
     ]);
-    files = fj.files || [];
-    comics = cj.items || [];
+    files = (fj && fj.files) || [];
+    comics = (cj && cj.items) || [];
     renderAll();
     showGuideOnce();
-  } catch (e) { box.innerHTML = '<div class="empty">无法连接电脑<br>请确认电脑已开机、程序已运行,且手机与电脑在同一网络<br><span style="font-size:12px">(电脑端设置 → 手机 → 二维码扫码打开)</span><br><br><span style="font-size:12px; color:var(--primary)">校园网连不上?点右上角「📶 远程直连」,用 WebRTC 或电脑热点连接</span></div>'; }
+  } catch (e) {
+    if (authNeeded || /需要配对/.test(e.message || '')) {
+      box.innerHTML = '<div class="empty">需要与电脑配对<br><span style="font-size:12px">电脑端「手机连接 → 局域网扫码」点「生成配对码」,再用手机系统相机扫描新版二维码即可自动配对。旧版页面也支持二维码内置的配对码。</span></div>';
+      return;
+    }
+    box.innerHTML = '<div class="empty">无法连接电脑<br>请确认电脑已开机、程序已运行,且手机与电脑在同一网络<br><span style="font-size:12px">(电脑端设置 → 手机 → 二维码扫码打开)</span><br><br><span style="font-size:12px; color:var(--primary)">校园网连不上?点右上角「📶 远程直连」,用 WebRTC 或电脑热点连接</span></div>';
+  }
 }
 // 手机会话登记 + 心跳(每 60s):电脑端设置页显示本机在线
 if (!OFF && !NOHTTP) {
@@ -3104,14 +3190,15 @@ if (!OFF && !NOHTTP) {
 }
 // 电脑离线检测:每 4s ping,连续 2 次失败 → 全屏遮罩禁用交互;恢复后自动解除
 let offlineFails = 0, offlineShown = false;
-function pingOnce() {
+async function pingOnce() {
+  await AUTH_READY;
   if (TR.type === 'wrtc') {
     return wrpc('GET', '/api/ping').then(() => true).catch(() => false);
   }
   return new Promise(res => {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), 3000);
-    fetch('/api/ping', {signal: ctl.signal}).then(r => { clearTimeout(t); res(r.ok); }).catch(() => { clearTimeout(t); res(false); });
+    fetch('/api/ping', {headers: authHeaders(), signal: ctl.signal}).then(r => { clearTimeout(t); res(r.ok); }).catch(() => { clearTimeout(t); res(false); });
   });
 }
 function showOfflineMask() {
@@ -3220,7 +3307,7 @@ function renderComics() {
     const row = document.createElement('div');
     row.className = 'book';
     row.innerHTML =
-      '<div class="cov"><img src="' + esc(c.cover_url || '') + '" onerror="this.parentNode.textContent=coverChar(\'' + jss(c.title) + '\')" alt=""></div>'
+      '<div class="cov"><img src="' + esc(withToken(c.cover_url || '')) + '" onerror="this.parentNode.textContent=coverChar(\'' + jss(c.title) + '\')" alt=""></div>'
       + '<div class="info"><div class="name">' + esc(c.title) + '</div>'
       + '<div class="meta"><span>' + c.files + ' 话</span><span>' + fmtSize(c.size) + '</span></div></div>'
       + '<div class="rowbtns">'
@@ -3234,7 +3321,7 @@ function renderComics() {
     chaps.id = 'chaps-' + cssid(c.title);
     chaps.innerHTML = (c.pdfs || []).map(p =>
       '<div class="ch"><span class="nm">' + esc(p.replace(/\.pdf$/i, '')) + '</span>'
-      + (TR.type === 'wrtc' ? '' : '<a href="/downloads/comic/' + enc(c.title) + '/' + enc(p) + '">预览</a>')
+      + (TR.type === 'wrtc' ? '' : '<a href="' + withToken('/downloads/comic/' + enc(c.title) + '/' + enc(p)) + '">预览</a>')
       + '<a href="javascript:void(0)" onclick="dlComicPdf(\'' + jss(c.title) + '\',\'' + jss(p) + '\')">下载</a></div>'
     ).join('') || '<div class="ch"><span class="nm">无 PDF</span></div>';
     box.appendChild(chaps);
@@ -3321,7 +3408,7 @@ function comicZip(title) {
     return;
   }
   const a = document.createElement('a');
-  a.href = '/api/comic_pack?title=' + encodeURIComponent(title) + '&sid=' + sid;
+  a.href = withToken('/api/comic_pack?title=' + encodeURIComponent(title) + '&sid=' + sid);
   a.download = title + '.zip';
   document.body.appendChild(a); a.click(); a.remove();
   toast('开始下载:' + title + '.zip(保存到系统下载目录)');
@@ -3334,7 +3421,7 @@ function dlComicPdf(title, name) {
     return;
   }
   const a = document.createElement('a');
-  a.href = '/downloads/comic/' + encodeURIComponent(title) + '/' + encodeURIComponent(name) + '?dl=1&sid=' + sid;
+  a.href = withToken('/downloads/comic/' + encodeURIComponent(title) + '/' + encodeURIComponent(name) + '?dl=1&sid=' + sid);
   a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   toast('开始下载:' + name);
@@ -3347,7 +3434,7 @@ function dlBook(name) {
     return;
   }
   const a = document.createElement('a');
-  a.href = '/downloads/' + encodeURIComponent(name) + '?dl=1&sid=' + sid;
+  a.href = withToken('/downloads/' + encodeURIComponent(name) + '?dl=1&sid=' + sid);
   a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   toast('开始下载:' + name + '<br>保存位置:安卓 Download/ · iOS 文件App→下载');
@@ -3469,7 +3556,7 @@ function genSnapshot() {
   };
   fetch('/api/snapshot_start', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: authHeaders({'Content-Type': 'application/json'}),
     body: JSON.stringify(payload)
   }).then(r => r.json()).then(j => {
     if (j.error) { packFail(j.error); return; }
@@ -3487,7 +3574,7 @@ function pollPack() {
     if (j.status === 'ready') {
       clearInterval(packPollTimer);
       const a = document.createElement('a');
-      a.href = '/api/snapshot_download?job=' + packJobId;
+      a.href = withToken('/api/snapshot_download?job=' + packJobId);
       a.download = '漫画+小说-离线版.zip';
       document.body.appendChild(a); a.click(); a.remove();
       packJobId = null;
@@ -3560,7 +3647,7 @@ async function loadCh(i) {
     const ch = await api((isEpub ? '/api/epub_read?file=' : '/api/read?file=') + encodeURIComponent(curFile) + '&ch=' + idx);
     body.scrollTop = 0;
     document.getElementById('rTitle').textContent = ch.title || ('第' + idx + '章');
-    body.innerHTML = '<h2>' + esc(ch.title || '') + '</h2>' + (isEpub && ch.html ? ch.html : (ch.text || '').split(/\n+/).map(p => '<p>' + esc(p) + '</p>').join(''));
+    body.innerHTML = '<h2>' + esc(ch.title || '') + '</h2>' + (isEpub && ch.html ? withTokenHtml(ch.html) : (ch.text || '').split(/\n+/).map(p => '<p>' + esc(p) + '</p>').join(''));
     saveProgress();
   } catch (e) { body.innerHTML = '<p style="text-align:center;color:var(--muted);text-indent:0">读取失败</p>'; }
 }
@@ -3591,17 +3678,23 @@ function showGuideOnce() {
 function closeGuide() { document.getElementById('guideMask').classList.remove('show'); }
 
 // 工具
-function api(path) {
+async function api(path) {
+  await AUTH_READY;
   if (TR.type === 'wrtc') {
     const q = path.indexOf('?');
     const p = q >= 0 ? path.slice(0, q) : path;
     const query = q >= 0 ? path.slice(q + 1) : '';
-    return wrpc('GET', p, query).then(j => {
-      if (j && j.type === 'json') return j.body;
-      throw new Error('非 JSON 响应');
-    });
+    const j = await wrpc('GET', p, query);
+    if (j && j.type === 'json') return j.body;
+    throw new Error('非 JSON 响应');
   }
-  return fetch(path).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+  const r = await fetch(path, {headers: authHeaders()});
+  if (r.status === 401) {
+    authNeeded = true;
+    throw new Error('需要配对:请在电脑端重新生成配对码后扫码');
+  }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function jss(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
@@ -3626,7 +3719,7 @@ if (NOHTTP && !OFF) {
     openWrtcPanel();
   }, 200);
 } else {
-  loadList();
+  AUTH_READY.then(loadList);
 }
 
 // ---------- 经临时隧道打开时自动 P2P 升级 ----------
@@ -3664,7 +3757,7 @@ async function tryAutoP2p() {
     const answerB64 = await compressStrToB64(pc.localDescription.sdp);
     // 注意:本页的 api() 只做 GET,提交应答必须用原生 fetch 发 POST
     const r = await fetch('/api/webrtc/answer', {method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: authHeaders({'Content-Type': 'application/json'}),
       body: JSON.stringify({session: offer.session, answer_b64: answerB64})}).then(x => x.json());
     if (r.ok) toast('正在建立 P2P 直连(当前连接保持可用)…');
   } catch (e) { /* 静默:保持当前 HTTP 通道 */ }

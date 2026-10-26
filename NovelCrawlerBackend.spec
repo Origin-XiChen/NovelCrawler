@@ -4,7 +4,7 @@
 与 NovelCrawler.spec 的区别：
   * 入口是 server_entry.py，不创建 Win32/WebView2 窗口；
   * 产物名 NovelCrawlerBackend，作为 extraResources 放进 Electron 的 resources/backend；
-  * 仍包含 static/（经典界面 + 新 React 界面在 static/app）与 Playwright 依赖。
+  * 仍包含 static/（经典界面 + 新 React 界面在 static/app + 手机 App 在 static/mobile-app）与 Playwright 依赖。
 """
 
 import os
@@ -102,7 +102,7 @@ a = Analysis(
     hiddenimports=[
         'novel.browser', 'novel.verify', 'novel.opds', 'novel.epub', 'novel.searcher',
         'novel.jsonpath', 'novel.fetcher', 'novel.downloader', 'novel.source_registry',
-        'novel.paths', 'novel.tasklog', 'novel.notes', 'novel.wenku8', 'novel.comic',
+        'novel.paths', 'novel.mobile_auth', 'novel.tasklog', 'novel.notes', 'novel.wenku8', 'novel.comic',
         'novel.comic_cimoc', 'novel.pdfcover', 'novel.hotspot', 'novel.tunnel',
         'novel.webrtc', 'novel.signal_mqtt', 'novel.camscan', 'img2pdf', 'qrcode',
         'PIL', 'pypdf', 'cv2',

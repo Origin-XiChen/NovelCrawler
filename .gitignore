@@ -37,6 +37,7 @@ subscriptions.json
 task_history.json
 window_state.json
 notes.json
+mobile_devices.json
 verify_cookies.json
 verify_pending.json
 
@@ -55,6 +56,8 @@ release/
 release-*/
 dist-backend/
 static/app/
+static/mobile-app/
+web-mobile/dist/
 *.log
 
 # ================= 操作系统杂项 =================

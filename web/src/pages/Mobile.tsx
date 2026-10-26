@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
+  Copy,
   Download,
   ExternalLink,
   Flame,
   Globe2,
+  KeyRound,
   Link2,
   Loader2,
   Package,
+  QrCode,
   RefreshCw,
   Router,
   Send,
+  ShieldCheck,
   Smartphone,
   Square,
+  Trash2,
   Wifi,
   Zap,
 } from 'lucide-react';
@@ -80,6 +85,26 @@ interface SyncSession {
   tasks?: SyncTask[];
 }
 
+interface PairInfo {
+  ok: boolean;
+  code: string;
+  ttl: number;
+  expires_at: number;
+  uri: string;
+  legacy_uri: string;
+  base_url: string;
+  lan_access: boolean;
+}
+
+interface PairedDevice {
+  id: string;
+  name: string;
+  created: number;
+  last_seen: number;
+  last_ip: string;
+  online: boolean;
+}
+
 interface SettingsData {
   settings: {
     webrtc_turn_url?: string;
@@ -130,11 +155,27 @@ function resultText(value: number) {
   return value > 1048576 ? `${(value / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1024))} KB`;
 }
 
+function lastSeenText(value: number) {
+  if (!value) return '从未在线';
+  const diff = Math.max(0, Math.floor(Date.now() / 1000 - value));
+  if (diff < 60) return '刚刚在线';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  return `${Math.floor(diff / 86400)} 天前`;
+}
+
 function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (value: boolean) => void }) {
   const { toast } = useToast();
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [sessions, setSessions] = useState<SyncSession[]>([]);
+  const [devices, setDevices] = useState<PairedDevice[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pair, setPair] = useState<PairInfo | null>(null);
+  const [pairQr, setPairQr] = useState('');
+  const [pairLoading, setPairLoading] = useState(false);
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  const [revoking, setRevoking] = useState('');
 
   const loadNetwork = useCallback(
     async (force = false) => {
@@ -149,18 +190,45 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
     [onLanChange, toast],
   );
 
+  const loadDevices = useCallback(
+    async (silent = false) => {
+      if (!silent) setDevicesLoading(true);
+      try {
+        const data = await apiGet<{ devices?: PairedDevice[] }>('/api/mobile/devices');
+        setDevices(data.devices ?? []);
+      } catch (cause) {
+        if (!silent) toast(cause instanceof Error ? cause.message : String(cause), 'error');
+      } finally {
+        if (!silent) setDevicesLoading(false);
+      }
+    },
+    [toast],
+  );
+
   useEffect(() => {
     void loadNetwork();
+    void loadDevices(true);
     const timer = window.setInterval(() => {
       void apiGet<{ sessions?: SyncSession[] }>('/api/sync_status')
         .then((data) => setSessions(data.sessions ?? []))
         .catch(() => undefined);
     }, 2000);
+    const deviceTimer = window.setInterval(() => void loadDevices(true), 6000);
     void apiGet<{ sessions?: SyncSession[] }>('/api/sync_status')
       .then((data) => setSessions(data.sessions ?? []))
       .catch(() => undefined);
+    return () => {
+      window.clearInterval(timer);
+      window.clearInterval(deviceTimer);
+    };
+  }, [loadDevices, loadNetwork]);
+
+  useEffect(() => {
+    if (!pair) return;
+    setNowSec(Math.floor(Date.now() / 1000));
+    const timer = window.setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
     return () => window.clearInterval(timer);
-  }, [loadNetwork]);
+  }, [pair]);
 
   const toggleLan = async () => {
     const next = !lanAccess;
@@ -182,9 +250,56 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
     }
   };
 
-  const url = network?.ips?.length
-    ? `http://${network.ips[0]}:${network.port || location.port || '8899'}/mobile`
+  const startPairing = async () => {
+    setPairLoading(true);
+    try {
+      const data = await apiPost<PairInfo>('/api/mobile/pair/start', {});
+      setPair(data);
+      setNowSec(Math.floor(Date.now() / 1000));
+      setPairQr(await fetchQr(data.uri));
+      if (!data.lan_access) toast('局域网访问未开启，请先开启并重启应用', 'info');
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error');
+    } finally {
+      setPairLoading(false);
+    }
+  };
+
+  const copyPairLink = async () => {
+    if (!pair) return;
+    try {
+      await navigator.clipboard.writeText(pair.uri);
+      toast('配对链接已复制', 'success');
+    } catch {
+      toast('复制失败，请手动选择链接', 'error');
+    }
+  };
+
+  const revokeDevice = async (device: PairedDevice) => {
+    if (!window.confirm(`撤销「${device.name}」的配对权限？该手机需要重新扫码才能使用。`)) return;
+    setRevoking(device.id);
+    try {
+      const result = await apiPost<{ ok: boolean; error?: string }>('/api/mobile/devices/revoke', {
+        device_id: device.id,
+      });
+      if (!result.ok) throw new Error(result.error || '撤销失败');
+      toast('已撤销该手机的配对权限', 'success');
+      await loadDevices(true);
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error');
+    } finally {
+      setRevoking('');
+    }
+  };
+
+  const baseUrl = network?.ips?.length
+    ? `http://${network.ips[0]}:${network.port || location.port || '8899'}`
     : '';
+  const serverBase = (pair?.base_url || baseUrl).replace(/\/+$/, '');
+  const appUrl = serverBase ? `${serverBase}/m` : '';
+  const remaining = pair ? Math.max(0, pair.expires_at - nowSec) : 0;
+  const pairActive = Boolean(pair && remaining > 0 && pairQr);
+  const remainingText = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
 
   return (
     <div className="mobile-stack">
@@ -207,21 +322,123 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
       </div>
 
       <div className="mobile-card">
-        <div className="mobile-card__row">
-          <QrBox value={network?.qr_b64} alt="局域网访问二维码" />
-          <div className="mobile-card__main">
-            <div className="mobile-card__title">
-              <Smartphone size={16} />
-              手机扫码打开阅读页
+        <div className="mobile-card__title">
+          <Smartphone size={16} />
+          手机扫码配对
+        </div>
+        <div className="mobile-card__row mobile-card__row--top">
+          {pairActive ? (
+            <QrBox value={pairQr} size={168} alt="手机配对二维码" />
+          ) : (
+            <div className="mobile-pair-empty">
+              <QrCode size={36} />
+              <span>{pair ? '配对码已过期' : '等待生成配对码'}</span>
             </div>
-            <div className="mobile-url">{url || '未检测到局域网 IP'}</div>
-            {lanAccess ? (
-              <div className="mobile-hint">手机需与电脑处于同一网络。</div>
+          )}
+          <div className="mobile-card__main">
+            <div className="mobile-pair-url">{appUrl || '未检测到局域网 IP'}</div>
+            {pairActive ? (
+              <>
+                <div className="mobile-pair-code">
+                  {pair?.code.replace(/(\d{3})(\d{3})/, '$1 $2')}
+                </div>
+                <div className="mobile-hint">
+                  剩余 {remainingText} 后过期 · 配对码仅可使用一次
+                </div>
+                <div className="mobile-actions">
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyPairLink()}>
+                    <Copy size={13} />
+                    复制链接
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    disabled={pairLoading}
+                    onClick={() => void startPairing()}
+                  >
+                    {pairLoading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
+                    刷新二维码
+                  </button>
+                </div>
+              </>
             ) : (
-              <div className="mobile-warn">局域网访问未开启，扫码无效；请开启后重启应用。</div>
+              <>
+                <div className="mobile-hint">
+                  点「生成配对码」后，用手机系统相机或微信扫码，会自动打开新版手机页面并完成配对。
+                  局域网 HTTP 下浏览器不能调用摄像头，请勿用网页扫码。
+                </div>
+                {pair && <div className="mobile-warn">配对码已过期，请重新生成。</div>}
+                {!lanAccess && (
+                  <div className="mobile-warn">局域网访问未开启，请先打开上方开关并重启应用。</div>
+                )}
+                <div className="mobile-actions">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={pairLoading || !lanAccess}
+                    onClick={() => void startPairing()}
+                  >
+                    {pairLoading ? <Loader2 size={15} className="spin" /> : <KeyRound size={15} />}
+                    生成配对码
+                  </button>
+                </div>
+              </>
             )}
           </div>
         </div>
+        <div className="mobile-pair-foot">
+          <span>二维码内置一次性配对码，5 分钟内有效</span>
+          <span>手机需与电脑处于同一 Wi-Fi 或热点</span>
+        </div>
+      </div>
+
+      <div className="mobile-card">
+        <div className="mobile-card__title">
+          <ShieldCheck size={16} />
+          已配对手机
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm mobile-card__title-action"
+            disabled={devicesLoading}
+            onClick={() => void loadDevices()}
+          >
+            {devicesLoading ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+            刷新
+          </button>
+        </div>
+        {devices.length === 0 ? (
+          <div className="mobile-hint">还没有手机完成配对。生成配对码后扫码即可。</div>
+        ) : (
+          <div className="mobile-list">
+            {devices.map((device) => (
+              <div className="mobile-list__row mobile-device-row" key={device.id}>
+                <span className={device.online ? 'dot dot--on' : 'dot'} />
+                <div className="mobile-list__main">
+                  <div className="mobile-list__title">
+                    {device.name}
+                    <span className="mobile-list__meta">
+                      {device.online ? '在线' : lastSeenText(device.last_seen)}
+                    </span>
+                  </div>
+                  <div className="mobile-list__sub">{device.last_ip || device.id}</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={revoking === device.id}
+                  onClick={() => void revokeDevice(device)}
+                >
+                  {revoking === device.id ? (
+                    <Loader2 size={12} className="spin" />
+                  ) : (
+                    <Trash2 size={12} />
+                  )}
+                  撤销
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mobile-card">

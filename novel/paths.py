@@ -74,6 +74,7 @@ VERIFY_PENDING_PATH = os.path.join(APP_DATA_DIR, "verify_pending.json")
 OPDS_COOKIES_PATH = os.path.join(APP_DATA_DIR, "opds_cookies.json")
 TASK_HISTORY_PATH = os.path.join(APP_DATA_DIR, "task_history.json")
 NOTES_PATH = os.path.join(APP_DATA_DIR, "notes.json")
+MOBILE_DEVICES_PATH = os.path.join(APP_DATA_DIR, "mobile_devices.json")
 
 
 def resolve_out_dir(configured: str) -> str:

@@ -24,6 +24,7 @@ import json
 import math
 import os
 import re
+import socket
 import sys
 import tempfile
 import threading
@@ -267,6 +268,8 @@ from novel.config import (
     set_source_state,
     update_custom_source,
 )
+from novel import __version__ as APP_VERSION
+from novel import mobile_auth
 from novel.downloader import download_book, fetch_toc, safe_filename
 from novel.fetcher import Fetcher
 from novel.paths import APP_DATA_DIR, COMIC_OUT_DIR, OPDS_COOKIES_PATH
@@ -290,6 +293,23 @@ else:
 
 # 图标目录:exe 同目录的 icon/(用户可自定义/替换)
 ICON_DIR = os.path.join(ROOT, "icon")
+
+# 手机 App(web-mobile 构建产物),由 npm run build:mobile 生成
+MOBILE_APP_DIR = os.path.join(STATIC_DIR, "mobile-app")
+
+_MOBILE_BUILD_RE = re.compile(r"/assets/[A-Za-z0-9._-]+-([A-Za-z0-9_-]{6,})\.js")
+
+
+def mobile_build_id() -> str:
+    """手机端入口 JS 的 Vite 内容哈希,用于已打开的页面检测电脑端是否换了新版。"""
+    try:
+        with open(os.path.join(MOBILE_APP_DIR, "index.html"), "r", encoding="utf-8") as f:
+            html = f.read(20000)
+    except OSError:
+        return ""
+    match = _MOBILE_BUILD_RE.search(html)
+    return match.group(1) if match else ""
+
 
 # 静态文件 MIME 映射(/static 与 Electron 新界面 /app 共用)
 _STATIC_MIME = {
@@ -985,8 +1005,206 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # 静默访问日志
         pass
 
+    # ---------------- 手机配对鉴权 / CORS ----------------
+    _CORS_ORIGIN_RE = re.compile(r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?$")
+    _CORS_EXACT = {"capacitor://localhost", "ionic://localhost"}
+
+    def _cors_origin(self) -> str:
+        origin = (self.headers.get("Origin") or "").strip()
+        if origin in self._CORS_EXACT or self._CORS_ORIGIN_RE.fullmatch(origin):
+            return origin
+        return ""
+
+    def end_headers(self) -> None:
+        origin = self._cors_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers",
+                             "Authorization, Content-Type, X-NC-Token, X-NC-API")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            self.send_header("Access-Control-Max-Age", "86400")
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _client_ip(self) -> str:
+        ip = self.client_address[0] if self.client_address else ""
+        # 仅本机反代(隧道)才信任转发头;局域网客户端伪造 XFF 不能绕过配对失败限流
+        if ip not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            return ip
+        for key in ("CF-Connecting-IP", "X-Real-IP"):
+            value = (self.headers.get(key) or "").strip()
+            if value:
+                return value[:64]
+        xff = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        if xff:
+            return xff[:64]
+        return ip
+
+    def _is_trusted_local(self) -> bool:
+        """本机直连才免 token;隧道转发(带 Forwarded 头)一律视为远程。"""
+        ip = self.client_address[0] if self.client_address else ""
+        if ip not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            return False
+        for key in ("CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP",
+                    "Forwarded", "X-Forwarded-Host", "X-Forwarded-Proto"):
+            if self.headers.get(key):
+                return False
+        host = (self.headers.get("Host") or "").strip()
+        if host:
+            if host.startswith("[") and "]" in host:
+                hostname = host[1:host.index("]")]
+            else:
+                hostname = host.rsplit(":", 1)[0] if ":" in host else host
+            if hostname.lower() not in ("127.0.0.1", "localhost", "::1"):
+                return False
+        return True
+
+    def _request_token(self) -> str:
+        auth = (self.headers.get("Authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        token = (self.headers.get("X-NC-Token") or "").strip()
+        if token:
+            return token
+        if self.command in ("GET", "HEAD"):
+            # <img>/<a> 无法带请求头,资源型 GET 允许 ?token=
+            qs = parse_qs(urlparse(self.path).query)
+            return (qs.get("token") or [""])[0].strip()
+        return ""
+
+    def _guard(self) -> bool:
+        path = urlparse(self.path).path
+        if path in ("/api/ping", "/api/mobile/ping", "/api/mobile/pair/confirm"):
+            return True
+        if self._is_trusted_local():
+            return True
+        if not (path.startswith("/api/") or path.startswith("/downloads/")):
+            return True
+        token = self._request_token()
+        device = mobile_auth.verify_token(
+            token, self._client_ip(), self.headers.get("User-Agent") or "")
+        if device:
+            self._mobile_device = device
+            return True
+        self._send_json({"error": "需要配对令牌", "code": "unauthorized"}, 401)
+        return False
+
+    def _mobile_server_name(self) -> str:
+        try:
+            name = socket.gethostname()
+        except OSError:
+            name = ""
+        return name or "NovelCrawler"
+
+    def _api_mobile_ping(self):
+        token = self._request_token()
+        device = None
+        if token:
+            # 已配对客户端用 ping 做在线心跳:顺便刷新 last_seen;失效令牌返回 401
+            device = mobile_auth.verify_token(
+                token, self._client_ip(), self.headers.get("User-Agent") or "")
+            if not device:
+                return self._send_json({"error": "配对令牌已失效", "code": "unauthorized"}, 401)
+        payload = {
+            "ok": True,
+            "name": self._mobile_server_name(),
+            "version": APP_VERSION,
+            "api": mobile_auth.API_VERSION,
+            "auth": "pair",
+            "capabilities": ["library", "novel", "comic", "downloads"],
+            "mobile_build": mobile_build_id(),
+            "t": int(time.time()),
+        }
+        if device:
+            payload["paired"] = True
+            payload["device_id"] = device.get("id", "")
+        return self._send_json(payload)
+
+    def _api_mobile_pair_start(self):
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机生成配对码"}, 403)
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            body = {}
+        base = str(body.get("base_url") or "").strip().rstrip("/")
+        if base:
+            parsed = urlparse(base)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                return self._send_json({"ok": False, "error": "base_url 不合法"}, 400)
+        else:
+            try:
+                from novel.hotspot import best_lan_ip
+                host = best_lan_ip()
+            except Exception:  # noqa: BLE001
+                host = ""
+            if not host or host == "127.0.0.1":
+                host = (self.headers.get("Host") or "").split(":")[0] or "127.0.0.1"
+            port = self.server.server_address[1]
+            base = f"http://{host}:{port}"
+        try:
+            lan = bool(load_settings().get("lan_access"))
+        except Exception:  # noqa: BLE001
+            lan = False
+        result = mobile_auth.start_pair(self._mobile_server_name(), base)
+        result["base_url"] = base
+        result["lan_access"] = lan
+        return self._send_json(result)
+
+    def _api_mobile_pair_confirm(self):
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            return self._send_json({"ok": False, "error": "请求体非法"}, 400)
+        result = mobile_auth.confirm_pair(
+            str(body.get("code") or ""),
+            str(body.get("device_id") or ""),
+            str(body.get("device_name") or ""),
+            self._client_ip(),
+            self.headers.get("User-Agent") or "",
+        )
+        if result.get("ok"):
+            result["server"] = {
+                "name": self._mobile_server_name(),
+                "version": APP_VERSION,
+                "api": mobile_auth.API_VERSION,
+                "capabilities": ["library", "novel", "comic", "downloads"],
+            }
+        status = 200 if result.get("ok") else int(result.get("status") or 400)
+        return self._send_json(result, status)
+
+    def _api_mobile_devices(self):
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机查看设备"}, 403)
+        return self._send_json({
+            "ok": True,
+            "devices": mobile_auth.list_devices(),
+            "api": mobile_auth.API_VERSION,
+        })
+
+    def _api_mobile_revoke(self):
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机撤销设备"}, 403)
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            body = {}
+        if body.get("all"):
+            count = mobile_auth.revoke_all()
+            return self._send_json({"ok": True, "revoked": count})
+        device_id = str(body.get("device_id") or body.get("id") or "").strip()
+        ok = mobile_auth.revoke(device_id)
+        return self._send_json({"ok": ok, "error": None if ok else "未找到该设备"})
+
     # ---------------- 路由 ----------------
     def do_GET(self):
+        if not self._guard():
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
@@ -1120,6 +1338,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_qr(qs)
         if path == "/api/ping":
             return self._send_json({"ok": 1, "t": int(time.time())})
+        if path == "/api/mobile/ping":
+            return self._api_mobile_ping()
+        if path == "/api/mobile/devices":
+            return self._api_mobile_devices()
         if path == "/api/snapshot_status":
             return self._api_snapshot_status(qs)
         if path == "/api/snapshot_download":
@@ -1147,6 +1369,22 @@ class Handler(BaseHTTPRequestHandler):
             base = os.path.abspath(STATIC_DIR)
             if (fp == base or fp.startswith(base + os.sep)) and os.path.isfile(fp):
                 return self._send_file(fp, _static_mime(fp))
+        if path in ("/m", "/m/"):
+            index = os.path.join(MOBILE_APP_DIR, "index.html")
+            if os.path.isfile(index):
+                return self._send_file(index, "text/html; charset=utf-8")
+            return self._send_json({"error": "手机 App 尚未构建(npm run build:mobile)"}, 404)
+        if path.startswith("/m/"):
+            base = os.path.abspath(MOBILE_APP_DIR)
+            rel = path[len("/m/"):]
+            fp = os.path.normpath(os.path.join(base, rel))
+            if (fp == base or fp.startswith(base + os.sep)) and os.path.isfile(fp):
+                return self._send_file(fp, _static_mime(fp))
+            if not os.path.splitext(rel)[1]:
+                index = os.path.join(base, "index.html")
+                if os.path.isfile(index):
+                    return self._send_file(index, "text/html; charset=utf-8")
+            return self._send_json({"error": "not found"}, 404)
         if path in ("/app", "/app/"):
             # React 新界面入口(Electron 与浏览器共用)
             return self._send_file(os.path.join(STATIC_DIR, "app", "index.html"),
@@ -1218,7 +1456,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if not self._guard():
+            return
         parsed = urlparse(self.path)
+        if parsed.path == "/api/mobile/pair/start":
+            return self._api_mobile_pair_start()
+        if parsed.path == "/api/mobile/pair/confirm":
+            return self._api_mobile_pair_confirm()
+        if parsed.path == "/api/mobile/devices/revoke":
+            return self._api_mobile_revoke()
         if parsed.path == "/api/download":
             return self._api_download()
         if parsed.path == "/api/snapshot_start":
@@ -1361,12 +1607,16 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": "not found"}, 404)
 
     def do_PUT(self):
+        if not self._guard():
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/api/sources":
             return self._api_update_source()
         self._send_json({"error": "not found"}, 404)
 
     def do_DELETE(self):
+        if not self._guard():
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/api/sources":
             qs = parse_qs(parsed.query)

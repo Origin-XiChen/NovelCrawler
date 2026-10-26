@@ -30,6 +30,12 @@ if (!fs.existsSync(webEntry)) {
   process.exit(1);
 }
 
+const mobileEntry = path.join(ROOT, 'static', 'mobile-app', 'index.html');
+if (!fs.existsSync(mobileEntry)) {
+  console.error('[backend] 缺少 static/mobile-app/index.html，请先运行 npm run build:mobile');
+  process.exit(1);
+}
+
 const python = resolvePython();
 const version = spawnSync(python, ['-m', 'PyInstaller', '--version'], {
   windowsHide: true,
