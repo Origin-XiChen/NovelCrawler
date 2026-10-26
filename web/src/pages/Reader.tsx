@@ -1,25 +1,154 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Bookmark,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  ExternalLink,
   List,
+  Maximize2,
+  Minimize2,
   Minus,
   NotebookPen,
   Plus,
   Search,
+  Settings2,
   Trash2,
+  Volume2,
+  VolumeX,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { Modal } from '../components/Modal';
 import { useToast } from '../lib/toast';
 import type { ReaderChapter, ReaderMeta } from '../lib/types';
 
-type ReaderTheme = 'light' | 'sepia' | 'dark';
+type ReaderTheme = 'light' | 'green' | 'sepia' | 'dark';
 type ReaderMode = 'file' | 'online' | 'epub';
+
+interface ReaderLayout {
+  fs: number;
+  lh: number;
+  ff: string;
+  w: number;
+}
+
+const LAYOUT_KEY = 'novelist_reader_layout';
+const PAPER_KEY = 'novelist_paper';
+const READ_KEY = 'novelist_reading_progress';
+const READ_POS_KEY = 'novelist_reading_scroll';
+const READER_ZOOM_KEY = 'novelist_reader_zoom';
+const TTS_RATE_KEY = 'novelist_reader_tts_rate';
+const DEFAULT_LAYOUT: ReaderLayout = { fs: 17, lh: 2.05, ff: 'songti', w: 880 };
+const READER_FONTS = [
+  { key: 'songti', name: '宋体', css: '"Georgia", "STSong", "SimSun", serif' },
+  { key: 'kaiti', name: '楷体', css: '"KaiTi", "STKaiti", "楷体", serif' },
+  { key: 'heiti', name: '黑体', css: '"SimHei", "Heiti SC", "Microsoft YaHei", sans-serif' },
+  { key: 'dengxian', name: '等线', css: '"DengXian", "Microsoft YaHei", sans-serif' },
+  { key: 'yuanti', name: '圆体', css: '"Yuanti SC", "YouYuan", "幼圆", sans-serif' },
+  { key: 'fangsong', name: '仿宋', css: '"FangSong", "STFangsong", "仿宋", serif' },
+  { key: 'yahei', name: '微软雅黑', css: '"Microsoft YaHei", "微软雅黑", sans-serif' },
+];
+
+function loadLayout(): ReaderLayout {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') as Partial<ReaderLayout>;
+    return {
+      fs: Math.min(28, Math.max(13, Number(saved.fs) || DEFAULT_LAYOUT.fs)),
+      lh: [1.6, 1.9, 2.05, 2.2].includes(Number(saved.lh)) ? Number(saved.lh) : DEFAULT_LAYOUT.lh,
+      ff: READER_FONTS.some((font) => font.key === saved.ff) ? String(saved.ff) : DEFAULT_LAYOUT.ff,
+      w: [720, 880, 1080].includes(Number(saved.w)) ? Number(saved.w) : DEFAULT_LAYOUT.w,
+    };
+  } catch {
+    return { ...DEFAULT_LAYOUT };
+  }
+}
+
+function loadTheme(): ReaderTheme {
+  try {
+    const paper = localStorage.getItem(PAPER_KEY);
+    if (paper === 'paper') return 'light';
+    if (paper === 'green' || paper === 'sepia') return paper;
+    if (paper === 'night') return 'dark';
+    const legacy = localStorage.getItem('reader-theme');
+    if (legacy === 'green' || legacy === 'sepia' || legacy === 'dark') return legacy;
+  } catch {
+    /* 存储不可用时使用默认纸色 */
+  }
+  return 'light';
+}
+
+function loadNumber(key: string, fallback: number, min: number, max: number): number {
+  const value = Number(localStorage.getItem(key));
+  return Number.isFinite(value) && value > 0 ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+function readScrollTop(key: string, ch: number): number {
+  try {
+    const all = JSON.parse(localStorage.getItem(READ_POS_KEY) || '{}') as Record<
+      string,
+      Record<string, number>
+    >;
+    return Number(all[key]?.[ch]) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeScrollTop(key: string, ch: number, top: number) {
+  try {
+    const all = JSON.parse(localStorage.getItem(READ_POS_KEY) || '{}') as Record<
+      string,
+      Record<string, number>
+    >;
+    const positions = all[key] || {};
+    positions[ch] = Math.max(0, Math.round(top));
+    all[key] = positions;
+    localStorage.setItem(READ_POS_KEY, JSON.stringify(all));
+  } catch {
+    /* 滚动记忆失败不影响阅读 */
+  }
+}
+
+function splitSpeech(text: string): string[] {
+  const sentences = text.match(/[^。！？!?；;\n]+[。！？!?；;\n]?/g) ?? [text];
+  const chunks: string[] = [];
+  let buffer = '';
+  for (const sentence of sentences) {
+    if (sentence.length > 900) {
+      if (buffer) {
+        chunks.push(buffer);
+        buffer = '';
+      }
+      for (let i = 0; i < sentence.length; i += 900) chunks.push(sentence.slice(i, i + 900));
+    } else if ((buffer + sentence).length > 900) {
+      chunks.push(buffer);
+      buffer = sentence;
+    } else {
+      buffer += sentence;
+    }
+  }
+  if (buffer.trim()) chunks.push(buffer);
+  return chunks.filter((chunk) => chunk.trim());
+}
+
+function pickChineseVoice(): SpeechSynthesisVoice | null {
+  if (!('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find(
+      (voice) =>
+        /zh[-_]CN/i.test(voice.lang) &&
+        /Huihui|Yaoyao|Xiaoxiao|Yunxi|Xiaoyi|Kangkang|Meijia/i.test(voice.name),
+    ) ||
+    voices.find((voice) => /^zh/i.test(voice.lang)) ||
+    null
+  );
+}
 
 interface Note {
   id: string;
@@ -94,18 +223,34 @@ export function ReaderPage() {
   const [noteSaving, setNoteSaving] = useState(false);
   const [selBubble, setSelBubble] = useState<{ quote: string; top: number; left: number } | null>(null);
   const [zoomImage, setZoomImage] = useState('');
-  const [fontScale, setFontScale] = useState(() => {
-    const saved = Number(localStorage.getItem('reader-font'));
-    return Number.isFinite(saved) && saved > 0 ? Math.min(1.6, Math.max(0.85, saved)) : 1;
-  });
-  const [theme, setTheme] = useState<ReaderTheme>(() => {
-    const saved = localStorage.getItem('reader-theme');
-    return saved === 'sepia' || saved === 'dark' ? saved : 'light';
-  });
+  const [imgScale, setImgScale] = useState(0);
+  const [imgNatural, setImgNatural] = useState({ w: 0, h: 0 });
+  const [layout, setLayout] = useState<ReaderLayout>(loadLayout);
+  const [theme, setTheme] = useState<ReaderTheme>(loadTheme);
+  const [zoom, setZoom] = useState(() => loadNumber(READER_ZOOM_KEY, 1, 0.6, 2));
+  const [ttsRate, setTtsRate] = useState(() => loadNumber(TTS_RATE_KEY, 1, 0.5, 2));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [immersive, setImmersive] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [scrollPercent, setScrollPercent] = useState(0);
   const seq = useRef(0);
   const contentRef = useRef<HTMLElement>(null);
   const htmlRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
   const pendingAnchor = useRef<{ id: string; ch: number } | null>(null);
+  const idxRef = useRef(idx);
+  const bookKeyRef = useRef(bookKey);
+  const posTimerRef = useRef<number | null>(null);
+  const suppressSaveRef = useRef(false);
+  const restoredKeyRef = useRef('');
+  const ttsGenRef = useRef(0);
+
+  useEffect(() => {
+    idxRef.current = idx;
+    bookKeyRef.current = bookKey;
+  }, [bookKey, idx]);
 
   // 旧版后端 /api/epub_meta 不返回 total,退回章节数
   const total = meta?.total ?? meta?.chapters.length ?? 0;
@@ -185,7 +330,17 @@ export function ReaderPage() {
         }
         if (cancelled) return;
         setMeta(next);
-        const saved = Number(localStorage.getItem(`reader:${bookKey}`) || 0);
+        let saved = Number(localStorage.getItem(`reader:${bookKey}`) || 0);
+        if (!saved) {
+          try {
+            saved = Number(
+              (JSON.parse(localStorage.getItem(READ_KEY) || '{}') as Record<string, number>)[bookKey] ||
+                0,
+            );
+          } catch {
+            saved = 0;
+          }
+        }
         const start =
           next.chapters.find((item) => item.idx === saved)?.idx ?? next.chapters[0]?.idx ?? 1;
         setIdx(start);
@@ -206,6 +361,8 @@ export function ReaderPage() {
     const id = ++seq.current;
     setChapterLoading(true);
     setSelBubble(null);
+    setScrollPercent(0);
+    contentRef.current?.scrollTo({ top: 0 });
     const load = async () => {
       try {
         let data: ReaderChapter;
@@ -225,8 +382,17 @@ export function ReaderPage() {
           html: data.html || undefined,
         });
         setLoadedIdx(idx);
-        localStorage.setItem(`reader:${bookKey}`, String(idx));
-        contentRef.current?.scrollTo({ top: 0 });
+        try {
+          localStorage.setItem(`reader:${bookKey}`, String(idx));
+          const progress = JSON.parse(localStorage.getItem(READ_KEY) || '{}') as Record<
+            string,
+            number
+          >;
+          progress[bookKey] = idx;
+          localStorage.setItem(READ_KEY, JSON.stringify(progress));
+        } catch {
+          /* 进度写入失败不影响阅读 */
+        }
       } catch (cause) {
         if (id !== seq.current) return;
         toast(cause instanceof Error ? cause.message : '章节加载失败', 'error');
@@ -254,13 +420,26 @@ export function ReaderPage() {
     void loadNotes();
   }, [loadNotes]);
 
+  const persistScroll = useCallback(
+    (ch = idxRef.current, top = contentRef.current?.scrollTop ?? 0) => {
+      const key = bookKeyRef.current;
+      if (key) writeScrollTop(key, ch, top);
+    },
+    [],
+  );
+
   const go = useCallback(
     (next: number) => {
       if (!total) return;
+      const target = Math.min(total, Math.max(1, next));
+      if (target === idxRef.current) return;
+      persistScroll();
       pendingAnchor.current = null;
-      setIdx(Math.min(total, Math.max(1, next)));
+      setScrollPercent(0);
+      setIdx(target);
+      contentRef.current?.scrollTo({ top: 0 });
     },
-    [total],
+    [persistScroll, total],
   );
 
   const jumpTo = useCallback(
@@ -273,31 +452,247 @@ export function ReaderPage() {
     [go],
   );
 
+  const stopSpeak = useCallback(() => {
+    ttsGenRef.current += 1;
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    setSpeaking(false);
+  }, []);
+
+  const toggleSpeak = useCallback(() => {
+    if (!('speechSynthesis' in window)) {
+      toast('当前环境不支持朗读', 'error');
+      return;
+    }
+    if (speaking) {
+      stopSpeak();
+      return;
+    }
+    const plain = (chapter?.html ? stripHtml(chapter.html) : chapter?.text || '').trim();
+    if (!plain) {
+      toast('本章暂无内容可朗读', 'info');
+      return;
+    }
+    const chunks = splitSpeech(plain);
+    const gen = ++ttsGenRef.current;
+    const voice = pickChineseVoice();
+    const speakAt = (index: number) => {
+      if (gen !== ttsGenRef.current) return;
+      if (index >= chunks.length) {
+        setSpeaking(false);
+        return;
+      }
+      const utterance = new SpeechSynthesisUtterance(chunks[index]);
+      if (voice) utterance.voice = voice;
+      utterance.lang = voice?.lang || 'zh-CN';
+      utterance.rate = ttsRate;
+      utterance.onend = () => speakAt(index + 1);
+      utterance.onerror = () => {
+        if (gen === ttsGenRef.current) setSpeaking(false);
+      };
+      window.speechSynthesis.speak(utterance);
+    };
+    window.speechSynthesis.cancel();
+    setSpeaking(true);
+    speakAt(0);
+  }, [chapter?.html, chapter?.text, speaking, stopSpeak, toast, ttsRate]);
+
+  useEffect(() => {
+    stopSpeak();
+  }, [idx, stopSpeak]);
+
+  useEffect(() => {
+    return () => {
+      ttsGenRef.current += 1;
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    const request = document.documentElement.requestFullscreen?.();
+    if (request) void request.catch(() => toast('当前环境不支持全屏', 'info'));
+  }, [toast]);
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    setSelBubble(null);
+    const root = contentRef.current;
+    if (!root) return;
+    const max = root.scrollHeight - root.clientHeight;
+    setScrollPercent(max > 0 ? Math.min(100, Math.max(0, (root.scrollTop / max) * 100)) : 0);
+    if (suppressSaveRef.current) return;
+    if (posTimerRef.current) window.clearTimeout(posTimerRef.current);
+    posTimerRef.current = window.setTimeout(() => {
+      persistScroll(idxRef.current, root.scrollTop);
+    }, 250);
+  }, [persistScroll]);
+
+  useEffect(() => {
+    return () => {
+      if (posTimerRef.current) window.clearTimeout(posTimerRef.current);
+      const root = contentRef.current;
+      if (root && bookKeyRef.current) {
+        writeScrollTop(bookKeyRef.current, idxRef.current, root.scrollTop);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!settingsRef.current?.contains(event.target as Node)) setSettingsOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    return () => document.removeEventListener('pointerdown', onPointer);
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+      localStorage.setItem('reader-font', String(layout.fs));
+    } catch {
+      /* 存储不可用 */
+    }
+  }, [layout]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PAPER_KEY, theme === 'light' ? 'paper' : theme);
+      localStorage.setItem('reader-theme', theme);
+    } catch {
+      /* 存储不可用 */
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(READER_ZOOM_KEY, String(zoom));
+    } catch {
+      /* 存储不可用 */
+    }
+  }, [zoom]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TTS_RATE_KEY, String(ttsRate));
+    } catch {
+      /* 存储不可用 */
+    }
+  }, [ttsRate]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
-      // 焦点在按钮上时空格应触发按钮本身,避免翻页两次
-      if (event.key === ' ' && tag === 'BUTTON') return;
+      if (event.ctrlKey || event.metaKey) {
+        if (event.key.toLowerCase() === 'h') {
+          event.preventDefault();
+          setImmersive((value) => !value);
+          setSettingsOpen(false);
+        }
+        return;
+      }
+      if (event.key === 'Escape') {
+        if (settingsOpen) setSettingsOpen(false);
+        else if (zoomImage) setZoomImage('');
+        else if (tocOpen) setTocOpen(false);
+        else if (notesOpen) setNotesOpen(false);
+        else if (selBubble) setSelBubble(null);
+        else if (immersive) setImmersive(false);
+        return;
+      }
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
         go(idx - 1);
-      } else if (event.key === 'ArrowRight' || event.key === ' ') {
+      } else if (event.key === 'ArrowRight') {
         event.preventDefault();
         go(idx + 1);
+      } else if (event.key === 'PageDown' || (event.key === ' ' && (!event.shiftKey || tag !== 'BUTTON'))) {
+        if (event.key === ' ' && tag === 'BUTTON') return;
+        event.preventDefault();
+        const root = contentRef.current;
+        if (root) {
+          root.scrollBy({
+            top: root.clientHeight * 0.85 * (event.shiftKey ? -1 : 1),
+            behavior: 'smooth',
+          });
+        }
+      } else if (event.key === 'PageUp') {
+        event.preventDefault();
+        const root = contentRef.current;
+        if (root) root.scrollBy({ top: -root.clientHeight * 0.85, behavior: 'smooth' });
+      } else if (event.key === 'f' || event.key === 'F') {
+        toggleFullscreen();
+      } else if (event.key === 't' || event.key === 'T') {
+        setTocOpen((value) => !value);
+        setNotesOpen(false);
+        setSelBubble(null);
+      } else if (event.key === 'n' || event.key === 'N') {
+        setNotesOpen((value) => !value);
+        setTocOpen(false);
+        setSelBubble(null);
+      } else if (event.key === 'r' || event.key === 'R') {
+        toggleSpeak();
+      } else if (event.key === '+' || event.key === '=') {
+        setLayout((value) => ({ ...value, fs: Math.min(28, value.fs + 1) }));
+      } else if (event.key === '-') {
+        setLayout((value) => ({ ...value, fs: Math.max(13, value.fs - 1) }));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [go, idx]);
+  }, [
+    go,
+    idx,
+    immersive,
+    notesOpen,
+    selBubble,
+    settingsOpen,
+    tocOpen,
+    toggleFullscreen,
+    toggleSpeak,
+    zoomImage,
+  ]);
 
   useEffect(() => {
-    localStorage.setItem('reader-font', String(fontScale));
-  }, [fontScale]);
-  useEffect(() => {
-    localStorage.setItem('reader-theme', theme);
-  }, [theme]);
+    if (loadedIdx !== idx || !bookKey) return;
+    const root = contentRef.current;
+    if (!root) return;
+    const token = `${bookKey}\u0000${idx}`;
+    if (restoredKeyRef.current === token) return;
+    restoredKeyRef.current = token;
+    if (pendingAnchor.current?.ch === idx) return;
+    const top = readScrollTop(bookKey, idx);
+    if (!top) return;
+    suppressSaveRef.current = true;
+    let cancelled = false;
+    const apply = () => {
+      if (cancelled || !root.isConnected) return;
+      const max = Math.max(0, root.scrollHeight - root.clientHeight);
+      root.scrollTop = Math.min(top, max);
+      setScrollPercent(max > 0 ? Math.min(100, (root.scrollTop / max) * 100) : 0);
+    };
+    const raf = window.requestAnimationFrame(apply);
+    const timer = window.setTimeout(() => {
+      apply();
+      suppressSaveRef.current = false;
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+      suppressSaveRef.current = false;
+    };
+  }, [bookKey, chapter?.html, chapter?.text, idx, loadedIdx]);
 
   // EPUB 章节 HTML 注入后的增强:插图放大、脚注锚点、跨章节链接
   useEffect(() => {
@@ -310,6 +705,8 @@ export function ReaderPage() {
     const onImage = (event: Event) => {
       event.stopPropagation();
       const img = event.currentTarget as HTMLImageElement;
+      setImgScale(0);
+      setImgNatural({ w: 0, h: 0 });
       setZoomImage(img.currentSrc || img.src);
     };
     images.forEach((img) => img.addEventListener('click', onImage));
@@ -389,7 +786,14 @@ export function ReaderPage() {
     return meta.chapters.slice(start, start + TOC_WINDOW);
   }, [idx, meta, tocQuery]);
 
-  const percent = total ? Math.round((idx / total) * 100) : 0;
+  const percent = total
+    ? Math.min(100, Math.max(0, ((idx - 1 + scrollPercent / 100) / total) * 100))
+    : 0;
+  const readerFont = READER_FONTS.find((font) => font.key === layout.ff) ?? READER_FONTS[0];
+  const readerStyle = {
+    '--reader-width': `${layout.w}px`,
+    '--reader-font': readerFont.css,
+  } as CSSProperties;
   const title =
     meta?.title?.replace(/\.(txt|epub)$/i, '').replace(/\[[^\]]*\]$/, '') ||
     titleParam ||
@@ -479,6 +883,45 @@ export function ReaderPage() {
     }
   };
 
+  const copySelection = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('已复制选中文字', 'success');
+      setSelBubble(null);
+    } catch {
+      toast('复制失败', 'error');
+    }
+  };
+
+  const copyImage = async () => {
+    if (!zoomImage) return;
+    try {
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error('load'));
+        image.src = zoomImage;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      canvas.getContext('2d')?.drawImage(image, 0, 0);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('empty');
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      toast('图片已复制到剪贴板', 'success');
+    } catch {
+      toast('复制失败（可能受权限限制）', 'error');
+    }
+  };
+
+  const openImageOriginal = () => {
+    if (!zoomImage) return;
+    const opened = window.open(zoomImage, '_blank', 'noopener,noreferrer');
+    if (!opened) toast('无法打开新窗口', 'info');
+  };
+
   const captureSelection = () => {
     window.setTimeout(() => {
       const selection = window.getSelection();
@@ -497,12 +940,13 @@ export function ReaderPage() {
       setSelBubble({
         quote: text,
         top: Math.max(8, rect.top - 44),
-        left: Math.min(window.innerWidth - 116, Math.max(8, rect.left + rect.width / 2 - 52)),
+        left: Math.min(window.innerWidth - 156, Math.max(8, rect.left + rect.width / 2 - 74)),
       });
     }, 0);
   };
 
-  if (error) {    return (
+  if (error) {
+    return (
       <div className="page">
         <div className="empty" style={{ paddingTop: 80 }}>
           <div className="empty__icon">
@@ -525,8 +969,11 @@ export function ReaderPage() {
   }
 
   return (
-    <div className={`reader reader--${theme}`}>
-      <header className="reader__bar">
+    <div
+      ref={rootRef}
+      className={`reader reader--${theme}${immersive ? ' reader--immersive' : ''}`}
+      style={readerStyle}
+    >      <header className="reader__bar">
         <button type="button" className="btn btn--ghost btn--sm" onClick={() => navigate(-1)}>
           <ArrowLeft size={15} />
           返回
@@ -579,33 +1026,181 @@ export function ReaderPage() {
             <button type="button" className={theme === 'light' ? 'is-on' : ''} onClick={() => setTheme('light')}>
               纸白
             </button>
+            <button type="button" className={theme === 'green' ? 'is-on' : ''} onClick={() => setTheme('green')}>
+              护眼
+            </button>
             <button type="button" className={theme === 'sepia' ? 'is-on' : ''} onClick={() => setTheme('sepia')}>
-              米黄
+              羊皮
             </button>
             <button type="button" className={theme === 'dark' ? 'is-on' : ''} onClick={() => setTheme('dark')}>
-              夜间
+              暗夜
             </button>
           </div>
           <div className="reader__font">
             <button
               type="button"
               className="btn btn--ghost btn--sm btn--icon"
-              onClick={() => setFontScale((value) => Math.max(0.85, Number((value - 0.05).toFixed(2))))}
-              disabled={fontScale <= 0.85}
+              onClick={() => setLayout((value) => ({ ...value, fs: Math.max(13, value.fs - 1) }))}
+              disabled={layout.fs <= 13}
+              title="减小字号"
               aria-label="减小字号"
             >
               <Minus size={14} />
             </button>
-            <span>{Math.round(fontScale * 100)}%</span>
+            <span>{layout.fs}px</span>
             <button
               type="button"
               className="btn btn--ghost btn--sm btn--icon"
-              onClick={() => setFontScale((value) => Math.min(1.6, Number((value + 0.05).toFixed(2))))}
-              disabled={fontScale >= 1.6}
+              onClick={() => setLayout((value) => ({ ...value, fs: Math.min(28, value.fs + 1) }))}
+              disabled={layout.fs >= 28}
+              title="增大字号"
               aria-label="增大字号"
             >
               <Plus size={14} />
             </button>
+          </div>
+          <button
+            type="button"
+            className={`btn btn--ghost btn--sm btn--icon${speaking ? ' is-on' : ''}`}
+            onClick={toggleSpeak}
+            title={speaking ? '停止朗读（R）' : '朗读本章（R）'}
+            aria-label={speaking ? '停止朗读' : '朗读本章'}
+            aria-pressed={speaking}
+          >
+            {speaking ? <VolumeX size={15} /> : <Volume2 size={15} />}
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm btn--icon"
+            onClick={toggleFullscreen}
+            title={fullscreen ? '退出全屏（F）' : '全屏（F）'}
+            aria-label={fullscreen ? '退出全屏' : '全屏'}
+          >
+            {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+          <div className="reader__settings-wrap" ref={settingsRef}>
+            <button
+              type="button"
+              className={`btn btn--ghost btn--sm btn--icon${settingsOpen ? ' is-on' : ''}`}
+              onClick={() => setSettingsOpen((value) => !value)}
+              title="阅读设置"
+              aria-label="阅读设置"
+              aria-expanded={settingsOpen}
+            >
+              <Settings2 size={15} />
+            </button>
+            {settingsOpen ? (
+              <div className="reader__settings" role="dialog" aria-label="阅读设置">
+                <div className="reader__settings-hd">
+                  <span>阅读设置</span>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm btn--icon"
+                    onClick={() => setSettingsOpen(false)}
+                    aria-label="关闭阅读设置"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+                <div className="reader__settings-label">纸张主题</div>
+                <div className="reader__chip-row">
+                  {(
+                    [
+                      ['light', '纸白'],
+                      ['green', '护眼'],
+                      ['sepia', '羊皮'],
+                      ['dark', '暗夜'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={theme === key ? 'is-on' : ''}
+                      onClick={() => setTheme(key)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="reader__settings-label">字体</div>
+                <div className="reader__font-grid">
+                  {READER_FONTS.map((font) => (
+                    <button
+                      key={font.key}
+                      type="button"
+                      className={layout.ff === font.key ? 'is-on' : ''}
+                      style={{ fontFamily: font.css }}
+                      onClick={() => setLayout((value) => ({ ...value, ff: font.key }))}
+                    >
+                      {font.name}
+                    </button>
+                  ))}
+                </div>
+                <div className="reader__settings-label">行距</div>
+                <div className="reader__chip-row">
+                  {[1.6, 1.9, 2.2].map((lineHeight) => (
+                    <button
+                      key={lineHeight}
+                      type="button"
+                      className={layout.lh === lineHeight ? 'is-on' : ''}
+                      onClick={() => setLayout((value) => ({ ...value, lh: lineHeight }))}
+                    >
+                      {lineHeight.toFixed(1)}×
+                    </button>
+                  ))}
+                </div>
+                <div className="reader__settings-label">版心宽度</div>
+                <div className="reader__chip-row">
+                  {[
+                    [720, '窄'],
+                    [880, '中'],
+                    [1080, '宽'],
+                  ].map(([width, label]) => (
+                    <button
+                      key={width}
+                      type="button"
+                      className={layout.w === width ? 'is-on' : ''}
+                      onClick={() => setLayout((value) => ({ ...value, w: Number(width) }))}
+                    >
+                      {label} {width}
+                    </button>
+                  ))}
+                </div>
+                <div className="reader__settings-label">屏幕缩放</div>
+                <div className="reader__stepper">
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm btn--icon"
+                    onClick={() => setZoom((value) => Math.max(0.6, Math.round((value - 0.1) * 10) / 10))}
+                    aria-label="缩小屏幕"
+                  >
+                    <Minus size={13} />
+                  </button>
+                  <span>{Math.round(zoom * 100)}%</span>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm btn--icon"
+                    onClick={() => setZoom((value) => Math.min(2, Math.round((value + 0.1) * 10) / 10))}
+                    aria-label="放大屏幕"
+                  >
+                    <Plus size={13} />
+                  </button>
+                </div>
+                <div className="reader__settings-label">朗读语速</div>
+                <div className="reader__chip-row">
+                  {[0.8, 1, 1.2, 1.5].map((rate) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      className={ttsRate === rate ? 'is-on' : ''}
+                      onClick={() => setTtsRate(rate)}
+                    >
+                      {rate}×
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </header>
@@ -771,14 +1366,22 @@ export function ReaderPage() {
         <main
           className="reader__main"
           ref={contentRef}
-          onScroll={() => setSelBubble(null)}
+          onScroll={handleScroll}
+          style={{ zoom } as CSSProperties}
         >
           <article
             className="reader__paper"
-            style={{ fontSize: `${16 * fontScale}px` }}
+            style={{ fontSize: `${layout.fs}px`, lineHeight: layout.lh, fontFamily: 'var(--reader-font)' }}
             onMouseUp={captureSelection}
             onTouchEnd={captureSelection}
             onKeyUp={captureSelection}
+            onClick={(event) => {
+              const target = event.target as HTMLElement;
+              if (target.closest('a, img, button, input, textarea, select')) return;
+              if (window.getSelection()?.toString().trim()) return;
+              setImmersive((value) => !value);
+              setSettingsOpen(false);
+            }}
           >
             <h1 className="reader__title">
               {chapter?.title || meta?.chapters.find((item) => item.idx === idx)?.title}
@@ -817,16 +1420,20 @@ export function ReaderPage() {
       </div>
 
       {selBubble ? (
-        <button
-          type="button"
+        <div
           className="reader__sel-bubble"
           style={{ top: selBubble.top, left: selBubble.left }}
           onMouseDown={(event) => event.preventDefault()}
-          onClick={() => openNote(selBubble.quote)}
         >
-          <NotebookPen size={14} />
-          记笔记
-        </button>
+          <button type="button" onClick={() => openNote(selBubble.quote)}>
+            <NotebookPen size={14} />
+            记笔记
+          </button>
+          <button type="button" onClick={() => void copySelection(selBubble.quote)}>
+            <Copy size={14} />
+            复制
+          </button>
+        </div>
       ) : null}
 
       <Modal
@@ -852,10 +1459,8 @@ export function ReaderPage() {
       >
         <div className="reader__note-form">
           <div className="reader__note-form-meta">
-            第 {noteChapter} 章
-            {meta?.chapters.find((item) => item.idx === noteChapter)?.title
-              ? ` · ${meta.chapters.find((item) => item.idx === noteChapter)?.title}`
-              : ''}
+            {meta?.chapters.find((item) => item.idx === noteChapter)?.title ||
+              `第 ${noteChapter} 章`}
           </div>
           {noteQuote ? <div className="reader__note-quote">「{noteQuote}」</div> : null}
           <textarea
@@ -878,15 +1483,82 @@ export function ReaderPage() {
       <Modal
         title="插图"
         open={Boolean(zoomImage)}
-        onClose={() => setZoomImage('')}
+        onClose={() => {
+          setZoomImage('');
+          setImgScale(0);
+        }}
         width={920}
         footer={
-          <button type="button" className="btn" onClick={() => setZoomImage('')}>
-            关闭
-          </button>
+          <div className="reader__zoom-tools">
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setImgScale((value) => Math.max(0.1, Math.round(((value || 1) - 0.25) * 100) / 100))}
+            >
+              <ZoomOut size={14} />
+              缩小
+            </button>
+            <span className="reader__zoom-pct">{imgScale > 0 ? `${Math.round(imgScale * 100)}%` : '适应'}</span>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setImgScale((value) => Math.min(8, Math.round(((value || 1) + 0.25) * 100) / 100))}
+            >
+              <ZoomIn size={14} />
+              放大
+            </button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setImgScale(1)}>
+              1:1
+            </button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setImgScale(0)}>
+              适应
+            </button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyImage()}>
+              <Copy size={14} />
+              复制
+            </button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={openImageOriginal}>
+              <ExternalLink size={14} />
+              原图
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => {
+                setZoomImage('');
+                setImgScale(0);
+              }}
+            >
+              关闭
+            </button>
+          </div>
         }
       >
-        {zoomImage ? <img className="reader__zoom-img" src={zoomImage} alt="插图" /> : null}
+        <div className="reader__zoom-stage">
+          {zoomImage ? (
+            <img
+              className="reader__zoom-img"
+              src={zoomImage}
+              alt="插图"
+              style={
+                imgScale > 0 && imgNatural.w > 0
+                  ? {
+                      width: `${Math.round(imgNatural.w * imgScale)}px`,
+                      maxWidth: 'none',
+                      maxHeight: 'none',
+                    }
+                  : undefined
+              }
+              onLoad={(event) =>
+                setImgNatural({
+                  w: event.currentTarget.naturalWidth,
+                  h: event.currentTarget.naturalHeight,
+                })
+              }
+              onDoubleClick={() => setImgScale((value) => (value > 0 ? 0 : 1))}
+            />
+          ) : null}
+        </div>
       </Modal>
     </div>
   );

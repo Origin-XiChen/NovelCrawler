@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   BookOpen,
@@ -8,11 +17,18 @@ import {
   FolderOpen,
   Images,
   Library,
+  List,
+  Maximize2,
+  Minimize2,
+  Moon,
   RefreshCw,
   Search,
   Star,
+  Sun,
   Trash2,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { apiGet, apiPost, coverSrc } from '../lib/api';
 import { formatBytes, relativeTime } from '../lib/format';
@@ -68,6 +84,25 @@ interface ReaderState {
   error: string;
 }
 
+interface PdfChapterMeta {
+  pdf?: string;
+  chapter?: string | number;
+  title?: string;
+  label?: string;
+  first_page?: number;
+  last_page?: number;
+}
+
+interface PdfVolume {
+  volume?: string;
+  chapters?: PdfChapterMeta[];
+}
+
+interface PdfMeta {
+  mode?: string;
+  volumes?: PdfVolume[];
+}
+
 interface PdfState {
   title: string;
   file: string;
@@ -75,6 +110,121 @@ interface PdfState {
   page: number;
   loading: boolean;
   error: string;
+  files: string[];
+  meta: PdfMeta | null;
+}
+
+const CREAD_KEY = 'novelist_comic_progress';
+const PDFREAD_KEY = 'novelist_comic_pdf_progress';
+const COMIC_ZOOM_KEY = 'novelist_comic_zoom';
+const COMIC_FIT_KEY = 'novelist_comic_fit';
+const COMIC_DARK_KEY = 'novelist_comic_dark';
+const PDF_CONT_KEY = 'novelist_pdf_continuous';
+
+function loadStoredNumber(key: string, fallback: number, min: number, max: number): number {
+  const value = Number(localStorage.getItem(key));
+  return Number.isFinite(value) && value > 0 ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+function loadStoredFlag(key: string): boolean {
+  return localStorage.getItem(key) === '1';
+}
+
+function savedComicIndex(variant: Variant, chapters: ComicChapter[]): number {
+  try {
+    const all = JSON.parse(localStorage.getItem(CREAD_KEY) || '{}') as Record<
+      string,
+      Record<string, number>
+    >;
+    const saved = Number(all[variant.source]?.[variant.id]) || 0;
+    if (saved >= 1 && saved <= chapters.length) return saved - 1;
+  } catch {
+    /* 忽略损坏的进度记录 */
+  }
+  return 0;
+}
+
+function saveComicIndex(variant: Variant, index: number) {
+  try {
+    const all = JSON.parse(localStorage.getItem(CREAD_KEY) || '{}') as Record<
+      string,
+      Record<string, number>
+    >;
+    const books = all[variant.source] || {};
+    books[variant.id] = index + 1;
+    all[variant.source] = books;
+    localStorage.setItem(CREAD_KEY, JSON.stringify(all));
+  } catch {
+    /* 忽略写入失败 */
+  }
+}
+
+function pdfPageImage(title: string, file: string, page: number): string {
+  return `/api/comic_page_image?title=${encodeURIComponent(title)}&file=${encodeURIComponent(file)}&page=${page}`;
+}
+
+interface RetryableImageProps {
+  src: string;
+  alt: string;
+  className?: string;
+  onRetryBlocked?: () => void;
+  onClick?: () => void;
+}
+
+function RetryableImage({ src, alt, className, onRetryBlocked, onClick }: RetryableImageProps) {
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setAttempt(0);
+    setFailed(false);
+  }, [src]);
+  if (failed) {
+    return (
+      <div
+        className={`comic-reader__retry${className ? ` ${className}` : ''}`}
+        role="button"
+        tabIndex={0}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRetryBlocked?.();
+          setFailed(false);
+          setAttempt((value) => value + 1);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            event.stopPropagation();
+            setFailed(false);
+            setAttempt((value) => value + 1);
+          }
+        }}
+      >
+        {alt}加载失败，点击重试
+      </div>
+    );
+  }
+  const finalSrc = attempt > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${attempt}` : src;
+  return (
+    <img
+      className={className}
+      src={finalSrc}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onClick={
+        onClick
+          ? (event) => {
+              event.stopPropagation();
+              onClick();
+            }
+          : undefined
+      }
+      onError={() => {
+        if (attempt < 2) setAttempt((value) => value + 1);
+        else setFailed(true);
+      }}
+    />
+  );
 }
 
 const TABS: { value: Tab; label: string }[] = [
@@ -132,10 +282,14 @@ function mergeGroups(previous: Group[], items: ComicSearchItem[]): Group[] {
 
 function chapterLabel(chapter: ComicChapter | undefined, index: number): string {
   if (!chapter) return `第 ${index + 1} 话`;
+  const title = (chapter.title || '').trim();
+  const compactTitle = title.replace(/\s+/g, '');
   const bits: string[] = [];
-  if (chapter.volume !== undefined && chapter.volume !== '') bits.push(`第${chapter.volume}卷`);
-  if (chapter.chapter !== undefined && chapter.chapter !== '') bits.push(`第${chapter.chapter}话`);
-  if (chapter.title) bits.push(chapter.title);
+  const volume = chapter.volume === undefined ? '' : String(chapter.volume).replace(/\s+/g, '');
+  const number = chapter.chapter === undefined ? '' : String(chapter.chapter).replace(/\s+/g, '');
+  if (volume && !compactTitle.includes(`第${volume}卷`)) bits.push(`第${chapter.volume}卷`);
+  if (number && !compactTitle.includes(`第${number}话`)) bits.push(`第${chapter.chapter}话`);
+  if (title) bits.push(title);
   return bits.join(' ') || `第 ${index + 1} 话`;
 }
 
@@ -193,12 +347,43 @@ export function ComicsPage() {
   const [favoriteBusy, setFavoriteBusy] = useState('');
   const [fileBusy, setFileBusy] = useState<Record<string, string>>({});
   const [removeTarget, setRemoveTarget] = useState<ComicShelfEntry | null>(null);
+  const [readerZoom, setReaderZoom] = useState(() =>
+    loadStoredNumber(COMIC_ZOOM_KEY, 1, 0.5, 2),
+  );
+  const [readerFit, setReaderFit] = useState<'width' | 'page'>(() =>
+    localStorage.getItem(COMIC_FIT_KEY) === 'page' ? 'page' : 'width',
+  );
+  const [readerDark, setReaderDark] = useState(() => loadStoredFlag(COMIC_DARK_KEY));
+  const [readerTwoPage, setReaderTwoPage] = useState(false);
+  const [readerTocOpen, setReaderTocOpen] = useState(false);
+  const [readerUiHidden, setReaderUiHidden] = useState(false);
+  const [readerPageNo, setReaderPageNo] = useState(1);
+  const [readerBodyHeight, setReaderBodyHeight] = useState(0);
+  const [comicThumbs, setComicThumbs] = useState<
+    Record<number, { loading?: boolean; urls?: string[]; error?: string }>
+  >({});
+  const [pdfZoom, setPdfZoom] = useState(1);
+  const [pdfTwoPage, setPdfTwoPage] = useState(false);
+  const [pdfContinuous, setPdfContinuous] = useState(
+    () => localStorage.getItem(PDF_CONT_KEY) !== '0',
+  );
+  const [pdfTocOpen, setPdfTocOpen] = useState(false);
+  const [pdfUiHidden, setPdfUiHidden] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const searchSeq = useRef(0);
   const detailSeq = useRef(0);
   const readerSeq = useRef(0);
+  const pdfSeq = useRef(0);
   const readerBodyRef = useRef<HTMLDivElement>(null);
+  const pdfBodyRef = useRef<HTMLDivElement>(null);
+  const lastReaderKeyRef = useRef('');
+  const lastPdfKeyRef = useRef('');
+  const pdfAligningRef = useRef(false);
+  const pdfAlignStopRef = useRef<() => void>(() => undefined);
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
   const navigate = useNavigate();
 
   const enabledSources = useMemo(() => sources.filter((source) => source.enabled), [sources]);
@@ -269,25 +454,295 @@ export function ComicsPage() {
     if (tab === 'shelf') void loadShelf(true);
   }, [loadFiles, loadShelf, tab]);
 
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    const request = document.documentElement.requestFullscreen?.();
+    if (request) void request.catch(() => toastRef.current('当前环境不支持全屏', 'info'));
+  }, []);
+
   useEffect(() => {
-    if (reader) readerBodyRef.current?.scrollTo({ top: 0 });
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!reader) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      setReaderZoom((value) =>
+        Math.min(2, Math.max(0.5, Math.round((value + (event.deltaY < 0 ? 0.1 : -0.1)) * 10) / 10)),
+      );
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => window.removeEventListener('wheel', onWheel);
   }, [reader]);
+
+  useEffect(() => {
+    if (!reader) {
+      lastReaderKeyRef.current = '';
+      return;
+    }
+    const key = `${reader.variant.source}:${reader.variant.id}:${reader.index}`;
+    if (lastReaderKeyRef.current !== key) {
+      lastReaderKeyRef.current = key;
+      readerBodyRef.current?.scrollTo({ top: 0 });
+      setReaderPageNo(1);
+    }
+  }, [reader]);
+
+  useEffect(() => {
+    if (!reader) return;
+    saveComicIndex(reader.variant, reader.index);
+  }, [reader?.index, reader?.variant.id, reader?.variant.source]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMIC_ZOOM_KEY, String(readerZoom));
+    } catch {
+      /* 存储不可用 */
+    }
+  }, [readerZoom]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMIC_FIT_KEY, readerFit);
+    } catch {
+      /* 存储不可用 */
+    }
+  }, [readerFit]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMIC_DARK_KEY, readerDark ? '1' : '0');
+    } catch {
+      /* 存储不可用 */
+    }
+  }, [readerDark]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PDF_CONT_KEY, pdfContinuous ? '1' : '0');
+    } catch {
+      /* 存储不可用 */
+    }
+  }, [pdfContinuous]);
+
+  useEffect(() => {
+    if (!reader || readerFit !== 'page') return;
+    const body = readerBodyRef.current;
+    if (!body) return;
+    const update = () => setReaderBodyHeight(body.clientHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [reader, readerFit]);
+
+  useEffect(() => {
+    if (!reader || reader.loading || !reader.pages.length) {
+      setReaderPageNo(1);
+      return;
+    }
+    const body = readerBodyRef.current;
+    if (!body) return;
+    const visible = new Map<number, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const page = Number((entry.target as HTMLElement).dataset.page || 0);
+          if (entry.isIntersecting) visible.set(page, entry.intersectionRatio);
+          else visible.delete(page);
+        }
+        if (visible.size) setReaderPageNo(Math.min(...visible.keys()));
+      },
+      { root: body, threshold: [0, 0.25, 0.5] },
+    );
+    body.querySelectorAll<HTMLElement>('[data-page]').forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
+  }, [reader?.pages, readerFit, readerTwoPage, readerZoom]);
+
+  useEffect(() => {
+    if (!pdfReader || pdfReader.loading || !pdfReader.pages) return;
+    try {
+      localStorage.setItem(
+        PDFREAD_KEY,
+        JSON.stringify({
+          title: pdfReader.title,
+          file: pdfReader.file,
+          page: pdfReader.page,
+          ts: Date.now(),
+        }),
+      );
+    } catch {
+      /* 存储不可用 */
+    }
+  }, [pdfReader?.file, pdfReader?.loading, pdfReader?.page, pdfReader?.pages, pdfReader?.title]);
+
+  const startPdfAlign = useCallback((targetPage: number) => {
+    pdfAlignStopRef.current();
+    const initialBody = pdfBodyRef.current;
+    if (!initialBody) return () => undefined;
+    let stopped = false;
+    let interval = 0;
+    let timer = 0;
+    let stableSince = 0;
+    let lastSignature = '';
+    const finish = (aligned: boolean) => {
+      if (stopped) return;
+      stopped = true;
+      pdfAligningRef.current = false;
+      window.clearInterval(interval);
+      window.clearTimeout(timer);
+      pdfAlignStopRef.current = () => undefined;
+      const body = pdfBodyRef.current;
+      body?.removeEventListener('wheel', stop);
+      body?.removeEventListener('touchmove', stop);
+      body?.removeEventListener('pointerdown', stop);
+      window.removeEventListener('keydown', stop);
+      if (aligned) {
+        setPdfReader((prev) =>
+          prev && prev.page !== targetPage ? { ...prev, page: targetPage } : prev,
+        );
+      }
+    };
+    const stop = () => finish(false);
+    const align = () => {
+      if (stopped) return;
+      const body = pdfBodyRef.current;
+      const wrap = body?.querySelector<HTMLElement>(`[data-page="${targetPage}"]`);
+      if (!body || !wrap) return;
+      const delta = wrap.getBoundingClientRect().top - body.getBoundingClientRect().top;
+      if (Math.abs(delta) > 1) {
+        body.scrollTop += delta;
+        stableSince = 0;
+        return;
+      }
+      const targetImg = wrap.querySelector('img');
+      if (targetImg && !targetImg.complete) {
+        // 图片未就绪时页高不可信，等它撑开后再判定对齐
+        stableSince = 0;
+        lastSignature = '';
+        return;
+      }
+      const signature = `${wrap.offsetTop}|${body.scrollHeight}`;
+      if (signature !== lastSignature) {
+        lastSignature = signature;
+        stableSince = window.performance.now();
+      } else if (stableSince && window.performance.now() - stableSince > 450) {
+        finish(true);
+      }
+    };
+    pdfAligningRef.current = true;
+    pdfAlignStopRef.current = stop;
+    initialBody.addEventListener('wheel', stop, { passive: true });
+    initialBody.addEventListener('touchmove', stop, { passive: true });
+    initialBody.addEventListener('pointerdown', stop);
+    window.addEventListener('keydown', stop);
+    interval = window.setInterval(align, 80);
+    timer = window.setTimeout(() => finish(false), 6000);
+    align();
+    return stop;
+  }, []);
+
+  useEffect(() => {
+    if (!pdfReader || pdfReader.loading || pdfReader.error || !pdfContinuous) {
+      lastPdfKeyRef.current = '';
+      pdfAlignStopRef.current();
+      return;
+    }
+    const key = `${pdfReader.title}|${pdfReader.file}|cont`;
+    if (lastPdfKeyRef.current === key) return;
+    if (!pdfBodyRef.current) return;
+    lastPdfKeyRef.current = key;
+    startPdfAlign(pdfReader.page);
+    return () => {
+      pdfAlignStopRef.current();
+    };
+  }, [
+    pdfContinuous,
+    pdfReader?.error,
+    pdfReader?.file,
+    pdfReader?.loading,
+    pdfReader?.title,
+    startPdfAlign,
+  ]);
+
+  useEffect(() => {
+    if (!pdfTocOpen) return;
+    const timer = window.setTimeout(() => {
+      const active = document.querySelector('.comic-reader__drawer .is-current');
+      active?.scrollIntoView({ block: 'center' });
+    }, 30);
+    return () => window.clearTimeout(timer);
+  }, [pdfTocOpen]);
+
+  useEffect(() => {
+    if (!reader || !readerTocOpen) return;
+    const timer = window.setTimeout(() => {
+      const active = document.querySelector('.comic-reader__drawer .is-current');
+      active?.scrollIntoView({ block: 'center' });
+    }, 30);
+    return () => window.clearTimeout(timer);
+  }, [reader, readerTocOpen]);
 
   useEffect(() => {
     if (!reader) return;
     const onKey = (event: KeyboardEvent) => {
       const tag = (event.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (event.ctrlKey || event.metaKey) {
+        if (event.key.toLowerCase() === 'h') {
+          event.preventDefault();
+          setReaderUiHidden((value) => !value);
+        }
+        return;
+      }
       if (event.key === 'Escape') {
-        setReader(null);
+        if (readerTocOpen) setReaderTocOpen(false);
+        else if (readerUiHidden) setReaderUiHidden(false);
+        else {
+          setReader(null);
+          setReaderTocOpen(false);
+          setReaderUiHidden(false);
+          setComicThumbs({});
+        }
         return;
       }
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
         void showChapter(reader.index - 1);
-      } else if (event.key === 'ArrowRight' || event.key === ' ') {
+      } else if (event.key === 'ArrowRight') {
         event.preventDefault();
         void showChapter(reader.index + 1);
+      } else if (event.key === 'PageDown' || event.key === ' ') {
+        if (event.key === ' ' && tag === 'BUTTON') return;
+        event.preventDefault();
+        const body = readerBodyRef.current;
+        if (body) {
+          body.scrollBy({
+            top: body.clientHeight * 0.85 * (event.shiftKey ? -1 : 1),
+            behavior: 'smooth',
+          });
+        }
+      } else if (event.key === 'PageUp') {
+        event.preventDefault();
+        readerBodyRef.current?.scrollBy({ top: -readerBodyRef.current.clientHeight * 0.85, behavior: 'smooth' });
+      } else if (event.key === 'f' || event.key === 'F') {
+        toggleFullscreen();
+      } else if (event.key === 't' || event.key === 'T') {
+        setReaderTocOpen((value) => !value);
+        setReaderUiHidden(false);
+      } else if (event.key === 'd' || event.key === 'D') {
+        setReaderDark((value) => !value);
+      } else if (event.key === '+' || event.key === '=') {
+        setReaderZoom((value) => Math.min(2, Math.round((value + 0.1) * 10) / 10));
+      } else if (event.key === '-') {
+        setReaderZoom((value) => Math.max(0.5, Math.round((value - 0.1) * 10) / 10));
       }
     };
     window.addEventListener('keydown', onKey);
@@ -299,21 +754,71 @@ export function ComicsPage() {
     const onKey = (event: KeyboardEvent) => {
       const tag = (event.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (event.key === 'Escape') setPdfReader(null);
+      if (event.ctrlKey || event.metaKey) {
+        if (event.key.toLowerCase() === 'h') {
+          event.preventDefault();
+          setPdfUiHidden((value) => !value);
+        }
+        return;
+      }
+      if (event.key === 'Escape') {
+        if (pdfTocOpen) setPdfTocOpen(false);
+        else if (pdfUiHidden) setPdfUiHidden(false);
+        else {
+          setPdfReader(null);
+          setPdfTocOpen(false);
+          setPdfUiHidden(false);
+        }
+        return;
+      }
       if (!pdfReader.pages) return;
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
-        setPdfReader((prev) => (prev && prev.page > 1 ? { ...prev, page: prev.page - 1 } : prev));
+        if (pdfContinuous) {
+          pdfBodyRef.current?.scrollBy({ top: -window.innerHeight * 0.85, behavior: 'smooth' });
+        } else {
+          const step = pdfTwoPage ? 2 : 1;
+          setPdfReader((prev) =>
+            prev && prev.page > 1 ? { ...prev, page: Math.max(1, prev.page - step) } : prev,
+          );
+        }
       } else if (event.key === 'ArrowRight') {
         event.preventDefault();
-        setPdfReader((prev) =>
-          prev && prev.page < prev.pages ? { ...prev, page: prev.page + 1 } : prev,
-        );
+        if (pdfContinuous) {
+          pdfBodyRef.current?.scrollBy({ top: window.innerHeight * 0.85, behavior: 'smooth' });
+        } else {
+          const step = pdfTwoPage ? 2 : 1;
+          setPdfReader((prev) =>
+            prev && prev.page < prev.pages
+              ? { ...prev, page: Math.min(prev.pages, prev.page + step) }
+              : prev,
+          );
+        }
+      } else if (event.key === ' ' || event.key === 'PageDown') {
+        if (event.key === ' ' && tag === 'BUTTON') return;
+        event.preventDefault();
+        pdfBodyRef.current?.scrollBy({ top: window.innerHeight * 0.85, behavior: 'smooth' });
+      } else if (event.key === 'PageUp') {
+        event.preventDefault();
+        pdfBodyRef.current?.scrollBy({ top: -window.innerHeight * 0.85, behavior: 'smooth' });
+      } else if (event.key === 'f' || event.key === 'F') {
+        toggleFullscreen();
+      } else if (event.key === 't' || event.key === 'T') {
+        setPdfTocOpen((value) => !value);
+        setPdfUiHidden(false);
+      } else if (event.key === 'c' || event.key === 'C') {
+        setPdfContinuous((value) => !value);
+        setPdfTwoPage(false);
+        lastPdfKeyRef.current = '';
+      } else if (event.key === '+' || event.key === '=') {
+        setPdfZoom((value) => Math.min(3, Math.round((value + 0.2) * 10) / 10));
+      } else if (event.key === '-') {
+        setPdfZoom((value) => Math.max(0.4, Math.round((value - 0.2) * 10) / 10));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [pdfReader]);
+  });
 
   const isFavorite = (variant: Variant) =>
     shelf.some((entry) => entry.source === variant.source && entry.comic_id === variant.id);
@@ -415,6 +920,7 @@ export function ComicsPage() {
     const chapter = chapters[index];
     if (!chapter) return;
     const seq = ++readerSeq.current;
+    saveComicIndex(variant, index);
     setReader((prev) =>
       prev ? { ...prev, index, pages: [], loading: true, error: '' } : prev,
     );
@@ -440,20 +946,65 @@ export function ComicsPage() {
     }
   };
 
-  const openOnlineReader = (variant: Variant, chapters: ComicChapter[], index = 0) => {
+  const openOnlineReader = (variant: Variant, chapters: ComicChapter[], index?: number) => {
     if (!chapters.length) {
       toast('暂无可阅读的话', 'error');
       return;
     }
+    const target = index ?? savedComicIndex(variant, chapters);
     setDetail(null);
     setPdfReader(null);
-    setReader({ variant, chapters, index, pages: [], loading: true, error: '' });
-    void fetchPages(variant, chapters, index);
+    setReaderTocOpen(false);
+    setReaderUiHidden(false);
+    setReaderTwoPage(false);
+    setComicThumbs({});
+    lastReaderKeyRef.current = '';
+    setReader({ variant, chapters, index: target, pages: [], loading: true, error: '' });
+    void fetchPages(variant, chapters, target);
   };
 
   const showChapter = async (index: number) => {
     if (!reader || index < 0 || index >= reader.chapters.length) return;
     await fetchPages(reader.variant, reader.chapters, index);
+  };
+
+  const jumpComicChapter = (index: number) => {
+    setReaderTocOpen(false);
+    void showChapter(index);
+  };
+
+  const toggleComicThumb = async (index: number) => {
+    if (!reader) return;
+    const chapter = reader.chapters[index];
+    if (!chapter) return;
+    if (comicThumbs[index]) {
+      setComicThumbs((prev) => {
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      });
+      return;
+    }
+    setComicThumbs((prev) => ({ ...prev, [index]: { loading: true } }));
+    try {
+      const data = await apiGet<{ urls: string[] }>('/api/comic_pages', {
+        source: reader.variant.source,
+        comic_id: reader.variant.id,
+        ep_id: chapter.id,
+      });
+      setComicThumbs((prev) => ({
+        ...prev,
+        [index]: { loading: false, urls: (data.urls ?? []).slice(0, 12) },
+      }));
+    } catch (error) {
+      setComicThumbs((prev) => ({
+        ...prev,
+        [index]: {
+          loading: false,
+          error: error instanceof Error ? error.message : '缩略图加载失败',
+        },
+      }));
+    }
   };
 
   const readVariant = async (variant: Variant) => {
@@ -465,7 +1016,7 @@ export function ComicsPage() {
       if (data.error) throw new Error(data.error);
       const chapters = data.chapters ?? [];
       if (!chapters.length) throw new Error('暂无章节');
-      openOnlineReader(variant, chapters, 0);
+      openOnlineReader(variant, chapters);
     } catch (error) {
       toast(error instanceof Error ? error.message : '打开失败', 'error');
     } finally {
@@ -478,22 +1029,212 @@ export function ComicsPage() {
   };
 
   const openPdf = async (title: string, file: string) => {
+    const seq = ++pdfSeq.current;
     setReader(null);
-    setPdfReader({ title, file, pages: 0, page: 1, loading: true, error: '' });
+    setPdfTocOpen(false);
+    setPdfUiHidden(false);
+    setPdfTwoPage(false);
+    lastPdfKeyRef.current = '';
+    setPdfReader({ title, file, pages: 0, page: 1, loading: true, error: '', files: [], meta: null });
     try {
-      const data = await apiGet<{ num_pages: number }>('/api/comic_page_meta', { title, file });
+      const metaData = await apiGet<{ meta?: PdfMeta | null; pdfs?: string[] }>(
+        '/api/comic_pdf_meta',
+        { title, file: file || '' },
+      );
+      if (seq !== pdfSeq.current) return;
+      const files = metaData.pdfs ?? [];
+      const actualFile = file || files[0] || '';
+      if (!actualFile) throw new Error('未找到 PDF 文件');
+      let savedPage = 1;
+      try {
+        const saved = JSON.parse(localStorage.getItem(PDFREAD_KEY) || 'null') as
+          | { title?: string; file?: string; page?: number }
+          | null;
+        if (saved && saved.title === title && saved.file === actualFile) {
+          savedPage = Math.max(1, Number(saved.page) || 1);
+        }
+      } catch {
+        /* 忽略损坏的进度记录 */
+      }
+      const pageData = await apiGet<{ num_pages: number }>('/api/comic_page_meta', {
+        title,
+        file: actualFile,
+      });
+      if (seq !== pdfSeq.current) return;
+      const pages = pageData.num_pages ?? 0;
       setPdfReader((prev) =>
-        prev && prev.title === title && prev.file === file
-          ? { ...prev, pages: data.num_pages ?? 0, loading: false }
+        prev && prev.title === title
+          ? {
+              ...prev,
+              file: actualFile,
+              pages,
+              page: Math.min(pages || 1, savedPage),
+              loading: false,
+              files,
+              meta: metaData.meta ?? null,
+            }
           : prev,
       );
     } catch (error) {
+      if (seq !== pdfSeq.current) return;
       setPdfReader((prev) =>
         prev
           ? { ...prev, loading: false, error: error instanceof Error ? error.message : 'PDF 解析失败' }
           : prev,
       );
     }
+  };
+
+  const pdfMetaChapters = useMemo(
+    () => (pdfReader?.meta?.volumes ?? []).flatMap((volume) => volume.chapters ?? []),
+    [pdfReader?.meta],
+  );
+
+  const changeReaderZoom = (delta: number) => {
+    setReaderZoom((value) =>
+      Math.min(2, Math.max(0.5, Math.round((value + delta) * 10) / 10)),
+    );
+  };
+
+  const changePdfZoom = (delta: number) => {
+    setPdfZoom((value) => Math.min(3, Math.max(0.4, Math.round((value + delta) * 10) / 10)));
+  };
+
+  const pdfGotoPage = (page: number) => {
+    if (!pdfReader) return;
+    const target = Math.min(pdfReader.pages || 1, Math.max(1, page));
+    setPdfReader((prev) => (prev ? { ...prev, page: target } : prev));
+    if (pdfContinuous) {
+      startPdfAlign(target);
+    }
+  };
+
+  const jumpPdfPage = (page?: number) => {
+    setPdfTocOpen(false);
+    pdfGotoPage(page || 1);
+  };
+
+  const pdfStepPage = (direction: number) => {
+    if (!pdfReader) return;
+    if (pdfContinuous) {
+      const body = pdfBodyRef.current;
+      const distance = (body?.clientHeight || window.innerHeight) * 0.9;
+      body?.scrollBy({ top: distance * direction, behavior: 'smooth' });
+      return;
+    }
+    const step = pdfTwoPage ? 2 : 1;
+    const next = pdfReader.page + direction * step;
+    if (next < 1) {
+      toast('已经是第一页', 'info');
+      return;
+    }
+    if (pdfReader.pages && next > pdfReader.pages) {
+      toast('已经是最后一页', 'info');
+      return;
+    }
+    setPdfReader((prev) =>
+      prev ? { ...prev, page: Math.min(prev.pages || next, Math.max(1, next)) } : prev,
+    );
+  };
+
+  const pdfPrevChapter = () => {
+    if (!pdfReader) return;
+    const index = pdfReader.files.indexOf(pdfReader.file);
+    if (index > 0) {
+      void openPdf(pdfReader.title, pdfReader.files[index - 1]);
+      return;
+    }
+    if (pdfReader.meta?.mode === 'merged' && pdfMetaChapters.length) {
+      const current = pdfMetaChapters.findIndex(
+        (chapter) =>
+          (chapter.first_page || 1) <= pdfReader.page &&
+          pdfReader.page <= (chapter.last_page || Number.POSITIVE_INFINITY),
+      );
+      if (current > 0) {
+        pdfGotoPage(pdfMetaChapters[current - 1].first_page || 1);
+        return;
+      }
+    }
+    toast('已经是第一话', 'info');
+  };
+
+  const pdfNextChapter = () => {
+    if (!pdfReader) return;
+    const index = pdfReader.files.indexOf(pdfReader.file);
+    if (index >= 0 && index < pdfReader.files.length - 1) {
+      void openPdf(pdfReader.title, pdfReader.files[index + 1]);
+      return;
+    }
+    if (pdfReader.meta?.mode === 'merged' && pdfMetaChapters.length) {
+      const current = pdfMetaChapters.findIndex(
+        (chapter) =>
+          (chapter.first_page || 1) <= pdfReader.page &&
+          pdfReader.page <= (chapter.last_page || Number.POSITIVE_INFINITY),
+      );
+      if (current >= 0 && current < pdfMetaChapters.length - 1) {
+        pdfGotoPage(pdfMetaChapters[current + 1].first_page || 1);
+        return;
+      }
+    }
+    toast('已经是最后一话', 'info');
+  };
+
+  const togglePdfContinuous = () => {
+    const next = !pdfContinuous;
+    setPdfContinuous(next);
+    if (next) setPdfTwoPage(false);
+    lastPdfKeyRef.current = '';
+    toast(next ? '连续滚动：滚轮直接往下看' : '已切回单页模式', 'info');
+  };
+
+  const togglePdfTwoPage = () => {
+    const next = !pdfTwoPage;
+    setPdfTwoPage(next);
+    if (next && pdfContinuous) setPdfContinuous(false);
+    lastPdfKeyRef.current = '';
+  };
+
+  const handleComicBodyClick = () => {
+    if (readerTocOpen) {
+      setReaderTocOpen(false);
+      return;
+    }
+    setReaderUiHidden((value) => !value);
+  };
+
+  const handlePdfScroll = () => {
+    if (!pdfContinuous || pdfAligningRef.current) return;
+    const body = pdfBodyRef.current;
+    if (!body) return;
+    const nodes = body.querySelectorAll<HTMLElement>('[data-page]');
+    if (!nodes.length) return;
+    const bodyRect = body.getBoundingClientRect();
+    let current = Number(nodes[0].dataset.page || 1);
+    if (body.scrollTop + body.clientHeight >= body.scrollHeight - 4) {
+      current = Number(nodes[nodes.length - 1].dataset.page || current);
+    } else {
+      const probe = bodyRect.top + body.clientHeight * 0.3;
+      nodes.forEach((node) => {
+        if (node.getBoundingClientRect().top <= probe) {
+          current = Number(node.dataset.page || current);
+        }
+      });
+    }
+    setPdfReader((prev) => (prev && prev.page !== current ? { ...prev, page: current } : prev));
+  };
+
+  const handlePdfBodyClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!pdfReader || pdfReader.loading || pdfReader.error) return;
+    if ((event.target as HTMLElement).closest('button, a')) return;
+    const x = event.clientX;
+    const width = window.innerWidth;
+    if (pdfContinuous) {
+      if (x < width * 0.33) pdfStepPage(-1);
+      else if (x > width * 0.66) pdfStepPage(1);
+      return;
+    }
+    if (x < width * 0.33) pdfStepPage(-1);
+    else if (x > width * 0.66) pdfStepPage(1);
   };
 
   const startSearch = async (event?: FormEvent) => {
@@ -720,6 +1461,15 @@ export function ComicsPage() {
   const shelfHint = shelfLoading
     ? '正在加载收藏…'
     : `${shelf.length} 部收藏 · ${shelf.filter((entry) => (entry.checked_chapters ?? 0) > (entry.have ?? 0)).length} 部有更新`;
+
+  const visiblePdfPages =
+    pdfReader && !pdfReader.loading && !pdfReader.error && pdfReader.pages
+      ? pdfContinuous
+        ? Array.from({ length: pdfReader.pages }, (_, index) => index + 1)
+        : pdfTwoPage
+          ? [pdfReader.page, pdfReader.page + 1].filter((page) => page <= pdfReader.pages)
+          : [pdfReader.page]
+      : [];
 
   return (
     <div className="page">
@@ -1218,7 +1968,7 @@ export function ComicsPage() {
                   <button
                     type="button"
                     className="btn btn--sm"
-                    onClick={() => openOnlineReader(detail.variant, detail.chapters, 0)}
+                    onClick={() => openOnlineReader(detail.variant, detail.chapters)}
                     disabled={!detail.chapters.length}
                   >
                     <BookOpen size={14} />
@@ -1370,9 +2120,32 @@ export function ComicsPage() {
       </Modal>
 
       {reader ? (
-        <div className="comic-reader" role="dialog" aria-modal="true" aria-label="漫画阅读器">
+        <div
+          className={`comic-reader${readerDark ? ' comic-reader--dark' : ''}${
+            readerUiHidden ? ' comic-reader--ui-hidden' : ''
+          }`}
+          style={
+            {
+              '--czoom': String(readerZoom),
+              '--cfit': `${Math.max(200, Math.floor((readerBodyHeight || window.innerHeight) / readerZoom))}px`,
+            } as CSSProperties
+          }
+          role="dialog"
+          aria-modal="true"
+          aria-label="漫画阅读器"
+        >
           <header className="comic-reader__bar">
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setReader(null)}>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => {
+                setReader(null);
+                setReaderTocOpen(false);
+                setReaderUiHidden(false);
+                setComicThumbs({});
+              }}
+              title="关闭(Esc)"
+            >
               <X size={15} />
               关闭
             </button>
@@ -1383,14 +2156,95 @@ export function ComicsPage() {
               <div className="comic-reader__sub">
                 {chapterLabel(reader.chapters[reader.index], reader.index)}
                 {reader.chapters.length ? ` · ${reader.index + 1}/${reader.chapters.length}` : ''}
+                {reader.pages.length ? ` · 本话 ${reader.pages.length} 页` : ''}
               </div>
             </div>
             <div className="comic-reader__controls">
+              <div className="comic-reader__group">
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm btn--icon"
+                  onClick={() => changeReaderZoom(-0.1)}
+                  disabled={readerZoom <= 0.5}
+                  title="缩小(Ctrl+-)"
+                  aria-label="缩小"
+                >
+                  <ZoomOut size={14} />
+                </button>
+                <span className="comic-reader__zoomval">{Math.round(readerZoom * 100)}%</span>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm btn--icon"
+                  onClick={() => changeReaderZoom(0.1)}
+                  disabled={readerZoom >= 2}
+                  title="放大(Ctrl++)"
+                  aria-label="放大"
+                >
+                  <ZoomIn size={14} />
+                </button>
+              </div>
+              <div className="comic-reader__group">
+                <button
+                  type="button"
+                  className={`btn btn--ghost btn--sm${readerFit === 'width' ? ' is-on' : ''}`}
+                  onClick={() => setReaderFit('width')}
+                  title="图片适应宽度"
+                >
+                  适宽
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn--ghost btn--sm${readerFit === 'page' ? ' is-on' : ''}`}
+                  onClick={() => setReaderFit('page')}
+                  title="整页显示(不超出一屏)"
+                >
+                  整页
+                </button>
+              </div>
+              <button
+                type="button"
+                className={`btn btn--ghost btn--sm${readerDark ? ' is-on' : ''}`}
+                onClick={() => setReaderDark((value) => !value)}
+                title="夜读模式(D)"
+              >
+                {readerDark ? <Sun size={14} /> : <Moon size={14} />}
+                夜读
+              </button>
+              <button
+                type="button"
+                className={`btn btn--ghost btn--sm${readerTocOpen ? ' is-on' : ''}`}
+                onClick={() => {
+                  setReaderTocOpen((value) => !value);
+                  setReaderUiHidden(false);
+                }}
+                title="目录(T)"
+              >
+                <List size={14} />
+                目录
+              </button>
+              <button
+                type="button"
+                className={`btn btn--ghost btn--sm${readerTwoPage ? ' is-on' : ''}`}
+                onClick={() => setReaderTwoPage((value) => !value)}
+                title="双页并排(宽窗口生效)"
+              >
+                双页
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm btn--icon"
+                onClick={toggleFullscreen}
+                title="全屏(F)"
+                aria-label="全屏"
+              >
+                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
               <button
                 type="button"
                 className="btn btn--ghost btn--sm"
                 onClick={() => void showChapter(reader.index - 1)}
                 disabled={reader.index <= 0 || reader.loading}
+                title="上一话(←)"
               >
                 <ChevronLeft size={15} />
                 上一话
@@ -1400,46 +2254,203 @@ export function ComicsPage() {
                 className="btn btn--ghost btn--sm"
                 onClick={() => void showChapter(reader.index + 1)}
                 disabled={reader.index >= reader.chapters.length - 1 || reader.loading}
+                title="下一话(→)"
               >
                 下一话
                 <ChevronRight size={15} />
               </button>
             </div>
           </header>
-          <div className="comic-reader__body" ref={readerBodyRef}>
+          <div
+            className={`comic-reader__body${readerTwoPage ? ' is-two-page' : ''}${
+              readerFit === 'page' ? ' is-fit-page' : ''
+            }`}
+            ref={readerBodyRef}
+            onClick={handleComicBodyClick}
+          >
             {reader.loading ? (
               <div className="comic-reader__loading">
                 <span className="spinner" /> 正在加载图片…
               </div>
             ) : reader.error ? (
-              <div className="comic-reader__loading">{reader.error}</div>
+              <div className="comic-reader__loading">
+                <div>{reader.error}</div>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void showChapter(reader.index);
+                  }}
+                >
+                  <RefreshCw size={14} />
+                  重新加载
+                </button>
+              </div>
             ) : reader.pages.length ? (
               <>
                 {reader.pages.map((url, index) => (
-                  <img
-                    key={`${index}-${url}`}
-                    className="comic-reader__page"
-                    src={comicImage(url, reader.variant.source)}
-                    alt={`第 ${index + 1} 页`}
-                    loading="lazy"
-                    onError={(event) => event.currentTarget.classList.add('is-broken')}
-                  />
+                  <div
+                    className="comic-reader__page-wrap"
+                    data-page={index + 1}
+                    key={`${reader.index}-${index}-${url}`}
+                  >
+                    <RetryableImage
+                      className="comic-reader__page"
+                      src={comicImage(url, reader.variant.source)}
+                      alt={`第 ${index + 1} 页`}
+                      onRetryBlocked={() =>
+                        toastRef.current(`第 ${index + 1} 页加载失败，点击占位可重试`, 'error')
+                      }
+                    />
+                  </div>
                 ))}
                 <div className="comic-reader__end">
-                  本话结束 · 共 {reader.pages.length} 页
+                  <span>本话结束 · 共 {reader.pages.length} 页</span>
+                  <span className="comic-reader__end-actions">
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void showChapter(reader.index - 1);
+                      }}
+                      disabled={reader.index <= 0 || reader.loading}
+                    >
+                      <ChevronLeft size={14} />
+                      上一话
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void showChapter(reader.index + 1);
+                      }}
+                      disabled={reader.index >= reader.chapters.length - 1 || reader.loading}
+                    >
+                      下一话
+                      <ChevronRight size={14} />
+                    </button>
+                  </span>
                 </div>
               </>
             ) : (
               <div className="comic-reader__loading">这一话没有可用图片。</div>
             )}
           </div>
+          {readerTocOpen ? (
+            <aside className="comic-reader__drawer" onClick={(event) => event.stopPropagation()}>
+              <div className="comic-reader__drawer-head">
+                <List size={15} />
+                目录
+                <span className="comic-reader__drawer-count">
+                  {reader.index + 1} / {reader.chapters.length}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm btn--icon"
+                  onClick={() => setReaderTocOpen(false)}
+                  aria-label="关闭目录"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="comic-reader__toc">
+                {reader.chapters.map((chapter, index) => {
+                  const thumbs = comicThumbs[index];
+                  return (
+                    <div key={`${chapter.id}-${index}`} className="comic-reader__toc-group">
+                      <div
+                        className={`comic-reader__toc-item${
+                          index === reader.index ? ' is-current' : ''
+                        }`}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => jumpComicChapter(index)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            jumpComicChapter(index);
+                          }
+                        }}
+                      >
+                        <span className="comic-reader__toc-label">
+                          {index + 1}. {chapterLabel(chapter, index)}
+                        </span>
+                        <button
+                          type="button"
+                          className={`comic-reader__thumb-btn${thumbs ? ' is-on' : ''}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void toggleComicThumb(index);
+                          }}
+                          title="缩略图预览"
+                          aria-label="缩略图预览"
+                        >
+                          <Images size={13} />
+                        </button>
+                      </div>
+                      {thumbs ? (
+                        <div className="comic-reader__thumbs">
+                          {thumbs.loading ? (
+                            <span className="comic-reader__thumbs-state">加载缩略图…</span>
+                          ) : thumbs.error ? (
+                            <span className="comic-reader__thumbs-state">{thumbs.error}</span>
+                          ) : thumbs.urls?.length ? (
+                            thumbs.urls.map((url, thumbIndex) => (
+                              <button
+                                key={`${thumbIndex}-${url}`}
+                                type="button"
+                                onClick={() => jumpComicChapter(index)}
+                                title={`第 ${thumbIndex + 1} 页`}
+                              >
+                                <RetryableImage
+                                  src={comicImage(url, reader.variant.source)}
+                                  alt={`第 ${thumbIndex + 1} 页`}
+                                />
+                              </button>
+                            ))
+                          ) : (
+                            <span className="comic-reader__thumbs-state">本话无图片</span>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </aside>
+          ) : null}
+          {!reader.loading && !reader.error && reader.pages.length ? (
+            <div className="comic-reader__hud">
+              {Math.min(readerPageNo, reader.pages.length)} / {reader.pages.length}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
       {pdfReader ? (
-        <div className="comic-reader" role="dialog" aria-modal="true" aria-label="PDF 阅读器">
+        <div
+          className={`comic-reader comic-reader--pdf${
+            pdfUiHidden ? ' comic-reader--ui-hidden' : ''
+          }`}
+          style={{ '--pzoom': String(pdfZoom) } as CSSProperties}
+          role="dialog"
+          aria-modal="true"
+          aria-label="PDF 阅读器"
+        >
           <header className="comic-reader__bar">
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setPdfReader(null)}>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => {
+                setPdfReader(null);
+                setPdfTocOpen(false);
+                setPdfUiHidden(false);
+              }}
+              title="关闭(Esc)"
+            >
               <X size={15} />
               关闭
             </button>
@@ -1449,48 +2460,279 @@ export function ComicsPage() {
               </div>
               <div className="comic-reader__sub" title={pdfReader.file}>
                 {pdfReader.file}
+                {pdfReader.pages ? ` · ${pdfReader.page}/${pdfReader.pages} 页` : ''}
               </div>
             </div>
             <div className="comic-reader__controls">
+              <div className="comic-reader__group">
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm btn--icon"
+                  onClick={() => changePdfZoom(-0.2)}
+                  disabled={pdfZoom <= 0.4}
+                  title="缩小"
+                  aria-label="缩小"
+                >
+                  <ZoomOut size={14} />
+                </button>
+                <span className="comic-reader__zoomval">{Math.round(pdfZoom * 100)}%</span>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm btn--icon"
+                  onClick={() => changePdfZoom(0.2)}
+                  disabled={pdfZoom >= 3}
+                  title="放大"
+                  aria-label="放大"
+                >
+                  <ZoomIn size={14} />
+                </button>
+              </div>
               <button
                 type="button"
-                className="btn btn--ghost btn--sm"
-                onClick={() => setPdfReader((prev) => (prev ? { ...prev, page: prev.page - 1 } : prev))}
-                disabled={pdfReader.page <= 1}
+                className={`btn btn--ghost btn--sm${pdfTocOpen ? ' is-on' : ''}`}
+                onClick={() => {
+                  setPdfTocOpen((value) => !value);
+                  setPdfUiHidden(false);
+                }}
+                title="卷/目录(T)"
               >
-                <ChevronLeft size={15} />
-                上一页
+                <List size={14} />
+                卷/目录
               </button>
-              <span className="comic-reader__count">
-                {pdfReader.page} / {pdfReader.pages || '—'}
-              </span>
               <button
                 type="button"
                 className="btn btn--ghost btn--sm"
-                onClick={() => setPdfReader((prev) => (prev ? { ...prev, page: prev.page + 1 } : prev))}
-                disabled={!pdfReader.pages || pdfReader.page >= pdfReader.pages}
+                onClick={pdfPrevChapter}
+                title="上一话(←)"
+                disabled={pdfReader.loading || Boolean(pdfReader.error)}
               >
-                下一页
-                <ChevronRight size={15} />
+                <ChevronLeft size={14} />
+                上一话
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={pdfNextChapter}
+                title="下一话(→)"
+                disabled={pdfReader.loading || Boolean(pdfReader.error)}
+              >
+                下一话
+                <ChevronRight size={14} />
+              </button>
+              <div className="comic-reader__group">
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm btn--icon"
+                  onClick={() => pdfStepPage(-1)}
+                  disabled={pdfReader.loading || Boolean(pdfReader.error)}
+                  title="上一页"
+                  aria-label="上一页"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <span className="comic-reader__zoomval">
+                  {pdfReader.page} / {pdfReader.pages || '—'}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm btn--icon"
+                  onClick={() => pdfStepPage(1)}
+                  disabled={pdfReader.loading || Boolean(pdfReader.error)}
+                  title="下一页"
+                  aria-label="下一页"
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+              <button
+                type="button"
+                className={`btn btn--ghost btn--sm${pdfTwoPage ? ' is-on' : ''}`}
+                onClick={togglePdfTwoPage}
+                disabled={pdfContinuous}
+                title="双页并排"
+              >
+                双页
+              </button>
+              <button
+                type="button"
+                className={`btn btn--ghost btn--sm${pdfContinuous ? ' is-on' : ''}`}
+                onClick={togglePdfContinuous}
+                title="连续滚动(C)"
+              >
+                连续
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm btn--icon"
+                onClick={toggleFullscreen}
+                title="全屏(F)"
+                aria-label="全屏"
+              >
+                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </button>
             </div>
           </header>
-          <div className="comic-reader__body">
+          <div
+            className={`comic-reader__body comic-reader__body--pdf${
+              pdfTwoPage ? ' is-two-page' : ''
+            }${pdfContinuous ? ' is-continuous' : ''}`}
+            ref={pdfBodyRef}
+            onScroll={handlePdfScroll}
+            onClick={handlePdfBodyClick}
+          >
             {pdfReader.loading ? (
               <div className="comic-reader__loading">
                 <span className="spinner" /> 正在解析 PDF…
               </div>
             ) : pdfReader.error ? (
-              <div className="comic-reader__loading">{pdfReader.error}</div>
+              <div className="comic-reader__loading">
+                <div>{pdfReader.error}</div>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void openPdf(pdfReader.title, pdfReader.file);
+                  }}
+                >
+                  <RefreshCw size={14} />
+                  重新加载
+                </button>
+              </div>
+            ) : !pdfReader.pages ? (
+              <div className="comic-reader__loading">PDF 没有可用页面。</div>
             ) : (
-              <img
-                key={pdfReader.page}
-                className="comic-reader__page comic-reader__page--pdf"
-                src={`/api/comic_page_image?title=${encodeURIComponent(pdfReader.title)}&file=${encodeURIComponent(pdfReader.file)}&page=${pdfReader.page}`}
-                alt={`第 ${pdfReader.page} 页`}
-              />
+              visiblePdfPages.map((page) => (
+                <div
+                  className={`comic-reader__pdf-wrap${
+                    page === pdfReader.page && !pdfContinuous ? ' is-current' : ''
+                  }`}
+                  data-page={page}
+                  key={`${pdfReader.file}-${page}`}
+                >
+                  <div className="comic-reader__pdf-no">第 {page} 页</div>
+                  <RetryableImage
+                    className="comic-reader__page comic-reader__page--pdf"
+                    src={pdfPageImage(pdfReader.title, pdfReader.file, page)}
+                    alt={`第 ${page} 页`}
+                    onRetryBlocked={() =>
+                      toastRef.current(`第 ${page} 页加载失败，点击占位可重试`, 'error')
+                    }
+                  />
+                </div>
+              ))
             )}
           </div>
+          {pdfTocOpen ? (
+            <aside className="comic-reader__drawer" onClick={(event) => event.stopPropagation()}>
+              <div className="comic-reader__drawer-head">
+                <List size={15} />
+                卷 / 目录
+                <span className="comic-reader__drawer-count">
+                  {pdfReader.page} / {pdfReader.pages || '—'}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm btn--icon"
+                  onClick={() => setPdfTocOpen(false)}
+                  aria-label="关闭目录"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="comic-reader__toc">
+                {pdfReader.meta?.volumes?.length ? (
+                  pdfReader.meta.volumes.map((volume, volumeIndex) => (
+                    <div key={`${volumeIndex}-${volume.volume || ''}`} className="comic-reader__toc-group">
+                      <div className="comic-reader__toc-vol">
+                        第 {volumeIndex + 1} 卷
+                        {volume.volume ? ` · ${volume.volume}` : ''}
+                      </div>
+                      {(volume.chapters ?? []).map((chapter, chapterIndex) => {
+                        const perChapter = pdfReader.meta?.mode === 'per_chapter';
+                        const active = perChapter
+                          ? chapter.pdf === pdfReader.file
+                          : (chapter.first_page || 1) <= pdfReader.page &&
+                            pdfReader.page <=
+                              (chapter.last_page || Number.POSITIVE_INFINITY);
+                        const label = chapter.chapter
+                          ? `第${chapter.chapter}话`
+                          : chapter.label ||
+                            chapter.pdf?.replace(/\.pdf$/i, '') ||
+                            `第 ${chapterIndex + 1} 话`;
+                        return (
+                          <div
+                            key={`${chapterIndex}-${chapter.pdf || chapter.first_page || ''}`}
+                            className={`comic-reader__toc-item${active ? ' is-current' : ''}`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              if (perChapter && chapter.pdf) {
+                                setPdfTocOpen(false);
+                                void openPdf(pdfReader.title, chapter.pdf);
+                              } else {
+                                jumpPdfPage(chapter.first_page || 1);
+                              }
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== 'Enter' && event.key !== ' ') return;
+                              event.preventDefault();
+                              if (perChapter && chapter.pdf) {
+                                setPdfTocOpen(false);
+                                void openPdf(pdfReader.title, chapter.pdf);
+                              } else {
+                                jumpPdfPage(chapter.first_page || 1);
+                              }
+                            }}
+                          >
+                            <span className="comic-reader__toc-label">
+                              {label}
+                              {chapter.title ? ` ${chapter.title}` : ''}
+                            </span>
+                            <span className="comic-reader__toc-hint">
+                              {perChapter ? '' : `第 ${chapter.first_page || 1} 页`}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))
+                ) : pdfReader.files.length ? (
+                  pdfReader.files.map((file) => (
+                    <div
+                      key={file}
+                      className={`comic-reader__toc-item${
+                        file === pdfReader.file ? ' is-current' : ''
+                      }`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        setPdfTocOpen(false);
+                        void openPdf(pdfReader.title, file);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        setPdfTocOpen(false);
+                        void openPdf(pdfReader.title, file);
+                      }}
+                    >
+                      <span className="comic-reader__toc-label">
+                        {file.replace(/\.pdf$/i, '')}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="comic-reader__toc-empty">暂无目录信息</div>
+                )}
+              </div>
+            </aside>
+          ) : null}
+          {pdfContinuous && pdfReader.pages && !pdfReader.error ? (
+            <div className="comic-reader__hud">
+              {pdfReader.page} / {pdfReader.pages}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

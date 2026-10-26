@@ -31,11 +31,11 @@
 | ⚙️ **可扩展** | GUI 设置面板管理书源(启用/停用/测试/添加) |
 | 📦 **桌面安装版** | Electron + React 新界面,内置 Python 后端,NSIS 安装包,启动自动检查 GitHub Releases 更新 |
 
-## 桌面版（Electron，v1.1.0）
+## 桌面版（Electron，v1.1.1）
 
 > 普通用户推荐安装版,不需要本机安装 Python。
 
-1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Setup-1.1.0.exe`。
+1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Setup-1.1.1.exe`。
 2. 双击安装。当前构建未做代码签名,Windows SmartScreen 若拦截,点「更多信息」→「仍要运行」。
 3. 启动后自动检查新版本;也可在「设置 → 版本更新」手动检查、下载并重启安装。
 
