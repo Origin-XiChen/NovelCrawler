@@ -590,12 +590,21 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
   const out: LocalBook[] = [];
   for (const item of manifest.books || []) {
     if (!item?.file || !item?.data) continue;
-    // 新版包里有 data/书名.json;早先的包只有 .js(window.__SNAP_DATA__[..] = {...})。
-    // 后者去掉前缀同样能取到 JSON,保证旧包也能导。
-    const jsonEntry = zip.file(item.data);
-    const jsEntry = jsonEntry ? null : zip.file(item.data.replace(/\.json$/i, '.js'));
-    const entry = jsonEntry || jsEntry;
+    // 包内文件名有两套写法:ZIP 条目用原始文件名,manifest 里是 URL 编码的。
+    // 两种都试一遍(并且 .json / .js 都试),否则会「一条都没匹配上」。
+    let entry: JSZip.JSZipObject | null = null;
+    const seen = new Set<string>();
+    for (const base of [item.data, decodeURIComponent(item.data)]) {
+      for (const name of [base, base.replace(/\.json$/i, '.js')]) {
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        const hit = zip.file(name);
+        if (hit) { entry = hit; break; }
+      }
+      if (entry) break;
+    }
     if (!entry) continue;
+    const jsonEntry = /\.json$/i.test((entry as JSZip.JSZipObject).name);
     let chapters: { title?: string; text?: string; html?: string }[] = [];
     try {
       const raw = await entry.async('string');
@@ -651,6 +660,56 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
     await saveChunk(id, blob);
     await putBook(book);
     out.push(book);
+  }
+  // 兜底:manifest 缺 books 或名字全对不上时,直接扫 data/ 目录按文件名恢复。
+  // 宁可多一次遍历,也不要让用户看到「没有可导入的书」。
+  if (!out.length) {
+    const names = Object.keys(zip.files).filter(
+      (n) => /^data\/[^/]+\.(json|js)$/i.test(n) && !zip.files[n].dir,
+    );
+    const grouped = new Map<string, string>();
+    for (const n of names) {
+      const key = n.replace(/\.(json|js)$/i, '');
+      if (!grouped.has(key) || /\.json$/i.test(n)) grouped.set(key, n);
+    }
+    for (const [key, entryName] of grouped) {
+      const entry = zip.file(entryName);
+      if (!entry) continue;
+      const raw = await entry.async('string');
+      const text = /\.json$/i.test(entryName) ? raw : raw.slice(raw.lastIndexOf('=') + 1).replace(/;\s*$/, '');
+      let chapters: { title?: string; text?: string; html?: string }[] = [];
+      try {
+        chapters = ((JSON.parse(text) as { chapters?: typeof chapters }).chapters) || [];
+      } catch {
+        continue;
+      }
+      if (!chapters.length) continue;
+      const fileName = decodeURIComponent(key.split('/').pop() || key);
+      const id = `novel:${fileName}`;
+      const bundle = new JSZip();
+      bundle.file('manifest.json', JSON.stringify({
+        bundle_version: 1, kind: 'txt', id, title: fileName.replace(/\.[^.]+$/, ''),
+        file: fileName,
+        chapters: chapters.map((c, i) => ({ idx: i + 1, title: c.title || `第${i + 1}章` })),
+        total: chapters.length, assets: {}, cover: '', src_size: 0, src_mtime: 0,
+        generated: Math.floor(Date.now() / 1000),
+      }));
+      chapters.forEach((c, i) => {
+        bundle.file(`chapters/${String(i + 1).padStart(5, '0')}.json`, JSON.stringify(c));
+      });
+      const blob = await bundle.generateAsync({ type: 'blob' });
+      const book: LocalBook = {
+        id, kind: 'novel', format: 'txt', title: fileName.replace(/\.[^.]+$/, ''),
+        file: fileName, total: chapters.length,
+        chapters: chapters.map((c, i) => ({ idx: i + 1, title: c.title || `第${i + 1}章` })),
+        assets: {}, coverArc: '', size: blob.size, srcMtime: 0, srcSize: 0,
+        importedAt: Date.now(), serverId: '', serverName: '本地导入', origin: 'import',
+      };
+      releaseZip(id);
+      await saveChunk(id, blob);
+      await putBook(book);
+      out.push(book);
+    }
   }
   return out;
 }

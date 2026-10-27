@@ -138,12 +138,21 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 4. **把 `sshd/host_rsa` 提交进公开仓库**：主机私钥泄露，只能 `filter-branch` 重写历史 + 重新生成。
 5. **本机跑 `electron-builder` 打包 NSIS**：稳定报 `Exit code: 2`，产物只有 0.4MB。**这是已知现象，不要在本机排查**，交给 CI。
 6. **在真实数据目录跑冒烟**：污染 `config.json` / 书架。一律 `NOVEL_DATA_DIR` 隔离。
+7. **本机 `electron-builder --win nsis` 必失败**（makensis 成功，随后运行安装包生成卸载器时报
+   「Error writing temporary file」）。本机自测改用 `npx electron-builder --win --dir`，
+   产出 `release/win-unpacked/NovelCrawler.exe` 直接运行；正式安装包一律交给 CI。
 
 ---
 
 ## §9 版本进度
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
+
+### 1.7.3 — 2026-10-27
+- 状态：已发布
+- 新增：离线包导入的兜底路径——条目名同时试「原始名 / URL 编码名」与 `.json/.js`，全对不上时直接扫 `data/` 目录按文件名恢复
+- 修复：导入整包报「离线包里没有可导入的书」（manifest 里是 URL 编码名、zip 条目是原始名，两边对不上）；生成端 json 命名与 manifest 对齐
+- 风险遗留：同 1.7.2
 
 ### 1.7.2 — 2026-10-27
 - 状态：已发布

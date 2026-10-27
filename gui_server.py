@@ -5791,7 +5791,7 @@ class Handler(BaseHTTPRequestHandler):
                     zf.writestr(f"data/{fname}.js", js_b)
                     # App 端导入读 JSON(不解析 JS),与 .js 并存互不影响
                     try:
-                        zf.writestr(f"data/{fname}.json",
+                        zf.writestr(f"data/{data_name}.json",
                                     _js.dumps({"chapters": chapters}, ensure_ascii=False).encode("utf-8"))
                     except Exception:  # noqa: BLE001
                         pass
