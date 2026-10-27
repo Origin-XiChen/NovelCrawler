@@ -17,7 +17,7 @@ export function AppShell() {
   const { pathname } = useLocation();
 
   useEffect(() => {
-    document.title = `${TITLES[pathname] ?? '小说管家'} · 小说管家`;
+    document.title = `${TITLES[pathname] ?? 'NovelCrawler'} · NovelCrawler`;
   }, [pathname]);
 
   return (

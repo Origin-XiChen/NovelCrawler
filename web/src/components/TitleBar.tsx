@@ -54,7 +54,7 @@ export function TitleBar() {
           <BookOpen size={15} strokeWidth={2.2} />
         </span>
         <span>
-          <span className="titlebar__name">小说管家</span>
+          <span className="titlebar__name">NovelCrawler</span>
           <span className="titlebar__sub">NovelCrawler</span>
         </span>
       </div>

@@ -681,7 +681,7 @@ export function SettingsPage() {
               <div>
                 <div className="settings-row__title">关于</div>
                 <div className="settings-row__desc">
-                  小说管家 · 多源小说 / 漫画聚合下载器 · GPL-3.0
+                  NovelCrawler · 多源小说 / 漫画聚合下载器 · GPL-3.0
                 </div>
               </div>
               <button

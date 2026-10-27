@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""小说管家 · 桌面壳(pywebview)
+"""NovelCrawler · 桌面壳(pywebview)
 
 把 Web GUI 包进原生桌面窗口:
   - 单进程:后端 HTTPServer 线程 + pywebview 窗口(Edge WebView2)
@@ -36,7 +36,7 @@ def find_free_port() -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="小说管家桌面版")
+    ap = argparse.ArgumentParser(description="NovelCrawler桌面版")
     ap.add_argument("--port", type=int, default=0, help="后端端口(默认随机空闲端口)")
     ap.add_argument("--dev", action="store_true", help="开发模式:不关窗口也打印日志")
     args = ap.parse_args()
@@ -104,13 +104,13 @@ def main() -> None:
             try:
                 if sys.platform == "win32":
                     import ctypes
-                    ctypes.windll.user32.MessageBoxW(None, str(msg), "小说管家", 0x40)
+                    ctypes.windll.user32.MessageBoxW(None, str(msg), "NovelCrawler", 0x40)
                 else:
                     subprocess_run = subprocess.run
                     if sys.platform == "darwin":
                         subprocess_run(["osascript", "-e", f'display notification "{msg}"'])
                     else:
-                        subprocess_run(["notify-send", "小说管家", str(msg)])
+                        subprocess_run(["notify-send", "NovelCrawler", str(msg)])
             except Exception:  # noqa: BLE001
                 pass
 
@@ -123,7 +123,7 @@ def main() -> None:
             # 用 ctypes 直接查真实窗口状态(避免 frameless 下 w.state 不准)
             try:
                 import ctypes
-                hwnd = ctypes.windll.user32.FindWindowW(None, "小说管家")
+                hwnd = ctypes.windll.user32.FindWindowW(None, "NovelCrawler")
                 if hwnd:
                     # IsZoomed(最大)= 1 表示已最大化
                     if ctypes.windll.user32.IsZoomed(hwnd):
@@ -148,7 +148,7 @@ def main() -> None:
         return _win_ref[0]
 
     window = webview.create_window(
-        "小说管家",
+        "NovelCrawler",
         url,
         width=1280,
         height=820,
@@ -174,7 +174,7 @@ def main() -> None:
         try:
             import ctypes
             ctypes.windll.user32.FindWindowW.restype = ctypes.c_void_p  # 句柄是 64 位指针,防截断
-            hwnd = ctypes.windll.user32.FindWindowW(None, "小说管家")
+            hwnd = ctypes.windll.user32.FindWindowW(None, "NovelCrawler")
             if hwnd:
                 try:
                     gui_server.set_main_hwnd(int(hwnd))  # 窗口控制 HTTP 端点依赖此句柄
@@ -225,7 +225,7 @@ def main() -> None:
         import ctypes
 
         ctypes.windll.user32.FindWindowW.restype = ctypes.c_void_p  # 句柄 64 位,防截断
-        hwnd = ctypes.windll.user32.FindWindowW(None, "小说管家")
+        hwnd = ctypes.windll.user32.FindWindowW(None, "NovelCrawler")
         if not hwnd:
             if args.dev:
                 print("[desktop-window] 未找到窗口,跳过窗口逻辑安装", flush=True)
@@ -451,7 +451,7 @@ def main() -> None:
         while True:
             try:
                 _t.sleep(1)
-                hwnd = _c.windll.user32.FindWindowW(None, "小说管家")
+                hwnd = _c.windll.user32.FindWindowW(None, "NovelCrawler")
                 if hwnd:
                     seen = True
                 elif seen:

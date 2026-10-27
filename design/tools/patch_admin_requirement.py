@@ -86,12 +86,12 @@ def _write_version_file() -> str:
     StringFileInfo([
       StringTable('080404b0', [
         StringStruct('CompanyName', 'NovelCrawler'),
-        StringStruct('FileDescription', '小说管家 · 漫画+小说 多源下载器(学习版)'),
+        StringStruct('FileDescription', 'NovelCrawler · 漫画+小说 多源下载器(学习版)'),
         StringStruct('FileVersion', '%(ver)s'),
         StringStruct('InternalName', 'NovelCrawler'),
         StringStruct('LegalCopyright', 'GPL-3.0 · 仅供个人学习与技术研究'),
         StringStruct('OriginalFilename', 'NovelCrawler.exe'),
-        StringStruct('ProductName', '小说管家'),
+        StringStruct('ProductName', 'NovelCrawler'),
         StringStruct('ProductVersion', '%(ver)s')]),
     ]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])
@@ -153,12 +153,12 @@ EDITS = {
     ],
     BAT: [
         (
-            """echo NovelCrawler 小说管家 - 免安装版> "dist\\NovelCrawler\\使用说明.txt"
+            """echo NovelCrawler NovelCrawler - 免安装版> "dist\\NovelCrawler\\使用说明.txt"
 echo.>> "dist\\NovelCrawler\\使用说明.txt"
 echo 双击 NovelCrawler.exe 即可使用。>> "dist\\NovelCrawler\\使用说明.txt"
 echo 书架/订阅/下载等数据保存在 exe 同目录。>> "dist\\NovelCrawler\\使用说明.txt"
 echo 需要 Edge WebView2 运行时,Windows 10/11 自带。>> "dist\\NovelCrawler\\使用说明.txt\"""",
-            """echo NovelCrawler 小说管家 - 免安装版> "dist\\NovelCrawler\\使用说明.txt"
+            """echo NovelCrawler NovelCrawler - 免安装版> "dist\\NovelCrawler\\使用说明.txt"
 echo.>> "dist\\NovelCrawler\\使用说明.txt"
 echo 双击 NovelCrawler.exe 即可使用,**不需要管理员权限**。>> "dist\\NovelCrawler\\使用说明.txt"
 echo 书架/订阅/下载等数据默认保存在 exe 同目录;>> "dist\\NovelCrawler\\使用说明.txt"

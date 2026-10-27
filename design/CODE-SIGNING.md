@@ -58,7 +58,7 @@
 
    ```bat
    signtool sign /v /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 ^
-     /d "小说管家 NovelCrawler" ^
+     /d "NovelCrawler NovelCrawler" ^
      /du "https://github.com/Origin-XiChen/NovelCrawler" ^
      dist\NovelCrawler\NovelCrawler.exe
    ```

@@ -5567,7 +5567,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         if qs.get("dl"):
             # ?dl=1 → 手机端「打包快照」直接附件下载(带时间戳文件名,避免覆盖)
-            fn = "小说管家-离线版-" + _t2.strftime("%Y%m%d-%H%M") + ".html"
+            fn = "NovelCrawler-Offline-" + _t2.strftime("%Y%m%d-%H%M") + ".html"
             self.send_header("Content-Disposition",
                              f"attachment; filename*=UTF-8''{_url_quote(fn)}")
         self.send_header("Content-Length", str(len(body)))
@@ -5789,6 +5789,12 @@ class Handler(BaseHTTPRequestHandler):
                     js_b = js.encode("utf-8")
                     # ZIP 内用原始文件名;meta.data 用 URL 编码(script src 会被浏览器解码回原名)
                     zf.writestr(f"data/{fname}.js", js_b)
+                    # App 端导入读 JSON(不解析 JS),与 .js 并存互不影响
+                    try:
+                        zf.writestr(f"data/{fname}.json",
+                                    _js.dumps({"chapters": chapters}, ensure_ascii=False).encode("utf-8"))
+                    except Exception:  # noqa: BLE001
+                        pass
                     done += len(js_b)
                     meta_books.append({"name": fname, "size": os.path.getsize(fp),
                                        "chs": len(chapters), "has_body": bool(chapters),
@@ -5828,6 +5834,29 @@ class Handler(BaseHTTPRequestHandler):
                     html = html.replace("</head>", "<script>" + js_inject + "</script></head>", 1)
                 zf.writestr("index.html", html.encode("utf-8"))
                 done += len(html)
+                # 新版 App 按 manifest.json 判定离线包;旧包缺这个文件会被拒收,
+                # 所以生成时一并写进来(含每本书的章节索引,便于导入到书架)
+                try:
+                    import time as _t5
+                    _manifest = {
+                        "bundle_version": 2,
+                        "kind": "snapshot",
+                        "id": "snapshot:" + _t5.strftime("%Y%m%d-%H%M%S"),
+                        "title": "NovelCrawler 离线包",
+                        "file": "",
+                        "generated": int(_t5.time()),
+                        "total": len(meta_books),
+                        "books": [
+                            {"file": b["name"], "title": os.path.splitext(b["name"])[0],
+                             "size": b["size"], "chapters": b["chs"], "has_body": b["has_body"],
+                             "data": b["data"].replace(".js", ".json")}
+                            for b in meta_books
+                        ],
+                    }
+                    zf.writestr("manifest.json",
+                                _js.dumps(_manifest, ensure_ascii=False).encode("utf-8"))
+                except Exception:  # noqa: BLE001
+                    pass
             job["status"] = "ready"
             _report(final=True)
             job["progress"] = 100
@@ -5856,7 +5885,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": "任务不存在"}, 404)
         if job["status"] != "ready":
             return self._send_json({"error": "任务尚未完成"}, 409)
-        fn = "小说管家-离线版-" + _t4.strftime("%Y%m%d-%H%M") + ".zip"
+        fn = "NovelCrawler-Offline-" + _t4.strftime("%Y%m%d-%H%M") + ".zip"
         tmp = job["tmp"]
         self._send_file(tmp, "application/zip", as_attachment=True, filename=fn)
         with self._snapshot_lock:

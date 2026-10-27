@@ -2,7 +2,7 @@
   "name": "@novelcrawler/desktop",
   "version": "1.7.0",
   "private": true,
-  "description": "小说管家 Electron 桌面壳",
+  "description": "NovelCrawler Electron 桌面壳",
   "main": "main.js",
   "author": "Origin-XiChen",
   "license": "GPL-3.0",
@@ -61,7 +61,7 @@
       "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "小说管家"
+      "shortcutName": "NovelCrawler"
     },
     "publish": [
       {

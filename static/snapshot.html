@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#0b2545">
-<title>小说管家 · 离线</title>
+<title>NovelCrawler · 离线</title>
 <style>
   :root {
     --bg:#f5f5f7; --card:#fff; --secondary:#f2f2f6; --border:#d2d2d7;
@@ -93,7 +93,7 @@
 
 <div class="topbar">
   <img class="logo" src="icon/app.png" onerror="this.style.display='none'" alt="">
-  <h1 id="appTitle">小说管家</h1>
+  <h1 id="appTitle">NovelCrawler</h1>
   <span class="badge">● 离线</span>
 </div>
 
@@ -316,7 +316,7 @@ if (!SNAP) {
   const el = document.getElementById('offBanner');
   el.innerHTML = '<b>📦 离线包</b> · 生成于 ' + esc(SNAP.gen_time || '')
     + ' · 内嵌 ' + esc(String(SNAP.books.length)) + ' 本小说、' + esc(String(SNAP.comics.length)) + ' 部漫画<br><span style="opacity:.85">点击「阅读」时按需加载该书内容;漫画与文件在包内 files/ 目录,可直接打开或保存。</span>';
-  document.getElementById('appTitle').textContent = '小说管家(离线)';
+  document.getElementById('appTitle').textContent = 'NovelCrawler(离线)';
   renderAll();
 }
 </script>

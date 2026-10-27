@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.originxichen.novelcrawler.mobile',
-  appName: '小说管家',
+  appName: 'NovelCrawler',
   webDir: '../static/mobile-app-native',
   backgroundColor: '#f5f3ee',
   android: {

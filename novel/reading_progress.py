@@ -238,9 +238,13 @@ def _merge(current, incoming, legacy: bool) -> dict:
         out["title"] = inc["title"]
     if inc["total"]:
         out["total"] = inc["total"]
+    # 当前位置只前进不后退:同一本书若已有更靠前的进度(比如电脑读到第 8 章、
+    # 手机还停在 3 章),同步时不能把电脑的进度拉回去。
     if inc["ch"]:
-        out["ch"] = inc["ch"]
-        out["scroll"] = inc["scroll"]
+        cur_ch, inc_ch = int(cur.get("ch") or 0), int(inc["ch"] or 0)
+        if inc_ch > cur_ch or (inc_ch == cur_ch and _frac(inc.get("scroll")) >= _frac(cur.get("scroll"))):
+            out["ch"] = inc["ch"]
+            out["scroll"] = inc["scroll"]
     if inc["chapterTitle"]:
         out["chapterTitle"] = inc["chapterTitle"]
     out["updated"] = max(inc["updated"], cur["updated"])

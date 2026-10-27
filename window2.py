@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""小说管家 · 自制窗口引擎(Win32 + WebView2 COM 直嵌)
+"""NovelCrawler · 自制窗口引擎(Win32 + WebView2 COM 直嵌)
 
 完全脱离 pywebview / .NET,窗口逻辑 100% 自己控制:
 - 窗口:纯 ctypes 创建 Win32 窗口;拖动 / Aero Snap / 双击最大化 / 四边缩放
@@ -991,7 +991,7 @@ class Api:
 
     def notify(self, msg: str) -> None:
         try:
-            user32.MessageBoxW(None, str(msg), "小说管家", 0x40)
+            user32.MessageBoxW(None, str(msg), "NovelCrawler", 0x40)
         except Exception:  # noqa: BLE001
             pass
 
@@ -1095,7 +1095,7 @@ def main() -> None:
         except Exception:  # noqa: BLE001
             pass
 
-    ap = argparse.ArgumentParser(description="小说管家 · 自制窗口")
+    ap = argparse.ArgumentParser(description="NovelCrawler · 自制窗口")
     ap.add_argument("--port", type=int, default=0)
     ap.add_argument("--dev", action="store_true")
     args = ap.parse_args()
@@ -1127,7 +1127,7 @@ def main() -> None:
         print(f"[window2] CoInitializeEx(STA): 0x{hr & 0xFFFFFFFF:08X}")
 
     cache_dir = _webview_cache_dir()  # 不再依赖 cwd/exe 目录可写(见函数注释)
-    win = MainWindow("小说管家", 1280, 820, url, cache_dir,
+    win = MainWindow("NovelCrawler", 1280, 820, url, cache_dir,
                      initial_rect=_validated_win_state())  # 恢复上次窗口尺寸/位置
     gui_server.set_main_hwnd(win.hwnd, cache_dir)  # 主窗口句柄 + 缓存目录(退出时识别子进程)
     # 多窗口钩子:阅读器窗口的创建(/api/window/open_reader)与控制(win 参数路由)

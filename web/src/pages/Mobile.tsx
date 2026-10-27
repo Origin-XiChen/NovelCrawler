@@ -1399,7 +1399,7 @@ function TunnelTab() {
           <button
             type="button"
             className="btn btn--ghost btn--sm"
-            onClick={() => downloadUrl('/direct?dl=1', '小说管家-远程直连.html')}
+            onClick={() => downloadUrl('/direct?dl=1', 'NovelCrawler-远程直连.html')}
           >
             <Download size={14} />
             下载连接文件
@@ -1862,7 +1862,7 @@ function PackTab() {
           setPackState(data.status ?? '');
           if (data.status === 'ready') {
             window.clearInterval(timer);
-            downloadUrl(`/api/snapshot_download?job=${encodeURIComponent(job)}`, '小说管家-离线版.zip');
+            downloadUrl(`/api/snapshot_download?job=${encodeURIComponent(job)}`, 'NovelCrawler-离线版.zip');
             setJob('');
             setPackState('');
             setProgress(0);
@@ -1913,7 +1913,7 @@ function PackTab() {
       if (bookSel.length) params.set('favs', bookSel.join(','));
       if (comicSel.length) params.set('comics', comicSel.join(','));
       params.set('dl', '1');
-      downloadUrl(`/offline-mobile?${params.toString()}`, '小说管家-离线版.html');
+      downloadUrl(`/offline-mobile?${params.toString()}`, 'NovelCrawler-离线版.html');
       toast('已开始打包下载，完成后可发送到手机', 'success');
       return;
     }
