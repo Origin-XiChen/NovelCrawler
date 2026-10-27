@@ -1,0 +1,564 @@
+/**
+ * 本地导入:手机自己选中的 EPUB/TXT 在浏览器里解析成与电脑端离线包
+ * 相同的结构(manifest + chapters + assets),旧离线 ZIP 则原样入库。
+ * 读章节/图片仍然只走 db.ts + reading.ts,不另开一套阅读逻辑。
+ */
+import JSZip from 'jszip';
+import { putBook, releaseZip, saveChunk, saveSource, type ChapterRef, type LocalBook } from './db';
+
+const BUNDLE_VERSION = 1;
+
+/** 与 reading.ts 的 ASSET_RE 同一条规则 */
+const ASSET_RE = /\/api\/epub_asset\?[^"'()\s]*?[&?]path=([^"'()\s)]+)/g;
+
+interface BundleManifest {
+  bundle_version: number;
+  kind: 'txt' | 'epub' | 'comic';
+  id: string;
+  title: string;
+  file: string;
+  chapters: ChapterRef[];
+  total: number;
+  assets: Record<string, string>;
+  cover: string;
+  src_size: number;
+  src_mtime: number;
+  generated: number;
+  num_pages?: number;
+  meta?: unknown;
+}
+
+export interface LocalImportProgress {
+  /** 当前第几个文件(从 1 开始) */
+  index: number;
+  total: number;
+  name: string;
+  detail: string;
+}
+
+export interface LocalImportOutcome {
+  imported: LocalBook[];
+  failed: { name: string; error: string }[];
+}
+
+export async function importLocalFiles(
+  files: File[],
+  onProgress?: (p: LocalImportProgress) => void,
+): Promise<LocalImportOutcome> {
+  const outcome: LocalImportOutcome = { imported: [], failed: [] };
+  const usable = files.filter((file) => file && file.size > 0);
+  for (let i = 0; i < usable.length; i += 1) {
+    const file = usable[i];
+    onProgress?.({
+      index: i + 1,
+      total: usable.length,
+      name: file.name,
+      detail: `正在解析 ${i + 1}/${usable.length}`,
+    });
+    try {
+      outcome.imported.push(await importLocalFile(file));
+    } catch (cause) {
+      outcome.failed.push({
+        name: file.name,
+        error: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  }
+  return outcome;
+}
+
+export function importLocalFile(file: File): Promise<LocalBook> {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.zip')) return importBundleZip(file);
+  if (name.endsWith('.epub')) return importEpub(file);
+  if (name.endsWith('.txt')) return importTxt(file);
+  return Promise.reject(new Error('只支持 EPUB、TXT 和 NovelCrawler 离线 ZIP'));
+}
+
+// ---------------- 旧离线 ZIP:已经是目标结构,直接入库 ----------------
+
+async function importBundleZip(file: File): Promise<LocalBook> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(file);
+  } catch {
+    throw new Error('ZIP 解析失败,文件可能已损坏');
+  }
+  const manifestFile = zip.file('manifest.json');
+  if (!manifestFile) {
+    throw new Error('这个 ZIP 里没有 manifest.json,不是 NovelCrawler 离线包');
+  }
+  let manifest: BundleManifest;
+  try {
+    manifest = JSON.parse(await manifestFile.async('string')) as BundleManifest;
+  } catch {
+    throw new Error('manifest.json 内容损坏');
+  }
+  if ((manifest.bundle_version || 0) > BUNDLE_VERSION) {
+    throw new Error('离线包版本过新,请先把手机 App 升级到最新版');
+  }
+  if (!manifest.kind || !manifest.file) throw new Error('manifest.json 缺少必要字段');
+
+  const comic = manifest.kind === 'comic';
+  const id = comic
+    ? manifest.id || `comic:${manifest.title}/${manifest.file}`
+    : `novel:${manifest.file}`;
+  const total =
+    manifest.total || (comic ? manifest.num_pages || 0 : (manifest.chapters || []).length);
+  if (!total) throw new Error('离线包是空的');
+
+  const title =
+    manifest.title ||
+    (comic ? manifest.file : manifest.file.replace(/\.[^.]+$/, ''));
+  const book: LocalBook = {
+    id,
+    kind: comic ? 'comic' : 'novel',
+    format: manifest.kind,
+    title,
+    file: manifest.file,
+    total,
+    chapters: manifest.chapters || [],
+    assets: manifest.assets || {},
+    coverArc: manifest.cover || '',
+    size: file.size,
+    srcMtime: Math.round(manifest.src_mtime || 0),
+    srcSize: manifest.src_size || 0,
+    importedAt: Date.now(),
+    serverId: '',
+    serverName: '本地导入',
+    origin: 'import',
+  };
+  releaseZip(id);
+  await saveChunk(id, file);
+  await putBook(book);
+  return book;
+}
+
+// ---------------- EPUB:浏览器内解析,重建离线包 ----------------
+
+async function importEpub(file: File): Promise<LocalBook> {
+  const zip = await JSZip.loadAsync(file);
+  const containerFile = zip.file('META-INF/container.xml');
+  if (!containerFile) throw new Error('不是有效的 EPUB(缺少 META-INF/container.xml)');
+  const container = parseXml(await containerFile.async('string'));
+  const rootfile = elements(container, 'rootfile')[0];
+  const opfPath = normalizePath(rootfile?.getAttribute('full-path') || '');
+  const opfFile = opfPath ? zip.file(opfPath) : null;
+  if (!opfFile) throw new Error('EPUB 的 OPF 文件缺失或损坏');
+
+  const opf = parseXml(await opfFile.async('string'));
+  const base = posixDir(opfPath);
+  const items = elements(opf, 'item');
+  const manifest = new Map<string, { path: string; properties: string }>();
+  for (const item of items) {
+    const id = item.getAttribute('id');
+    const href = item.getAttribute('href');
+    if (!id || !href) continue;
+    manifest.set(id, {
+      path: resolvePath(base, href),
+      properties: item.getAttribute('properties') || '',
+    });
+  }
+  const spine = elements(opf, 'itemref')
+    .map((item) => item.getAttribute('idref') || '')
+    .filter(Boolean);
+
+  const rawChapters: { path: string; raw: string }[] = [];
+  for (const idref of spine) {
+    const entry = manifest.get(idref);
+    if (!entry) continue;
+    const chapterFile = zip.file(entry.path);
+    if (!chapterFile) continue;
+    rawChapters.push({ path: entry.path, raw: await decodeZipText(chapterFile) });
+  }
+  if (!rawChapters.length) throw new Error('EPUB 里没有可读的正文章节');
+
+  const output = new JSZip();
+  const assets: Record<string, string> = {};
+  const chapters: ChapterRef[] = [];
+  const pendingAssets: { path: string; arc: string }[] = [];
+
+  const addAsset = (path: string): string => {
+    const existing = assets[path];
+    if (existing) return existing;
+    if (!zip.file(path)) return ''; // 资源缺失:正文照读,坏图由阅读器兜底
+    const ext = assetExt(path);
+    const arc = `assets/${String(Object.keys(assets).length + 1).padStart(4, '0')}${ext}`;
+    assets[path] = arc;
+    pendingAssets.push({ path, arc });
+    return arc;
+  };
+
+  const writeChapter = (idx: number, title: string, html: string, text: string) => {
+    output.file(
+      chapterName(idx),
+      JSON.stringify({ idx, title, html, text }),
+    );
+    chapters.push({ idx, title });
+  };
+
+  let cover = '';
+  const titleTag = elements(opf, 'title')[0]?.textContent?.trim() || '';
+
+  // 单文件 EPUB(旧版导出)按 <h2 id="cN"> 锚点分章,与电脑端规则一致
+  if (rawChapters.length === 1) {
+    const single = rawChapters[0];
+    const anchors = [...single.raw.matchAll(/<h2[^>]*id=["']c\d+["'][^>]*>([\s\S]*?)<\/h2>/gi)];
+    if (anchors.length > 1) {
+      const starts = anchors.map((a) => a.index || 0);
+      for (let k = 0; k < anchors.length; k += 1) {
+        const segment = single.raw.slice(starts[k], starts[k + 1] ?? single.raw.length);
+        const heading = stripTags(anchors[k][1]).trim() || `第${k + 1}章`;
+        const html = await processEpubChapter(segment, single.path, zip);
+        collectAssets(html, addAsset);
+        writeChapter(k + 1, heading, html, stripHtml(segment));
+      }
+      rawChapters.length = 0;
+    }
+  }
+
+  for (const chapter of rawChapters) {
+    const titleMatch = /<title[^>]*>([^<]+)<\/title>/i.exec(chapter.raw);
+    const title = titleMatch?.[1]?.trim() || `第${chapters.length + 1}章`;
+    const html = await processEpubChapter(chapter.raw, chapter.path, zip);
+    collectAssets(html, addAsset);
+    if (!cover) {
+      const first = [...html.matchAll(ASSET_RE)]
+        .map((m) => safeDecode(m[1]))
+        .find((p) => /\.(jpe?g|png|gif|webp|bmp)$/i.test(p) && /cover/i.test(p));
+      if (first) cover = addAsset(first);
+    }
+    writeChapter(chapters.length + 1, title, html, stripHtml(chapter.raw));
+  }
+
+  const coverPath = epubCoverPath(opf, manifest, base);
+  if (coverPath && !assets[coverPath]) {
+    const arc = addAsset(coverPath);
+    if (!cover) cover = arc;
+  }
+
+  for (const asset of pendingAssets) {
+    const entry = zip.file(asset.path);
+    if (!entry) continue;
+    output.file(asset.arc, await entry.async('uint8array'), { compression: 'STORE' });
+  }
+
+  const title = titleTag || fileTitle(file.name);
+  const manifestData: BundleManifest = {
+    bundle_version: BUNDLE_VERSION,
+    kind: 'epub',
+    id: `novel:${file.name}`,
+    title,
+    file: file.name,
+    chapters,
+    total: chapters.length,
+    assets,
+    cover,
+    src_size: file.size,
+    src_mtime: Math.round((file.lastModified || Date.now()) / 1000),
+    generated: Math.floor(Date.now() / 1000),
+  };
+  output.file('manifest.json', JSON.stringify(manifestData, null, 2));
+  const blob = await output.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  return persistBundle(manifestData, blob, file);
+}
+
+function parseXml(text: string): Document {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) {
+    throw new Error('EPUB 的 XML 格式损坏');
+  }
+  return doc;
+}
+
+/** 按 localName 取元素,兼容各家不规范的命名空间写法 */
+function elements(root: Document | Element, localName: string): Element[] {
+  const out: Element[] = [];
+  const walk = (node: Element) => {
+    for (const child of Array.from(node.children)) {
+      if (child.localName === localName) out.push(child);
+      walk(child);
+    }
+  };
+  if (root.nodeType === 9) {
+    const doc = root as Document;
+    if (doc.documentElement) walk(doc.documentElement);
+  } else {
+    walk(root as Element);
+  }
+  return out;
+}
+
+async function decodeZipText(file: JSZip.JSZipObject): Promise<string> {
+  const bytes = await file.async('uint8array');
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder('gb18030').decode(bytes);
+  }
+}
+
+function stripTags(html: string): string {
+  return html.replace(/<[^>]+>/g, '');
+}
+
+function posixDir(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash >= 0 ? path.slice(0, slash) : '';
+}
+
+function normalizePath(path: string): string {
+  const parts: string[] = [];
+  for (const part of path.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') parts.pop();
+    else parts.push(part);
+  }
+  return parts.join('/');
+}
+
+function resolvePath(baseDir: string, href: string): string {
+  const clean = href.split('#')[0];
+  return normalizePath(baseDir ? `${baseDir}/${clean}` : clean);
+}
+
+/** 与电脑端 quote() 一致:括号/单引号也编码,避免打断阅读器的资源地址正则 */
+function assetUrl(path: string): string {
+  return `/api/epub_asset?file=local&path=${encodeURIComponent(path).replace(
+    /[()']/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  )}`;
+}
+
+function assetExt(path: string): string {
+  const match = /(\.[^./\\]{1,6})$/.exec(path);
+  return match ? match[1].toLowerCase() : '.bin';
+}
+
+function isExternal(src: string): boolean {
+  return /^(data:|https?:|\/\/|blob:)/i.test(src);
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function collectAssets(html: string, add: (path: string) => string): void {
+  for (const match of html.matchAll(ASSET_RE)) add(safeDecode(match[1]));
+}
+
+function replaceAttr(attrs: string, attr: string, value: string): string {
+  const re = new RegExp(`(${attr}\\s*=\\s*)("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i');
+  const match = re.exec(attrs);
+  if (!match) return attrs;
+  return attrs.slice(0, match.index) + `${attr}="${value}"` + attrs.slice(match.index + match[0].length);
+}
+
+function rewriteSrc(attrs: string, chapterPath: string, attr = 'src'): string {
+  const re = new RegExp(`(?:^|\\s)${attr}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i');
+  const match = re.exec(attrs);
+  if (!match) return attrs;
+  const src = (match[2] ?? match[3] ?? match[4] ?? '').trim();
+  if (!src || isExternal(src)) return attrs;
+  const full = resolvePath(posixDir(chapterPath), src);
+  return replaceAttr(attrs, attr, assetUrl(full));
+}
+
+function rewriteCssUrls(css: string, cssPath: string): string {
+  const base = posixDir(cssPath);
+  return css.replace(/url\(\s*(['"]?)([^'")\s]*)\1\s*\)/gi, (whole, quote: string, inner: string) => {
+    const value = (inner || '').trim();
+    if (!value || isExternal(value) || value.startsWith('/')) return whole;
+    return `url(${quote}${assetUrl(resolvePath(base, value))}${quote})`;
+  });
+}
+
+async function processEpubChapter(raw: string, chapterPath: string, zip: JSZip): Promise<string> {
+  const styleBlocks = [...raw.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]);
+  for (const link of raw.matchAll(
+    /<link[^>]*rel\s*=\s*["']stylesheet["'][^>]*href\s*=\s*["']([^"']+)["'][^>]*\/?>/gi,
+  )) {
+    const href = link[1];
+    if (isExternal(href)) continue;
+    const cssPath = resolvePath(posixDir(chapterPath), href);
+    const cssFile = zip.file(cssPath);
+    if (!cssFile) continue;
+    const css = rewriteCssUrls(await decodeZipText(cssFile), cssPath);
+    styleBlocks.push(css);
+  }
+
+  let html = raw.replace(/<(script|head|nav)[\s\S]*?<\/\1>/gi, '');
+  if (styleBlocks.length) {
+    const safe = styleBlocks
+      .join('\n')
+      .replace(/@import[^;]*;?/gi, '')
+      .replace(/\bfont-family\s*:\s*[^;}]+;?/gi, '')
+      .replace(/(?<![\w-])\bfont\s*:\s*[^;}]+;?/gi, '');
+    html = `<style>${safe}</style>\n${html}`;
+  }
+  html = html.replace(/<\/?(html|body)[^>]*>/gi, '');
+  html = html.replace(/<img([^>]*)>/gi, (_whole, attrs: string) => `<img${rewriteSrc(attrs, chapterPath)}>`);
+  html = html.replace(/<audio([^>]*)>/gi, (_whole, attrs: string) => `<audio${rewriteSrc(attrs, chapterPath)}>`);
+  html = html.replace(/<video([^>]*)>/gi, (_whole, attrs: string) => `<video${rewriteSrc(attrs, chapterPath)}>`);
+  html = html.replace(/<source([^>]*)>/gi, (_whole, attrs: string) => `<source${rewriteSrc(attrs, chapterPath)}>`);
+  html = html.replace(/<image([^>]*)>/gi, (_whole, attrs: string) => {
+    const attr = /\bxlink:href\s*=/i.test(attrs) ? 'xlink:href' : 'href';
+    return `<image${rewriteSrc(attrs, chapterPath, attr)}>`;
+  });
+  html = html.replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  html = html.replace(/href\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi, (whole, _a, double, single, bare) => {
+    const value = String(double ?? single ?? bare ?? '').trim().toLowerCase();
+    return value.startsWith('javascript:') || value.startsWith('vbscript:') ? '' : whole;
+  });
+  return html;
+}
+
+function stripHtml(html: string): string {
+  const withBreaks = html
+    .replace(/<(script|style|head|nav)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br[^>]*>/gi, '\n')
+    .replace(/<\/(p|div|h[1-6]|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '');
+  const doc = new DOMParser().parseFromString(`<body>${withBreaks}</body>`, 'text/html');
+  const text = doc.body.textContent || '';
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+function epubCoverPath(
+  opf: Document,
+  manifest: Map<string, { path: string; properties: string }>,
+  base: string,
+): string {
+  const coverItem = elements(opf, 'item').find((item) =>
+    (item.getAttribute('properties') || '').split(/\s+/).includes('cover-image'),
+  );
+  if (coverItem) {
+    const href = coverItem.getAttribute('href');
+    if (href) return resolvePath(base, href);
+  }
+  const meta = elements(opf, 'meta').find((item) => item.getAttribute('name') === 'cover');
+  const refId = meta?.getAttribute('content')?.trim();
+  return refId ? manifest.get(refId)?.path || '' : '';
+}
+
+// ---------------- TXT:识别电脑端章节标记,没有标记就整本当一章 ----------------
+
+async function importTxt(file: File): Promise<LocalBook> {
+  const bytes = await file.arrayBuffer();
+  let text = new TextDecoder('utf-8').decode(bytes);
+  if (text.includes('\uFFFD') || looksGarbled(text)) {
+    try {
+      text = new TextDecoder('gb18030').decode(bytes);
+    } catch {
+      // UTF-8 结果已经是最好的一版
+    }
+  }
+  text = text.replace(/^\uFEFF/, '');
+  const title = fileTitle(file.name);
+  const chapters = parseTxtChapters(text, title);
+  if (!chapters.length) throw new Error('TXT 里没有找到正文');
+
+  const output = new JSZip();
+  const toc: ChapterRef[] = [];
+  chapters.forEach((chapter, index) => {
+    const idx = index + 1;
+    output.file(chapterName(idx), JSON.stringify({ idx, title: chapter.title, text: chapter.text }));
+    toc.push({ idx, title: chapter.title });
+  });
+  const manifestData: BundleManifest = {
+    bundle_version: BUNDLE_VERSION,
+    kind: 'txt',
+    id: `novel:${file.name}`,
+    title,
+    file: file.name,
+    chapters: toc,
+    total: toc.length,
+    assets: {},
+    cover: '',
+    src_size: file.size,
+    src_mtime: Math.round((file.lastModified || Date.now()) / 1000),
+    generated: Math.floor(Date.now() / 1000),
+  };
+  output.file('manifest.json', JSON.stringify(manifestData, null, 2));
+  const blob = await output.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  return persistBundle(manifestData, blob, file);
+}
+
+/** 解出来大量替换符通常是编码猜错了,给 GB18030 一次机会 */
+function looksGarbled(text: string): boolean {
+  const sample = text.slice(0, 4000);
+  if (!sample) return false;
+  let bad = 0;
+  for (const char of sample) {
+    if (char === '\uFFFD') bad += 1;
+  }
+  return bad / sample.length > 0.005;
+}
+
+function parseTxtChapters(text: string, fallbackTitle: string): { title: string; text: string }[] {
+  const chapters: { title: string; text: string }[] = [];
+  let current: { title: string; lines: string[] } | null = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (/^【章节】第(?:\d+|[一二三四五六七八九十百千零两]+)章$/.test(line)) {
+      if (current) chapters.push({ title: current.title, text: current.lines.join('\n').trim() });
+      current = { title: '', lines: [] };
+      continue;
+    }
+    if (!current) continue;
+    const head = /^==\s*(.+?)\s*==$/.exec(line);
+    if (head && !current.title) {
+      current.title = head[1].trim();
+      continue;
+    }
+    current.lines.push(raw);
+  }
+  if (current) chapters.push({ title: current.title, text: current.lines.join('\n').trim() });
+  if (!chapters.length) return [{ title: fallbackTitle, text: text.trim() }];
+  return chapters.filter((chapter) => chapter.text);
+}
+
+function fileTitle(name: string): string {
+  return name.replace(/\.[^.]+$/, '');
+}
+
+function chapterName(idx: number): string {
+  return `chapters/${String(idx).padStart(5, '0')}.json`;
+}
+
+async function persistBundle(manifest: BundleManifest, blob: Blob, file: File): Promise<LocalBook> {
+  const id = `novel:${manifest.file}`;
+  const book: LocalBook = {
+    id,
+    kind: 'novel',
+    format: manifest.kind === 'epub' ? 'epub' : 'txt',
+    title: manifest.title,
+    file: manifest.file,
+    total: manifest.total,
+    chapters: manifest.chapters,
+    assets: manifest.assets,
+    coverArc: manifest.cover,
+    size: file.size,
+    srcMtime: Math.round((file.lastModified || Date.now()) / 1000),
+    srcSize: file.size,
+    importedAt: Date.now(),
+    serverId: '',
+    serverName: '本地导入',
+    origin: 'import',
+    syncState: 'pending',
+  };
+  releaseZip(id);
+  await saveChunk(id, blob);
+  await saveSource(id, file);
+  await putBook(book);
+  return book;
+}

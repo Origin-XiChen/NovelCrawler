@@ -25,6 +25,10 @@ export default function NativeBackButton() {
         navigate('/home', { replace: true });
         return;
       }
+      if (path === '/connect') {
+        navigate('/home', { replace: true });
+        return;
+      }
       void App.minimizeApp();
     }).then((handle) => {
       listener = handle;

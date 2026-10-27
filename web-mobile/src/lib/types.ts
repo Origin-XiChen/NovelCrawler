@@ -6,6 +6,8 @@ export interface ServerEntry {
   api: number;
   version: string;
   lastUsed: number;
+  /** http=局域网/热点/隧道直连;wrtc=WebRTC 数据通道(仅当前页面有效) */
+  transport?: 'http' | 'wrtc';
 }
 
 export interface PingResult {

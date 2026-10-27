@@ -431,6 +431,10 @@ class WrtcManager:
         if query:
             url += ("&" if "?" in url else "?") + query
         headers = {"User-Agent": "novelist-wrtc/1.0"}
+        token = str(req.get("token") or "").strip()
+        if token:
+            # 直连通道在本机回环上转发,手机仍要带自己的配对令牌才能调手机专属接口
+            headers["Authorization"] = "Bearer " + token
         data = None
         body_b64 = req.get("body_b64")
         if method == "POST" and body_b64:

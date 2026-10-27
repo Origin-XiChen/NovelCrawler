@@ -11,7 +11,7 @@ const rootPkg = JSON.parse(
 
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-  "img-src 'self' data: blob: http: https:; connect-src 'self' http: https:; " +
+  "img-src 'self' data: blob: http: https:; connect-src 'self' http: https: wss:; " +
   "font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'";
 
 function cspPlugin(): Plugin {

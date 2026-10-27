@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  Upload,
   WifiOff,
 } from 'lucide-react';
 import BookCover from '../components/BookCover';
@@ -17,6 +18,7 @@ import { DownloadButton, LocalChip } from '../components/OfflineControls';
 import { getActiveServer } from '../lib/connection';
 import { deleteLocalBook, localBookHref } from '../lib/content';
 import { errorMessage, formatDate, formatSize, percent } from '../lib/format';
+import { importLocalFiles } from '../lib/offline/localImport';
 import { fetchCatalog, isOutdated } from '../lib/offline/transfer';
 import {
   dirtyRecords,
@@ -41,6 +43,43 @@ export default function ShelfPage() {
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState('');
   const [removing, setRemoving] = useState('');
+  const [importing, setImporting] = useState('');
+  const [importNotice, setImportNotice] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const pickFiles = () => {
+    if (importing) return;
+    fileInput.current?.click();
+  };
+
+  const handleFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+    setNotice('');
+    setImportNotice('');
+    setImporting(files.length > 1 ? `正在导入 ${files.length} 个文件…` : `正在导入《${files[0].name}》…`);
+    try {
+      const outcome = await importLocalFiles(files, (progress) => {
+        setImporting(`${progress.detail}：《${progress.name}》`);
+      });
+      announceLibraryChange();
+      const names = outcome.imported.map((book) => `《${book.title}》`).join('、');
+      setImporting('');
+      if (outcome.failed.length) {
+        setImportNotice(
+          `${outcome.imported.length ? `已导入 ${names}；` : ''}${outcome.failed
+            .map((item) => `${item.name}：${item.error}`)
+            .join('；')}`,
+        );
+      } else if (names) {
+        setImportNotice(`已导入 ${names}，不连电脑也能读。`);
+      }
+    } catch (cause) {
+      setImporting('');
+      setImportNotice(errorMessage(cause));
+    }
+  };
 
   const books = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -115,18 +154,55 @@ export default function ShelfPage() {
           <h1>本地书架</h1>
           <p>{library.loading ? '正在读取…' : `${library.books.length} 本 · 占用 ${formatSize(library.bytes)}`}</p>
         </div>
-        {server && (
+        <div className="shelf-header__actions">
           <button
             type="button"
             className="btn btn--ghost btn--sm"
-            disabled={checking}
-            onClick={() => void checkUpdates()}
+            disabled={Boolean(importing)}
+            onClick={pickFiles}
           >
-            {checking ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
-            检查更新
+            {importing ? <Loader2 size={15} className="spin" /> : <Upload size={15} />}
+            导入
           </button>
-        )}
+          {server && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              disabled={checking}
+              onClick={() => void checkUpdates()}
+            >
+              {checking ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
+              检查更新
+            </button>
+          )}
+        </div>
       </header>
+
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".epub,.txt,.zip,application/epub+zip,text/plain,application/zip"
+        multiple
+        hidden
+        onChange={(event) => void handleFiles(event)}
+      />
+
+      {importing && (
+        <div className="banner banner--info">
+          <span className="banner__inline">
+            <Loader2 size={14} className="spin" /> {importing}
+          </span>
+        </div>
+      )}
+
+      {importNotice && (
+        <div className="banner banner--info">
+          <span>{importNotice}</span>
+          <button type="button" className="text-btn" onClick={() => setImportNotice('')}>
+            知道了
+          </button>
+        </div>
+      )}
 
       {notice && (
         <div className="banner banner--info">
@@ -188,17 +264,23 @@ export default function ShelfPage() {
           <p>
             {query || filter !== 'all'
               ? '换个关键词或类型。'
-              : '连上电脑，在「电脑」页把想离线读的书下载到手机。'}
+              : '可以把手机里的 EPUB / TXT 导进来，也能连电脑下载书库里的书。'}
           </p>
-          {!server && (
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => navigate('/connect')}
-            >
-              连接电脑
+          <div className="empty-state__actions">
+            <button type="button" className="btn btn--primary" onClick={pickFiles}>
+              <Upload size={16} />
+              导入本地文件
             </button>
-          )}
+            {!server && (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => navigate('/connect')}
+              >
+                连接电脑
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="shelf-list">
@@ -223,6 +305,8 @@ export default function ShelfPage() {
                         ? `${book.total} 页 · ${formatSize(book.size)}`
                         : `${book.total} 章 · ${formatSize(book.size)}`}
                       {` · ${formatDate(book.importedAt)} 导入`}
+                      {book.origin === 'import' &&
+                        ` · ${book.syncState === 'pending' ? '本地文件·待传电脑' : '本地文件'}`}
                       {dirty && <LocalChip dirty />}
                     </span>
                     {record && (
@@ -268,6 +352,18 @@ export default function ShelfPage() {
             );
           })}
         </div>
+      )}
+
+      {!library.loading && books.length > 0 && (
+        <button
+          type="button"
+          className="shelf-more"
+          disabled={Boolean(importing)}
+          onClick={pickFiles}
+        >
+          {importing ? <Loader2 size={16} className="spin" /> : <Upload size={16} />}
+          从手机导入 EPUB / TXT / 离线 ZIP
+        </button>
       )}
 
       {server && !library.loading && books.length > 0 && (

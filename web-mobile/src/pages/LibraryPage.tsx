@@ -42,7 +42,8 @@ function NovelCover({ name, epub }: { name: string; epub: boolean }) {
 
 function ComicCover({ group }: { group: ComicFileGroup }) {
   const [failed, setFailed] = useState(false);
-  const showImage = group.cover_url && !failed;
+  const cover = group.cover_url ? mediaUrl(group.cover_url) : '';
+  const showImage = Boolean(cover) && !failed;
   return (
     <div
       className="comic-cover"
@@ -50,7 +51,7 @@ function ComicCover({ group }: { group: ComicFileGroup }) {
     >
       {showImage ? (
         <img
-          src={mediaUrl(group.cover_url || '')}
+          src={cover}
           alt=""
           loading="lazy"
           onError={() => setFailed(true)}
@@ -105,11 +106,11 @@ export default function LibraryPage() {
 
   useEffect(() => {
     if (!server) {
-      navigate('/connect', { replace: true });
+      setLoading(false);
       return;
     }
     void load();
-  }, [load, navigate, server]);
+  }, [load, server]);
 
   // 连上电脑就把手机上攒的离线进度送回去
   useEffect(() => {
@@ -149,9 +150,7 @@ export default function LibraryPage() {
     [comics, keyword],
   );
 
-  if (!server) return null;
-
-  const disconnected = Boolean(error) && !loading;
+  const disconnected = !server || (Boolean(error) && !loading);
   // 首次加载就没连上:别再显示"电脑上还没有小说"误导人
   const offline = disconnected && novels.length === 0 && comics.length === 0;
 
@@ -161,16 +160,16 @@ export default function LibraryPage() {
         <div>
           <div className="library-header__eyebrow">
             <span className={`status-dot${disconnected ? ' is-offline' : ''}`} />
-            {disconnected ? '连接断开' : '已连接'}
+            {!server ? '未连接电脑' : disconnected ? '连接断开' : '已连接'}
           </div>
-          <h1>{server.name}</h1>
-          <p>{server.baseUrl.replace(/^https?:\/\//, '')}</p>
+          <h1>{server?.name || '电脑书库'}</h1>
+          <p>{server ? server.baseUrl.replace(/^https?:\/\//, '') : '连接电脑后可下载新书'}</p>
         </div>
         <button
           type="button"
           className="icon-btn"
           aria-label="刷新书库"
-          disabled={refreshing || loading}
+          disabled={!server || refreshing || loading}
           onClick={() => void load(true)}
         >
           {refreshing ? <Loader2 size={20} className="spin" /> : <RefreshCw size={20} />}
@@ -229,11 +228,15 @@ export default function LibraryPage() {
       ) : offline ? (
         <div className="library-offline">
           <WifiOff size={30} />
-          <h3>连不上电脑</h3>
-          <p>{error}</p>
-          <button type="button" className="btn btn--ghost" onClick={() => void load()}>
-            <RefreshCw size={15} />
-            重新连接
+          <h3>{server ? '连不上电脑' : '还没连接电脑'}</h3>
+          <p>{server ? error : '连接电脑后可以挑选书库里的书下载到手机，已下载的书仍然可以离线阅读。'}</p>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => (server ? void load() : navigate('/connect'))}
+          >
+            {server ? <RefreshCw size={15} /> : <Server size={15} />}
+            {server ? '重新连接' : '连接电脑'}
           </button>
         </div>
       ) : tab === 'novel' ? (
@@ -369,7 +372,9 @@ export default function LibraryPage() {
 
       <div className="library-footnote">
         <Server size={14} />
-        电脑端版本 {server.version || '未知'} · API {server.api}
+        {server
+          ? `电脑端版本 ${server.version || '未知'} · API ${server.api}`
+          : '离线模式 · 只能阅读已下载到手机的书'}
       </div>
     </div>
   );

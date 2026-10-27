@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  ArrowLeft,
   BookOpen,
   Check,
   ChevronRight,
+  Flame,
+  Globe2,
+  KeyRound,
   Loader2,
   ScanLine,
   Server,
@@ -11,6 +15,7 @@ import {
   Smartphone,
   Trash2,
   Wifi,
+  Zap,
 } from 'lucide-react';
 import ScannerModal from '../components/ScannerModal';
 import { checkServer, pingServer, pairServer } from '../lib/api';
@@ -27,7 +32,20 @@ import {
 } from '../lib/connection';
 import { errorMessage } from '../lib/format';
 import { IS_NATIVE } from '../lib/native';
+import { pairOverWrtc, prepareWrtc, wrtcServerAlive, type WrtcHandshake } from '../lib/wrtc';
 import type { ServerEntry } from '../lib/types';
+
+type Method = 'lan' | 'hotspot' | 'tunnel' | 'wrtc';
+type ScanTarget = 'pair' | 'wrtc';
+
+const METHODS: { key: Method; label: string; icon: typeof Wifi }[] = [
+  { key: 'lan', label: '局域网', icon: Wifi },
+  { key: 'hotspot', label: '热点', icon: Flame },
+  { key: 'tunnel', label: '穿透', icon: Globe2 },
+  { key: 'wrtc', label: '直连', icon: Zap },
+];
+
+const HOTSPOT_PREFIX = '192.168.137.1';
 
 function cleanPairQuery() {
   const url = new URL(window.location.href);
@@ -41,17 +59,38 @@ function cleanPairQuery() {
   window.history.replaceState({}, '', url.pathname + (url.search || '') + url.hash);
 }
 
+/** 热点/隧道二维码只有地址没有配对码:识别出来填进地址栏,让用户补 6 位码。 */
+function parseServerAddress(raw: string): string | null {
+  try {
+    const url = new URL(String(raw || '').trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    let path = url.pathname.replace(/\/+$/, '');
+    if (path.toLowerCase().endsWith('/mobile')) path = path.slice(0, -7);
+    if (path.toLowerCase().endsWith('/m')) path = path.slice(0, -2);
+    if (path === '/direct') path = '';
+    if (path === '/') path = '';
+    if (path) return null;
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return null;
+  }
+}
+
 export default function ConnectPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [servers, setServers] = useState<ServerEntry[]>(() => getServers());
+  const [method, setMethod] = useState<Method>('lan');
   const [mode, setMode] = useState<'choose' | 'manual'>('choose');
   const [address, setAddress] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
-  const [scanOpen, setScanOpen] = useState(false);
+  const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
+  const [wrtcOffer, setWrtcOffer] = useState('');
+  const [wrtcAnswer, setWrtcAnswer] = useState('');
+  const wrtcRef = useRef<WrtcHandshake | null>(null);
   const autoRan = useRef(false);
   const doPairRef = useRef<(base: string, pairCode: string) => Promise<void>>(
     async () => undefined,
@@ -71,7 +110,7 @@ export default function ConnectPage() {
           ping = await pingServer(base);
         } catch (cause) {
           throw new Error(
-            `连不上电脑（${errorMessage(cause)}）。请确认电脑已开机、已开启局域网访问，并与手机在同一网络。`,
+            `连不上电脑（${errorMessage(cause)}）。请确认电脑已开机、已开启局域网访问，并与手机处于同一网络。`,
           );
         }
         if (!ping.ok) throw new Error('电脑返回的配对信息异常，请升级桌面端后重试');
@@ -85,6 +124,7 @@ export default function ConnectPage() {
           api: result.server?.api || ping.api || 1,
           version: result.server?.version || ping.version || '',
           lastUsed: Date.now(),
+          transport: 'http',
         });
         cleanPairQuery();
         navigate('/home', { replace: true });
@@ -116,8 +156,98 @@ export default function ConnectPage() {
     void doPairRef.current(parsed.baseUrl, parsed.code);
   }, []);
 
+  const finishWrtc = async (handshake: WrtcHandshake) => {
+    setInfo('直连已建立，正在完成配对…');
+    const result = await pairOverWrtc(getDeviceId(), detectDeviceName());
+    if (!result.token || !result.device) throw new Error(result.error || '电脑返回的配对信息不完整');
+    saveServer({
+      id: `wrtc:${result.device.id}`,
+      name: result.server?.name || '电脑直连',
+      baseUrl: `wrtc://${handshake.session}`,
+      token: result.token,
+      api: result.server?.api || 1,
+      version: result.server?.version || '',
+      lastUsed: Date.now(),
+      transport: 'wrtc',
+    });
+    setWrtcAnswer('');
+    setWrtcOffer('');
+    wrtcRef.current = null;
+    navigate('/home', { replace: true });
+  };
+
+  const startWrtc = async (offerInput?: string) => {
+    const offer = String(offerInput ?? wrtcOffer).trim();
+    if (busy) return;
+    if (!offer) {
+      setError('请先扫描电脑端「任意网络直连」生成的连接码，或粘贴连接码文本');
+      return;
+    }
+    setBusy('wrtc');
+    setError('');
+    setInfo('');
+    setWrtcAnswer('');
+    wrtcRef.current = null;
+    try {
+      const handshake = await prepareWrtc(offer, (message) => setInfo(message));
+      wrtcRef.current = handshake;
+      setWrtcAnswer(handshake.answerCode);
+      if (!handshake.autoSent) {
+        setInfo(
+          '云端回传不可用：请把下方应答码粘贴到电脑端「任意网络直连 → 兜底方式」，点「提交应答码」，再回到这里点「继续等待」。',
+        );
+        return;
+      }
+      setInfo('应答码已自动回传，正在等待电脑接通…');
+      await handshake.wait(35000);
+      await finishWrtc(handshake);
+    } catch (cause) {
+      setError(errorMessage(cause));
+      setInfo('');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const continueWrtc = async () => {
+    const handshake = wrtcRef.current;
+    if (!handshake || busy) return;
+    setBusy('wrtc');
+    setError('');
+    setInfo('正在等待电脑接通…');
+    try {
+      await handshake.wait(40000);
+      await finishWrtc(handshake);
+    } catch (cause) {
+      setError(errorMessage(cause));
+      setInfo('');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const copyAnswer = async () => {
+    try {
+      await navigator.clipboard.writeText(wrtcAnswer);
+      setInfo('应答码已复制，粘贴到电脑端即可');
+    } catch {
+      setError('复制失败，请长按文本框手动复制');
+    }
+  };
+
   const connectExisting = async (server: ServerEntry) => {
     if (busy) return;
+    if (server.transport === 'wrtc') {
+      if (wrtcServerAlive(server)) {
+        setActiveServer(server.id);
+        touchServer(server.id);
+        navigate('/home', { replace: true });
+        return;
+      }
+      setMethod('wrtc');
+      setError('点对点直连会随页面刷新断开，请重新扫描电脑端生成的连接码。');
+      return;
+    }
     setBusy(server.id);
     setError('');
     setInfo('');
@@ -135,27 +265,60 @@ export default function ConnectPage() {
     }
   };
 
+  const startWrtcRef = useRef(startWrtc);
+  startWrtcRef.current = startWrtc;
+
   const handleScan = useCallback((raw: string) => {
-    setScanOpen(false);
-    const parsed = parsePairPayload(raw);
-    if (!parsed) {
-      setError('二维码不是 NovelCrawler 配对码');
+    const text = String(raw || '').trim();
+    if (text.includes('novelist-wrtc://')) {
+      setMethod('wrtc');
+      setWrtcOffer(text);
+      void startWrtcRef.current(text);
       return;
     }
-    setAddress(parsed.baseUrl);
-    setCode(parsed.code);
-    setMode('manual');
-    setInfo('已识别配对二维码，正在连接电脑…');
-    void doPairRef.current(parsed.baseUrl, parsed.code);
+    const parsed = parsePairPayload(text);
+    if (parsed) {
+      setAddress(parsed.baseUrl);
+      setCode(parsed.code);
+      setMode('manual');
+      setInfo('已识别配对二维码，正在连接电脑…');
+      void doPairRef.current(parsed.baseUrl, parsed.code);
+      return;
+    }
+    const base = parseServerAddress(text);
+    if (base) {
+      const hotspot = base.includes(HOTSPOT_PREFIX);
+      const tunnel = base.startsWith('https://');
+      setMethod(hotspot ? 'hotspot' : tunnel ? 'tunnel' : 'lan');
+      setAddress(base.replace(/^https?:\/\//, ''));
+      setMode('manual');
+      setInfo('已识别电脑地址，请再输入电脑上显示的 6 位配对码。');
+      return;
+    }
+    setError('二维码不是 NovelCrawler 配对码或直连码');
   }, []);
 
-  const openScanner = () => {
+  const switchMethod = (next: Method) => {
+    if (next === method) return;
+    setMethod(next);
     setError('');
-    if (!window.isSecureContext) {
-      setInfo('局域网 HTTP 下浏览器不能调用摄像头：请直接用手机系统相机扫描电脑上的二维码，会自动打开本页并完成配对；也可以手动输入地址和配对码。');
+    setInfo('');
+  };
+
+  const openScanner = (target: ScanTarget) => {
+    setError('');
+    if (!window.isSecureContext && !IS_NATIVE) {
+      if (target === 'wrtc') {
+        setInfo('局域网 HTTP 下浏览器不能调用摄像头：请在电脑上复制连接码文本，粘贴到下方输入框再点「建立直连」。');
+      } else {
+        setInfo(
+          '局域网 HTTP 下浏览器不能调用摄像头：请直接用手机系统相机扫描电脑上的二维码，会自动打开本页完成配对；也可以手动输入地址和配对码。',
+        );
+        setMode('manual');
+      }
       return;
     }
-    setScanOpen(true);
+    setScanTarget(target);
   };
 
   const deleteServer = (server: ServerEntry) => {
@@ -164,8 +327,14 @@ export default function ConnectPage() {
     setServers(getServers());
   };
 
+  const showForm = method !== 'wrtc' && (mode === 'manual' || method !== 'lan');
+
   return (
     <div className="connect-page">
+      <button type="button" className="connect-back" onClick={() => navigate('/home')}>
+        <ArrowLeft size={16} />
+        返回首页
+      </button>
       <header className="brand">
         <div className="brand__mark">
           <BookOpen size={30} strokeWidth={1.8} />
@@ -178,11 +347,7 @@ export default function ConnectPage() {
 
       <section className="connect-hero">
         <h2>把电脑上的书，带到手机上继续读。</h2>
-        <p>电脑负责下载和整理，手机负责阅读。局域网直连，数据不经过第三方。</p>
-        <div className="connect-hero__pills">
-          <span><Wifi size={14} /> 局域网直连</span>
-          <span><ShieldCheck size={14} /> 配对令牌保护</span>
-        </div>
+        <p>电脑负责下载和整理，手机负责阅读。四种连接方式，按你手头的网络挑一种。</p>
       </section>
 
       {expired && (
@@ -193,27 +358,176 @@ export default function ConnectPage() {
       {error && <div className="banner banner--error">{error}</div>}
       {info && <div className="banner banner--info">{info}</div>}
 
-      <section className="connect-actions">
-        <button type="button" className="btn btn--primary btn--lg" onClick={openScanner}>
-          <ScanLine size={20} />
-          扫描电脑二维码
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost btn--lg"
-          onClick={() => setMode(mode === 'manual' ? 'choose' : 'manual')}
-        >
-          <Smartphone size={18} />
-          手动输入地址和配对码
-        </button>
-        <p className="connect-tip">
-          {IS_NATIVE || window.isSecureContext
-            ? '也可以点击上方按钮扫描二维码，或手动输入地址和配对码。'
-            : '局域网 HTTP 下请用手机系统相机扫码，二维码会自动打开本页并完成配对。'}
-        </p>
+      <section className="connect-methods">
+        <div className="segmented segmented--small connect-method-tabs" role="tablist" aria-label="连接方式">
+          {METHODS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                role="tab"
+                aria-selected={method === item.key}
+                className={method === item.key ? 'is-active' : ''}
+                onClick={() => switchMethod(item.key)}
+              >
+                <Icon size={14} />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {method === 'lan' && (
+          <div className="connect-method">
+            <div className="connect-method__title">
+              <Wifi size={16} />
+              局域网扫码
+            </div>
+            <p>手机和电脑连同一个 Wi-Fi。电脑端「手机连接 → 局域网扫码」生成二维码，扫一次即可完成配对。</p>
+            <div className="connect-method__actions">
+              <button type="button" className="btn btn--primary btn--sm" onClick={() => openScanner('pair')}>
+                <ScanLine size={16} />
+                扫描电脑二维码
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => setMode(mode === 'manual' && method === 'lan' ? 'choose' : 'manual')}
+              >
+                <Smartphone size={15} />
+                手动输入
+              </button>
+            </div>
+            <p className="connect-tip connect-tip--secure">
+              <ShieldCheck size={13} />
+              {IS_NATIVE || window.isSecureContext
+                ? '扫码会直接读取电脑屏幕上的二维码'
+                : '局域网 HTTP 下请用手机系统相机扫码'}
+            </p>
+          </div>
+        )}
+
+        {method === 'hotspot' && (
+          <div className="connect-method">
+            <div className="connect-method__title">
+              <Flame size={16} />
+              热点接力
+            </div>
+            <ol className="connect-method__steps">
+              <li>电脑打开「设置 → 网络 → 移动热点」并开启。</li>
+              <li>手机 Wi-Fi 连接到这个电脑热点。</li>
+              <li>按电脑端热点卡片上的地址（通常是 {HOTSPOT_PREFIX}）和端口连接。</li>
+            </ol>
+            <p>校园网 / 公司网禁止设备互访时，这条最稳。</p>
+            <div className="connect-method__actions">
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => {
+                  setAddress(HOTSPOT_PREFIX);
+                  setInfo('补上电脑端口后点「连接电脑」（电脑端热点卡片上有完整地址，如 192.168.137.1:8899）。');
+                }}
+              >
+                <KeyRound size={15} />
+                填入热点地址
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => openScanner('pair')}>
+                <ScanLine size={15} />
+                扫热点二维码
+              </button>
+            </div>
+          </div>
+        )}
+
+        {method === 'tunnel' && (
+          <div className="connect-method">
+            <div className="connect-method__title">
+              <Globe2 size={16} />
+              公网穿透
+            </div>
+            <p>
+              电脑端「手机连接 → 公网穿透」开启 natapp / cpolar / frp 等隧道后，把公网地址填到这里；手机在任何网络都能连。
+            </p>
+            <div className="connect-method__actions">
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => openScanner('pair')}>
+                <ScanLine size={15} />
+                扫隧道二维码
+              </button>
+            </div>
+          </div>
+        )}
+
+        {method === 'wrtc' && (
+          <div className="connect-method">
+            <div className="connect-method__title">
+              <Zap size={16} />
+              任意网络直连
+            </div>
+            <p>
+              手机和电脑不在同一个网络也能连：电脑端「手机连接 → 任意网络直连」点「生成连接码」，手机扫一次码即可建立点对点通道。
+            </p>
+            <div className="connect-method__actions">
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                disabled={Boolean(busy)}
+                onClick={() => openScanner('wrtc')}
+              >
+                <ScanLine size={16} />
+                扫描电脑连接码
+              </button>
+            </div>
+            <textarea
+              className="wrtc-offer"
+              rows={3}
+              value={wrtcOffer}
+              placeholder="或粘贴连接码文本 novelist-wrtc://v1/…"
+              onChange={(event) => setWrtcOffer(event.target.value)}
+            />
+            <div className="connect-method__actions">
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={Boolean(busy) || !wrtcOffer.trim()}
+                onClick={() => void startWrtc()}
+              >
+                {busy === 'wrtc' ? <Loader2 size={15} className="spin" /> : <Zap size={15} />}
+                {busy === 'wrtc' ? '正在连接…' : '建立直连'}
+              </button>
+              {wrtcAnswer && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={Boolean(busy)}
+                  onClick={() => void continueWrtc()}
+                >
+                  <Loader2 size={15} />
+                  继续等待
+                </button>
+              )}
+            </div>
+            {wrtcAnswer && (
+              <>
+                <p className="connect-method__fallback">
+                  电脑一直没接通？展开电脑端「兜底方式」，把这段应答码粘贴进去提交，再点「继续等待」。
+                </p>
+                <textarea className="wrtc-answer" rows={3} readOnly value={wrtcAnswer} />
+                <div className="connect-method__actions">
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyAnswer()}>
+                    复制应答码
+                  </button>
+                </div>
+              </>
+            )}
+            <p className="connect-method__note">
+              直连适合临时看文字章节；封面和插图不显示，整本大文件下载可能失败，需要时再连局域网或热点。
+            </p>
+          </div>
+        )}
       </section>
 
-      {mode === 'manual' && (
+      {showForm && (
         <form
           className="panel connect-form"
           onSubmit={(event) => {
@@ -229,7 +543,7 @@ export default function ConnectPage() {
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              placeholder="192.168.1.5:8765"
+              placeholder={method === 'hotspot' ? '192.168.137.1:8899' : method === 'tunnel' ? 'https://xxxx.cpolar.top' : '192.168.1.5:8899'}
               value={address}
               onChange={(event) => setAddress(event.target.value)}
             />
@@ -252,6 +566,9 @@ export default function ConnectPage() {
             {busy === 'pair' ? <Loader2 size={18} className="spin" /> : <Check size={18} />}
             {busy === 'pair' ? '正在配对…' : '连接电脑'}
           </button>
+          <p className="connect-tip">
+            电脑上的配对码 5 分钟内有效；地址要带端口，例如 192.168.1.5:8899。
+          </p>
         </form>
       )}
 
@@ -279,9 +596,15 @@ export default function ConnectPage() {
                 <div className="server-card__main">
                   <div className="server-card__name">
                     {server.name}
-                    <span className="server-card__badge">v{server.version || '?'}</span>
+                    <span className="server-card__badge">
+                      {server.transport === 'wrtc' ? '直连' : `v${server.version || '?'}`}
+                    </span>
                   </div>
-                  <div className="server-card__url">{server.baseUrl.replace(/^https?:\/\//, '')}</div>
+                  <div className="server-card__url">
+                    {server.transport === 'wrtc'
+                      ? '点对点直连 · 刷新后需重新扫码'
+                      : server.baseUrl.replace(/^https?:\/\//, '')}
+                  </div>
                 </div>
                 {busy === server.id ? (
                   <Loader2 size={18} className="spin" />
@@ -306,11 +629,19 @@ export default function ConnectPage() {
       )}
 
       <footer className="connect-footer">
-        <p>在电脑端打开「手机连接」页，开启局域网访问并点「生成配对码」。</p>
-        <p>手机与电脑需要连接同一 Wi-Fi 或电脑热点。</p>
+        <p>在电脑端打开「手机连接」页，按上方四种方式任一生成配对码或连接码。</p>
+        <p>配对令牌只保存在本机，局域网直连的数据不经过第三方。</p>
       </footer>
 
-      {scanOpen && <ScannerModal onClose={() => setScanOpen(false)} onResult={handleScan} />}
+      {scanTarget && (
+        <ScannerModal
+          onClose={() => setScanTarget(null)}
+          onResult={(raw) => {
+            setScanTarget(null);
+            handleScan(raw);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -272,6 +272,7 @@ from novel import __version__ as APP_VERSION
 from novel import mobile_auth
 from novel import mobile_bundle
 from novel import mobile_progress
+from novel import mobile_sync
 from novel.downloader import download_book, fetch_toc, safe_filename
 from novel.fetcher import Fetcher
 from novel.paths import APP_DATA_DIR, COMIC_OUT_DIR, OPDS_COOKIES_PATH
@@ -1427,6 +1428,78 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_json({"ok": True,
                                 "record": mobile_progress.save(device_id, book, body)})
 
+    # ---------------- 手机书回传(手机本地导入的 EPUB/TXT) ----------------
+    def _api_mobile_sync_pending(self):
+        """手机轮询:电脑是否点了「同步手机本地」。"""
+        return self._send_json({"ok": True, **mobile_sync.public_state()})
+
+    def _api_mobile_sync_local(self):
+        """电脑端:暂存区文件 + 请求状态。"""
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机查看"}, 403)
+        return self._send_json({"ok": True, "files": mobile_sync.list_files(),
+                                **mobile_sync.public_state()})
+
+    def _api_mobile_sync_request(self):
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机发起同步"}, 403)
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            body = {}
+        state = mobile_sync.request_sync(str(body.get("sid") or ""))
+        return self._send_json({"ok": True, **state})
+
+    def _api_mobile_sync_upload(self, qs: dict):
+        """手机 POST 原始字节 → 暂存,等电脑确认后再进书库。"""
+        if not self._mobile_device_id():
+            return self._send_json({"error": "需要配对令牌", "code": "unauthorized"}, 401)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        name = (qs.get("name") or [""])[0]
+        try:
+            saved, size = mobile_sync.receive(self.rfile, length, name)
+        except ValueError as exc:
+            return self._send_json({"ok": False, "error": str(exc)}, 400)
+        except OSError as exc:
+            return self._send_json({"ok": False, "error": f"接收失败: {exc}"}, 500)
+        return self._send_json({"ok": True, "name": saved, "size": size})
+
+    def _api_mobile_sync_ack(self):
+        """手机传完一轮后回执:电脑端停止"等待上传"。"""
+        if not self._mobile_device_id():
+            return self._send_json({"error": "需要配对令牌", "code": "unauthorized"}, 401)
+        return self._send_json({"ok": True, **mobile_sync.acknowledge()})
+
+    def _api_mobile_sync_import(self):
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机导入书库"}, 403)
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            return self._send_json({"error": "请求体非法"}, 400)
+        name = str(body.get("name") or "")
+        try:
+            result = mobile_sync.import_to_library(name)
+        except FileNotFoundError:
+            return self._send_json({"ok": False, "error": "文件已不在暂存区"}, 404)
+        except OSError as exc:
+            return self._send_json({"ok": False, "error": f"导入失败: {exc}"}, 500)
+        return self._send_json({"ok": True, **result})
+
+    def _api_mobile_sync_discard(self):
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机操作"}, 403)
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            return self._send_json({"error": "请求体非法"}, 400)
+        name = str(body.get("name") or "")
+        ok = mobile_sync.discard(name)
+        return self._send_json({"ok": ok, "error": None if ok else "未找到该文件"})
+
     # ---------------- 路由 ----------------
     def do_GET(self):
         if not self._guard():
@@ -1574,6 +1647,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_mobile_bundle(qs)
         if path == "/api/mobile/progress":
             return self._api_mobile_progress(qs)
+        if path == "/api/mobile/sync/pending":
+            return self._api_mobile_sync_pending()
+        if path == "/api/mobile/sync/local":
+            return self._api_mobile_sync_local()
         if path == "/api/snapshot_status":
             return self._api_snapshot_status(qs)
         if path == "/api/snapshot_download":
@@ -1699,6 +1776,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_mobile_revoke()
         if parsed.path == "/api/mobile/progress":
             return self._api_mobile_progress_save()
+        if parsed.path == "/api/mobile/sync/request":
+            return self._api_mobile_sync_request()
+        if parsed.path == "/api/mobile/sync/upload":
+            return self._api_mobile_sync_upload(parse_qs(parsed.query))
+        if parsed.path == "/api/mobile/sync/ack":
+            return self._api_mobile_sync_ack()
+        if parsed.path == "/api/mobile/sync/import":
+            return self._api_mobile_sync_import()
+        if parsed.path == "/api/mobile/sync/discard":
+            return self._api_mobile_sync_discard()
         if parsed.path == "/api/download":
             return self._api_download()
         if parsed.path == "/api/snapshot_start":

@@ -38,6 +38,7 @@ task_history.json
 window_state.json
 notes.json
 mobile_devices.json
+mobile_imports/
 verify_cookies.json
 verify_pending.json
 

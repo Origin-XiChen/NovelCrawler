@@ -201,6 +201,7 @@ export async function importBook(
     importedAt: Date.now(),
     serverId: server.id,
     serverName: server.name,
+    origin: 'download',
   };
   await saveChunk(id, blob);
   await putBook(book);

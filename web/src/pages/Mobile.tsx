@@ -22,6 +22,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
+import { formatBytes } from '../lib/format';
 import { useToast } from '../lib/toast';
 import type { ComicFileGroup, FileEntry } from '../lib/types';
 
@@ -113,6 +114,19 @@ interface SettingsData {
   };
 }
 
+interface LocalSyncFile {
+  name: string;
+  size: number;
+  mtime: number;
+}
+
+interface LocalSyncData {
+  requested: boolean;
+  requested_at: number;
+  done_at: number;
+  files?: LocalSyncFile[];
+}
+
 const TABS: { value: Tab; label: string; icon: typeof Wifi }[] = [
   { value: 'lan', label: '局域网扫码', icon: Wifi },
   { value: 'hotspot', label: '热点接力', icon: Flame },
@@ -164,6 +178,13 @@ function lastSeenText(value: number) {
   return `${Math.floor(diff / 86400)} 天前`;
 }
 
+function stampText(value: number) {
+  if (!value) return '';
+  const d = new Date(value * 1000);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (value: boolean) => void }) {
   const { toast } = useToast();
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
@@ -176,6 +197,10 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
   const [pairLoading, setPairLoading] = useState(false);
   const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
   const [revoking, setRevoking] = useState('');
+  const [localSync, setLocalSync] = useState<LocalSyncData | null>(null);
+  const [syncRefreshing, setSyncRefreshing] = useState(false);
+  const [syncRequesting, setSyncRequesting] = useState(false);
+  const [syncBusy, setSyncBusy] = useState('');
 
   const loadNetwork = useCallback(
     async (force = false) => {
@@ -205,23 +230,41 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
     [toast],
   );
 
+  const loadLocalSync = useCallback(
+    async (silent = false) => {
+      if (!silent) setSyncRefreshing(true);
+      try {
+        const data = await apiGet<LocalSyncData>('/api/mobile/sync/local');
+        setLocalSync(data);
+      } catch (cause) {
+        if (!silent) toast(cause instanceof Error ? cause.message : String(cause), 'error');
+      } finally {
+        if (!silent) setSyncRefreshing(false);
+      }
+    },
+    [toast],
+  );
+
   useEffect(() => {
     void loadNetwork();
     void loadDevices(true);
+    void loadLocalSync(true);
     const timer = window.setInterval(() => {
       void apiGet<{ sessions?: SyncSession[] }>('/api/sync_status')
         .then((data) => setSessions(data.sessions ?? []))
         .catch(() => undefined);
     }, 2000);
     const deviceTimer = window.setInterval(() => void loadDevices(true), 6000);
+    const syncTimer = window.setInterval(() => void loadLocalSync(true), 3000);
     void apiGet<{ sessions?: SyncSession[] }>('/api/sync_status')
       .then((data) => setSessions(data.sessions ?? []))
       .catch(() => undefined);
     return () => {
       window.clearInterval(timer);
       window.clearInterval(deviceTimer);
+      window.clearInterval(syncTimer);
     };
-  }, [loadDevices, loadNetwork]);
+  }, [loadDevices, loadLocalSync, loadNetwork]);
 
   useEffect(() => {
     if (!pair) return;
@@ -292,6 +335,62 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
     }
   };
 
+  const startLocalSync = async () => {
+    setSyncRequesting(true);
+    try {
+      const data = await apiPost<LocalSyncData>('/api/mobile/sync/request', {});
+      setLocalSync((prev) => ({
+        requested: data.requested,
+        requested_at: data.requested_at,
+        done_at: data.done_at,
+        files: prev?.files ?? [],
+      }));
+      toast('已通知手机上传本地书，手机保持联网即可', 'success');
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error');
+    } finally {
+      setSyncRequesting(false);
+    }
+  };
+
+  const importLocalFile = async (file: LocalSyncFile) => {
+    setSyncBusy(file.name);
+    try {
+      const result = await apiPost<{ ok: boolean; name?: string; existed?: boolean; error?: string }>(
+        '/api/mobile/sync/import',
+        { name: file.name },
+      );
+      if (!result.ok) throw new Error(result.error || '导入失败');
+      toast(
+        result.existed ? `书库里已有《${result.name}》，已清理暂存文件` : `已收进书库：${result.name}`,
+        'success',
+      );
+      await loadLocalSync(true);
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error');
+    } finally {
+      setSyncBusy('');
+    }
+  };
+
+  const discardLocalFile = async (file: LocalSyncFile) => {
+    if (!window.confirm(`从暂存区删除「${file.name}」？文件不会进入书库。`)) return;
+    setSyncBusy(file.name);
+    try {
+      const result = await apiPost<{ ok: boolean; error?: string }>('/api/mobile/sync/discard', {
+        name: file.name,
+      });
+      if (!result.ok) throw new Error(result.error || '删除失败');
+      toast('已删除暂存文件', 'success');
+      await loadLocalSync(true);
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error');
+    } finally {
+      setSyncBusy('');
+    }
+  };
+
+  const localFiles = localSync?.files ?? [];
   const baseUrl = network?.ips?.length
     ? `http://${network.ips[0]}:${network.port || location.port || '8899'}`
     : '';
@@ -471,6 +570,81 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
                     </div>
                   )}
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mobile-card">
+        <div className="mobile-card__title">
+          <Send size={16} />
+          手机本地书
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm mobile-card__title-action"
+            disabled={syncRefreshing}
+            onClick={() => void loadLocalSync()}
+          >
+            {syncRefreshing ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+            刷新
+          </button>
+        </div>
+        <div className="mobile-hint">
+          手机上导入的 EPUB / TXT 会先落到这台电脑的暂存区，确认后再收进小说书库；同名不同内容不会覆盖电脑上的书。
+        </div>
+        <div className="mobile-actions">
+          <button
+            type="button"
+            className="btn btn--sm"
+            disabled={syncRequesting}
+            onClick={() => void startLocalSync()}
+          >
+            {syncRequesting ? <Loader2 size={14} className="spin" /> : <Smartphone size={14} />}
+            同步手机本地
+          </button>
+          <span className="mobile-hint">
+            {localSync?.done_at
+              ? `上次同步：${stampText(localSync.done_at)}`
+              : '手机会上传尚未回传的书，传完自动停止'}
+          </span>
+        </div>
+        {localSync?.requested && (
+          <div className="mobile-warn">
+            等待手机上传… 请在手机上打开 Novelist 并保持联网，App 每分钟会自动检查一次。
+          </div>
+        )}
+        {localFiles.length === 0 ? (
+          <div className="mobile-hint">暂存区没有待收的文件。</div>
+        ) : (
+          <div className="mobile-list">
+            {localFiles.map((file) => (
+              <div className="mobile-list__row mobile-device-row" key={file.name}>
+                <div className="mobile-list__main">
+                  <div className="mobile-list__title">
+                    {file.name}
+                    <span className="mobile-list__meta">{formatBytes(file.size)}</span>
+                  </div>
+                  <div className="mobile-list__sub">上传于 {stampText(file.mtime)}</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={syncBusy === file.name}
+                  onClick={() => void importLocalFile(file)}
+                >
+                  {syncBusy === file.name ? <Loader2 size={12} className="spin" /> : <Download size={12} />}
+                  收进书库
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={syncBusy === file.name}
+                  onClick={() => void discardLocalFile(file)}
+                >
+                  <Trash2 size={12} />
+                  删除
+                </button>
               </div>
             ))}
           </div>
@@ -813,6 +987,7 @@ function WrtcTab() {
   const { toast } = useToast();
   const [status, setStatus] = useState<WrtcStatus | null>(null);
   const [qr, setQr] = useState('');
+  const [offerCode, setOfferCode] = useState('');
   const [session, setSession] = useState('');
   const [answer, setAnswer] = useState('');
   const [turn, setTurn] = useState({ url: '', user: '', pass: '' });
@@ -845,12 +1020,17 @@ function WrtcTab() {
   const generate = async () => {
     setBusy('offer');
     try {
-      const data = await apiGet<{ ok?: boolean; session?: string; qr_b64?: string; signal_auto?: boolean }>(
-        '/api/webrtc/offer',
-      );
+      const data = await apiGet<{
+        ok?: boolean;
+        session?: string;
+        qr_b64?: string;
+        offer?: string;
+        signal_auto?: boolean;
+      }>('/api/webrtc/offer');
       if (!data.ok) throw new Error('生成连接码失败');
       setSession(data.session ?? '');
       setQr(data.qr_b64 ?? '');
+      setOfferCode(data.offer ?? '');
       toast(
         data.signal_auto ? '连接码已生成，手机扫码后应答码会自动回传' : '连接码已生成，请用摄像头或手动应答码',
         'success',
@@ -863,12 +1043,22 @@ function WrtcTab() {
     }
   };
 
+  const copyOffer = async () => {
+    try {
+      await navigator.clipboard.writeText(offerCode);
+      toast('连接码已复制，去手机「连接电脑 → 直连」里粘贴', 'success');
+    } catch {
+      toast('复制失败，请手动选择文本框内容', 'error');
+    }
+  };
+
   const disconnect = async () => {
     setBusy('stop');
     try {
       await apiPost('/api/webrtc/stop', {});
       setSession('');
       setQr('');
+      setOfferCode('');
       toast('已断开全部直连会话', 'success');
       await load();
     } catch (cause) {
@@ -936,7 +1126,7 @@ function WrtcTab() {
   return (
     <div className="mobile-stack">
       <div className="mobile-note">
-        手机在任何网络与电脑点对点直连：电脑生成连接码 → 手机阅读页「远程直连」扫一次码即可。
+        手机在任何网络与电脑点对点直连：电脑生成连接码 → 手机 App「连接电脑 → 直连」扫一次码即可。
       </div>
 
       {status?.available === false && (
@@ -985,11 +1175,11 @@ function WrtcTab() {
             <div className="mobile-card__main">
               <div className="mobile-card__title">手机端操作</div>
               <div className="mobile-hint">
-                1. 手机打开阅读页「远程直连」
+                1. 手机打开 App「连接电脑」页，选「直连」
                 <br />
-                2. 点「扫电脑屏幕」对准二维码
+                2. 点「扫描电脑连接码」对准二维码
                 <br />
-                3. 等待自动握手，直连成功后状态变为「已直连」
+                3. 等待自动握手，成功后自动进入书库
               </div>
             </div>
           </div>
@@ -1025,6 +1215,21 @@ function WrtcTab() {
       <details className="mobile-details mobile-card">
         <summary>兜底方式：手动粘贴应答码 / 事件日志</summary>
         <div className="mobile-card__main" style={{ marginTop: 10 }}>
+          {offerCode && (
+            <>
+              <div className="mobile-hint">
+                手机在当前网络下不能扫码时（例如局域网 HTTP 页面），复制这段连接码，粘贴到手机「连接电脑 → 直连 →
+                粘贴连接码文本」，再点「建立直连」。
+              </div>
+              <textarea className="input mobile-textarea" readOnly value={offerCode} />
+              <div className="mobile-actions">
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyOffer()}>
+                  <Copy size={14} />
+                  复制连接码
+                </button>
+              </div>
+            </>
+          )}
           <textarea
             className="input mobile-textarea"
             value={answer}

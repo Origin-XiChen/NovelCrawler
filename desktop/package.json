@@ -1,6 +1,6 @@
 {
   "name": "@novelcrawler/desktop",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "description": "小说管家 Electron 桌面壳",
   "main": "main.js",

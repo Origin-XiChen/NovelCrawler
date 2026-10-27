@@ -16,6 +16,7 @@ import { apiGet } from './lib/api';
 import { loadedBuildId } from './lib/build';
 import { getActiveServer } from './lib/connection';
 import { IS_NATIVE } from './lib/native';
+import { syncImportedBooks } from './lib/offline/upload';
 import type { PingResult } from './lib/types';
 
 function PresenceWatcher() {
@@ -65,6 +66,29 @@ function PresenceWatcher() {
   );
 }
 
+/** 电脑点了「同步手机本地」后,App 在后台把待传的书送过去 */
+function LocalSyncWatcher() {
+  useEffect(() => {
+    const run = () => {
+      if (!getActiveServer()) return;
+      void syncImportedBooks().catch(() => {
+        // 离线/令牌失效由页面自行提示,这里保持安静
+      });
+    };
+    run();
+    const timer = window.setInterval(run, 60000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') run();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
+  return null;
+}
+
 function UnauthorizedBridge() {
   const navigate = useNavigate();
   useEffect(() => {
@@ -101,6 +125,7 @@ export default function App() {
     <HashRouter>
       <NativeBackButton />
       <PresenceWatcher />
+      <LocalSyncWatcher />
       <AppUpdateBanner />
       <UnauthorizedBridge />
       <Routes>
@@ -108,26 +133,9 @@ export default function App() {
         <Route path="/connect" element={<ConnectPage />} />
         <Route path="/home" element={<Shell><HomePage /></Shell>} />
         <Route path="/shelf" element={<Shell><ShelfPage /></Shell>} />
-        <Route
-          path="/library"
-          element={
-            <RequireServer>
-              <Shell>
-                <LibraryPage />
-              </Shell>
-            </RequireServer>
-          }
-        />
-        <Route
-          path="/settings"
-          element={
-            <RequireServer>
-              <Shell>
-                <SettingsPage />
-              </Shell>
-            </RequireServer>
-          }
-        />
+        {/* 电脑/我的在离线时也能进:页面自己给出"未连接"状态,不能把人踢到全屏连接页 */}
+        <Route path="/library" element={<Shell><LibraryPage /></Shell>} />
+        <Route path="/settings" element={<Shell><SettingsPage /></Shell>} />
         <Route
           path="/book/:file"
           element={

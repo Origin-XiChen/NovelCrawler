@@ -12,10 +12,11 @@
 import JSZip from 'jszip';
 
 const DB_NAME = 'nc-offline';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_BOOKS = 'books';
 const STORE_CHUNKS = 'chunks';
 const STORE_PROGRESS = 'progress';
+const STORE_SOURCES = 'sources';
 
 export interface ChapterRef {
   idx: number;
@@ -44,6 +45,10 @@ export interface LocalBook {
   /** 下载来源,便于提示"来自哪台电脑" */
   serverId: string;
   serverName: string;
+  /** download=从电脑下载,import=手机本地导入(可同步回电脑) */
+  origin?: 'download' | 'import';
+  /** 本地导入的书是否已经回传给电脑 */
+  syncState?: 'pending' | 'done';
 }
 
 export interface LocalProgress {
@@ -75,6 +80,7 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_BOOKS)) db.createObjectStore(STORE_BOOKS, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(STORE_CHUNKS)) db.createObjectStore(STORE_CHUNKS, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(STORE_PROGRESS)) db.createObjectStore(STORE_PROGRESS, { keyPath: 'bookId' });
+      if (!db.objectStoreNames.contains(STORE_SOURCES)) db.createObjectStore(STORE_SOURCES, { keyPath: 'id' });
     };
     request.onblocked = () => reject(new Error('本地书库被其他页面占用,请关闭旧的标签页'));
     request.onerror = () => reject(request.error || new Error('本地书库打开失败'));
@@ -149,12 +155,27 @@ async function deleteFrom(store: string, key: string): Promise<void> {
   await run<IDBRequest>(store, 'readwrite', (s) => s.delete(key));
 }
 
-/** 删掉一本书:内容 ZIP、章节缓存、进度一起走,不留孤儿数据。 */
+/** 删掉一本书:内容 ZIP、原始文件、进度一起走,不留孤儿数据。 */
 export async function removeBookData(id: string): Promise<void> {
   releaseZip(id);
   await deleteFrom(STORE_BOOKS, id);
   await deleteFrom(STORE_CHUNKS, id);
   await deleteFrom(STORE_PROGRESS, id);
+  await deleteFrom(STORE_SOURCES, id);
+}
+
+/** 本地导入时保留原始 EPUB/TXT,同步回电脑时上传的就是它 */
+export async function saveSource(id: string, data: Blob): Promise<void> {
+  await run<IDBRequest>(STORE_SOURCES, 'readwrite', (s) => s.put({ id, data }));
+}
+
+export async function loadSource(id: string): Promise<Blob | null> {
+  const row = await run<{ id: string; data: Blob } | undefined>(
+    STORE_SOURCES,
+    'readonly',
+    (s) => s.get(id),
+  );
+  return row?.data || null;
 }
 
 export async function saveChunk(id: string, data: Blob): Promise<void> {
