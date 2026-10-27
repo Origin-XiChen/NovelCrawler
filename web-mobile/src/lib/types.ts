@@ -48,6 +48,7 @@ export interface PairResult {
 export interface FileEntry {
   name: string;
   size: number;
+  cover_url?: string;
 }
 
 export interface ComicFileGroup {

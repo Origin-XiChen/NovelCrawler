@@ -151,11 +151,18 @@ export interface LocalProgressInput {
   total: number;
   chapterTitle?: string;
   scroll?: number;
+  chapters?: Record<string, number>;
 }
 
 /** 读到哪了就记一笔,并标成"待回传"。联网时由 syncProgress 送给电脑。 */
 export async function writeLocalProgress(book: LocalBook, input: LocalProgressInput): Promise<void> {
   const previous = await getProgress(book.id);
+  const chapters: Record<string, number> = { ...(previous?.chapters || {}) };
+  for (const [key, value] of Object.entries(input.chapters || {})) {
+    const ratio = Math.min(1, Math.max(0, Number(value) || 0));
+    if (ratio >= 0.98) chapters[key] = 1;
+    else if (ratio > 0) chapters[key] = Math.max(chapters[key] || 0, ratio);
+  }
   await putProgress({
     bookId: book.id,
     kind: book.kind,
@@ -164,6 +171,7 @@ export async function writeLocalProgress(book: LocalBook, input: LocalProgressIn
     ch: Math.max(0, Math.round(input.ch)),
     total: Math.max(0, Math.round(input.total)),
     scroll: Math.min(1, Math.max(0, input.scroll || 0)),
+    chapters,
     ts: Date.now(),
     dirty: true,
   });

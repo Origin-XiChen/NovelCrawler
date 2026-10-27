@@ -60,6 +60,8 @@ export interface LocalProgress {
   ch: number;
   total: number;
   scroll: number;
+  /** 每章完成比例;缺省时按"从第 1 章连续读到 ch"补出 */
+  chapters?: Record<string, number>;
   ts: number;
   /** 本地改过、还没成功回传电脑 */
   dirty: boolean;

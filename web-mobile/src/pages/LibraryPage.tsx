@@ -19,9 +19,13 @@ import {
   gradientFor,
   initialOf,
   isNovelFile,
-  percent,
 } from '../lib/format';
 import { loadAllProgress } from '../lib/progress';
+import {
+  fetchSharedProgress,
+  fromLegacyProgress,
+  type SharedProgressRecord,
+} from '../lib/reading-progress';
 import { DownloadButton } from '../components/OfflineControls';
 import { syncProgress } from '../lib/offline/sync';
 import { isOutdated } from '../lib/offline/transfer';
@@ -31,11 +35,31 @@ import type { ComicFileGroup, FileEntry } from '../lib/types';
 
 type ShelfTab = 'novel' | 'comic';
 
-function NovelCover({ name, epub }: { name: string; epub: boolean }) {
+function NovelCover({
+  name,
+  epub,
+  coverUrl,
+}: {
+  name: string;
+  epub: boolean;
+  coverUrl?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const cover = coverUrl ? mediaUrl(coverUrl) : '';
+  const showImage = Boolean(cover) && !failed;
   return (
-    <div className="novel-cover" style={{ background: gradientFor(name) }}>
-      <span className="novel-cover__char">{initialOf(name)}</span>
-      <span className="novel-cover__format">{epub ? 'EPUB' : 'TXT'}</span>
+    <div
+      className="novel-cover"
+      style={showImage ? undefined : { background: gradientFor(name) }}
+    >
+      {showImage ? (
+        <img src={cover} alt="" loading="lazy" onError={() => setFailed(true)} />
+      ) : (
+        <>
+          <span className="novel-cover__char">{initialOf(name)}</span>
+          <span className="novel-cover__format">{epub ? 'EPUB' : 'TXT'}</span>
+        </>
+      )}
     </div>
   );
 }
@@ -73,6 +97,7 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [progressMap, setProgressMap] = useState<Record<string, SharedProgressRecord>>({});
   const library = useLocalLibrary();
   const stored = useMemo(() => {
     const map: Record<string, LocalBook> = {};
@@ -87,12 +112,23 @@ export default function LibraryPage() {
       else setLoading(true);
       setError('');
       try {
-        const [filesData, comicsData] = await Promise.all([
+        const [filesData, comicsData, records] = await Promise.all([
           apiGet<{ files?: FileEntry[] }>('/api/files'),
           apiGet<{ items?: ComicFileGroup[] }>('/api/comic_files'),
+          // 共享进度取不到(旧电脑/断网)时退回手机本地缓存
+          fetchSharedProgress().catch(() => {
+            const legacy = loadAllProgress(server.id);
+            const fallback: Record<string, SharedProgressRecord> = {};
+            for (const [file, record] of Object.entries(legacy)) {
+              const book = `novel:${file}`;
+              fallback[book] = fromLegacyProgress(book, record);
+            }
+            return fallback;
+          }),
         ]);
         setNovels((filesData.files || []).filter((item) => isNovelFile(item.name)));
         setComics(comicsData.items || []);
+        setProgressMap(records);
         touchServer(server.id);
       } catch (cause) {
         setError(errorMessage(cause));
@@ -118,24 +154,12 @@ export default function LibraryPage() {
     void syncProgress();
   }, [server]);
 
-  const progressMap = useMemo(
-    () => (server ? loadAllProgress(server.id) : {}),
-    [server],
-  );
-
   const recent = useMemo(() => {
-    let best: { file: string; chapter: number; total?: number; updated: number } | null = null;
+    let best: { file: string; record: SharedProgressRecord } | null = null;
     for (const novel of novels) {
-      const progress = progressMap[novel.name];
-      if (!progress) continue;
-      if (!best || progress.updated > best.updated) {
-        best = {
-          file: novel.name,
-          chapter: progress.chapter,
-          total: progress.total,
-          updated: progress.updated,
-        };
-      }
+      const record = progressMap[`novel:${novel.name}`];
+      if (!record || !record.ch) continue;
+      if (!best || record.updated > best.record.updated) best = { file: novel.name, record };
     }
     return best;
   }, [novels, progressMap]);
@@ -246,7 +270,7 @@ export default function LibraryPage() {
               type="button"
               className="continue-card"
               onClick={() =>
-                navigate(`/read/${encodeURIComponent(recent.file)}?ch=${recent.chapter}`)
+                navigate(`/read/${encodeURIComponent(recent.file)}?ch=${recent.record.ch}`)
               }
             >
               <div className="continue-card__glow" />
@@ -254,11 +278,13 @@ export default function LibraryPage() {
                 <span className="continue-card__label">继续阅读</span>
                 <strong>{displayName(recent.file)}</strong>
                 <span className="continue-card__meta">
-                  第 {recent.chapter} 章{recent.total ? ` / 共 ${recent.total} 章` : ''}
+                  第 {recent.record.ch} 章
+                  {recent.record.total ? ` / 共 ${recent.record.total} 章` : ''}
+                  {` · 总进度 ${recent.record.percent}%`}
                 </span>
               </div>
               <div className="continue-card__ring">
-                <span>{percent(recent.chapter, recent.total || 0)}%</span>
+                <span>{recent.record.percent}%</span>
               </div>
             </button>
           )}
@@ -276,10 +302,8 @@ export default function LibraryPage() {
           ) : (
             <div className="novel-list">
               {visibleNovels.map((item) => {
-                const progress = progressMap[item.name];
-                const scale = progress?.total
-                  ? percent(progress.chapter, progress.total)
-                  : 0;
+                const progress = progressMap[`novel:${item.name}`];
+                const scale = progress?.percent || 0;
                 const local = stored[`novel:${item.name}`];
                 return (
                   <div className="shelf-row" key={item.name}>
@@ -290,7 +314,11 @@ export default function LibraryPage() {
                         navigate(`/book/${encodeURIComponent(item.name)}?kind=novel`)
                       }
                     >
-                      <NovelCover name={item.name} epub={/\.epub$/i.test(item.name)} />
+                      <NovelCover
+                        name={item.name}
+                        epub={/\.epub$/i.test(item.name)}
+                        coverUrl={item.cover_url}
+                      />
                       <div className="novel-row__main">
                         <strong>{displayName(item.name)}</strong>
                         <span className="novel-row__meta">
@@ -299,7 +327,8 @@ export default function LibraryPage() {
                         </span>
                         {progress && (
                           <span className="novel-row__progress">
-                            {progress.chapterTitle || `第 ${progress.chapter} 章`}
+                            {progress.chapterTitle || `第 ${progress.ch} 章`}
+                            {` · 总进度 ${progress.percent}%`}
                             <i style={{ width: `${scale}%` }} />
                           </span>
                         )}

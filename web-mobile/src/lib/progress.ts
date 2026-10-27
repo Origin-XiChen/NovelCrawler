@@ -4,6 +4,7 @@ export interface ReadingProgress {
   bookTitle?: string;
   chapterTitle?: string;
   scroll: number;
+  chapters?: Record<string, number>;
   updated: number;
 }
 

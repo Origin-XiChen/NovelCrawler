@@ -25,6 +25,16 @@ import {
 import { apiGet, apiPost } from '../lib/api';
 import { Modal } from '../components/Modal';
 import { useToast } from '../lib/toast';
+import {
+  clampRatio,
+  continuousPercent,
+  fetchReadingProgress,
+  normalizeFraction,
+  progressBookKey,
+  pushReadingProgress,
+  seedLegacyChapters,
+  type ReadingProgressRecord,
+} from '../lib/progress';
 import type { ReaderChapter, ReaderMeta } from '../lib/types';
 
 type ReaderTheme = 'light' | 'green' | 'sepia' | 'dark';
@@ -234,6 +244,7 @@ export function ReaderPage() {
   const [immersive, setImmersive] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [scrollPercent, setScrollPercent] = useState(0);
+  const [chapterMap, setChapterMap] = useState<Record<string, number>>({});
   const seq = useRef(0);
   const contentRef = useRef<HTMLElement>(null);
   const htmlRef = useRef<HTMLDivElement>(null);
@@ -246,6 +257,26 @@ export function ReaderPage() {
   const suppressSaveRef = useRef(false);
   const restoredKeyRef = useRef('');
   const ttsGenRef = useRef(0);
+  const chapterMapRef = useRef<Record<string, number>>({});
+  const loadedIdxRef = useRef(0);
+  const progressKeyRef = useRef('');
+  const metaRef = useRef<ReaderMeta | null>(null);
+  const chapterTitleRef = useRef('');
+  const scrollFractionRef = useRef(0);
+  const resumeFractionRef = useRef<{ ch: number; scroll: number } | null>(null);
+  const pendingSaveRef = useRef<{
+    ch: number;
+    scroll: number;
+    chapters: Record<string, number>;
+  } | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+
+  const progressKey = bookKey
+    ? progressBookKey(
+        mode === 'online' ? 'url' : mode,
+        mode === 'file' ? file : mode === 'epub' ? epubUrl : onlineUrl,
+      )
+    : '';
 
   useEffect(() => {
     idxRef.current = idx;
@@ -254,6 +285,81 @@ export function ReaderPage() {
 
   // 旧版后端 /api/epub_meta 不返回 total,退回章节数
   const total = meta?.total ?? meta?.chapters.length ?? 0;
+
+  useEffect(() => {
+    progressKeyRef.current = progressKey;
+  }, [progressKey]);
+
+  const flushProgress = useCallback(async () => {
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    const key = progressKeyRef.current;
+    if (!pending || !key) return;
+    const info = metaRef.current;
+    try {
+      await pushReadingProgress({
+        book: key,
+        kind: 'novel',
+        title: info?.title || '',
+        total: info?.total ?? info?.chapters.length ?? 0,
+        ch: pending.ch,
+        chapterTitle: chapterTitleRef.current,
+        scroll: pending.scroll,
+        chapters: pending.chapters,
+        updated: Date.now(),
+      });
+    } catch {
+      /* 后端暂不可用时本地进度照旧,下次翻章再补 */
+    }
+  }, []);
+
+  const noteChapterFraction = useCallback((ch: number, fraction: number) => {
+    if (!ch) return chapterMapRef.current;
+    const value = normalizeFraction(fraction);
+    const previous = chapterMapRef.current;
+    // 只增不减:回滚重读不会把已经读完的章抹掉
+    if (previous[String(ch)] !== undefined && previous[String(ch)] >= value) {
+      return previous;
+    }
+    const next = { ...previous, [String(ch)]: value };
+    chapterMapRef.current = next;
+    setChapterMap(next);
+    return next;
+  }, []);
+
+  const queueProgress = useCallback(
+    (ch: number, fraction: number, immediate = false) => {
+      if (!ch) return;
+      const chapters = noteChapterFraction(ch, fraction);
+      pendingSaveRef.current = { ch, scroll: clampRatio(fraction), chapters };
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (immediate) {
+        void flushProgress();
+        return;
+      }
+      saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null;
+        void flushProgress();
+      }, 800);
+    },
+    [flushProgress, noteChapterFraction],
+  );
+
+  const currentFraction = useCallback(() => {
+    const root = contentRef.current;
+    if (!root) return 0;
+    const max = root.scrollHeight - root.clientHeight;
+    // 短章节整章都在屏幕里,滚不动也要算读完
+    if (max <= 4) return loadedIdxRef.current === idxRef.current ? 1 : 0;
+    return clampRatio(root.scrollTop / max);
+  }, []);
 
   useEffect(() => {
     if (!bookKey) {
@@ -272,6 +378,18 @@ export function ReaderPage() {
     setSelBubble(null);
     pendingAnchor.current = null;
     setNotes({ bookmarks: [], notes: [] });
+    metaRef.current = null;
+    loadedIdxRef.current = 0;
+    chapterTitleRef.current = '';
+    chapterMapRef.current = {};
+    setChapterMap({});
+    scrollFractionRef.current = 0;
+    resumeFractionRef.current = null;
+    pendingSaveRef.current = null;
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
 
     const load = async () => {
       try {
@@ -330,6 +448,7 @@ export function ReaderPage() {
         }
         if (cancelled) return;
         setMeta(next);
+        metaRef.current = next;
         let saved = Number(localStorage.getItem(`reader:${bookKey}`) || 0);
         if (!saved) {
           try {
@@ -341,8 +460,40 @@ export function ReaderPage() {
             saved = 0;
           }
         }
-        const start =
-          next.chapters.find((item) => item.idx === saved)?.idx ?? next.chapters[0]?.idx ?? 1;
+
+        // 共享进度优先:电脑和手机写同一份,谁最后读就从谁那里接着读
+        let shared: ReadingProgressRecord | undefined;
+        if (progressKey) {
+          try {
+            shared = (await fetchReadingProgress(progressKey))[progressKey];
+          } catch {
+            shared = undefined;
+          }
+        }
+        if (cancelled) return;
+        const chapterTotal = next.total ?? next.chapters.length;
+        let start = shared?.ch || saved || 0;
+        if (!next.chapters.some((item) => item.idx === start)) {
+          start = next.chapters[0]?.idx ?? 1;
+        }
+        let chapters: Record<string, number> =
+          shared && shared.chapters && Object.keys(shared.chapters).length
+            ? { ...shared.chapters }
+            : {};
+        if (!Object.keys(chapters).length) {
+          // 升级前的旧记录只有章节号:按连续阅读补一次,保住原百分比
+          const legacyCh = shared?.ch || saved || 0;
+          if (legacyCh > 0) {
+            chapters = seedLegacyChapters(legacyCh, shared?.scroll ?? 0, chapterTotal);
+          }
+        }
+        chapterMapRef.current = chapters;
+        setChapterMap(chapters);
+        resumeFractionRef.current =
+          shared && shared.ch === start && shared.scroll > 0
+            ? { ch: start, scroll: clampRatio(shared.scroll) }
+            : null;
+        scrollFractionRef.current = resumeFractionRef.current?.scroll ?? 0;
         setIdx(start);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : '书籍加载失败');
@@ -354,7 +505,7 @@ export function ReaderPage() {
     return () => {
       cancelled = true;
     };
-  }, [bookKey, epubUrl, file, localEpub, mode, onlineUrl, titleParam]);
+  }, [bookKey, epubUrl, file, localEpub, mode, onlineUrl, progressKey, titleParam]);
 
   useEffect(() => {
     if (!meta || !bookKey) return;
@@ -376,14 +527,23 @@ export function ReaderPage() {
           data = await apiGet<ReaderChapter>('/api/read', { file, ch: idx });
         }
         if (id !== seq.current) return;
+        const loadedTitle =
+          data.title || meta.chapters.find((item) => item.idx === idx)?.title || '';
         setChapter({
-          title: data.title || meta.chapters.find((item) => item.idx === idx)?.title || '',
+          title: loadedTitle,
           text: data.text || (data.html ? stripHtml(data.html) : ''),
           html: data.html || undefined,
         });
         setLoadedIdx(idx);
+        loadedIdxRef.current = idx;
+        chapterTitleRef.current = loadedTitle;
+        const resume = resumeFractionRef.current;
+        const startFraction = resume && resume.ch === idx ? resume.scroll : 0;
+        scrollFractionRef.current = startFraction;
+        queueProgress(idx, startFraction, true);
         try {
           localStorage.setItem(`reader:${bookKey}`, String(idx));
+          localStorage.setItem(`reader_ts:${bookKey}`, String(Date.now()));
           const progress = JSON.parse(localStorage.getItem(READ_KEY) || '{}') as Record<
             string,
             number
@@ -404,7 +564,7 @@ export function ReaderPage() {
     return () => {
       seq.current += 1;
     };
-  }, [bookKey, epubUrl, file, idx, localEpub, meta, mode, onlineUrl, toast]);
+  }, [bookKey, epubUrl, file, idx, localEpub, meta, mode, onlineUrl, queueProgress, toast]);
 
   const loadNotes = useCallback(async () => {
     if (!bookKey) return;
@@ -434,12 +594,14 @@ export function ReaderPage() {
       const target = Math.min(total, Math.max(1, next));
       if (target === idxRef.current) return;
       persistScroll();
+      queueProgress(idxRef.current, currentFraction(), true);
       pendingAnchor.current = null;
+      scrollFractionRef.current = 0;
       setScrollPercent(0);
       setIdx(target);
       contentRef.current?.scrollTo({ top: 0 });
     },
-    [persistScroll, total],
+    [currentFraction, persistScroll, queueProgress, total],
   );
 
   const jumpTo = useCallback(
@@ -527,13 +689,18 @@ export function ReaderPage() {
     const root = contentRef.current;
     if (!root) return;
     const max = root.scrollHeight - root.clientHeight;
-    setScrollPercent(max > 0 ? Math.min(100, Math.max(0, (root.scrollTop / max) * 100)) : 0);
+    // 短章节整章可见,没有滚动条也要算读完
+    const fraction =
+      max > 0 ? clampRatio(root.scrollTop / max) : loadedIdxRef.current === idxRef.current ? 1 : 0;
+    setScrollPercent(fraction * 100);
+    scrollFractionRef.current = fraction;
     if (suppressSaveRef.current) return;
     if (posTimerRef.current) window.clearTimeout(posTimerRef.current);
     posTimerRef.current = window.setTimeout(() => {
       persistScroll(idxRef.current, root.scrollTop);
+      queueProgress(idxRef.current, currentFraction());
     }, 250);
-  }, [persistScroll]);
+  }, [currentFraction, persistScroll, queueProgress]);
 
   useEffect(() => {
     return () => {
@@ -542,8 +709,22 @@ export function ReaderPage() {
       if (root && bookKeyRef.current) {
         writeScrollTop(bookKeyRef.current, idxRef.current, root.scrollTop);
       }
+      if (progressKeyRef.current) {
+        // 离开阅读器前把最后位置送出去,不等 800ms 防抖
+        const fraction = currentFraction();
+        const current = chapterMapRef.current[String(idxRef.current)];
+        pendingSaveRef.current = {
+          ch: idxRef.current,
+          scroll: fraction,
+          chapters:
+            current !== undefined
+              ? chapterMapRef.current
+              : { ...chapterMapRef.current, [String(idxRef.current)]: fraction },
+        };
+        void flushProgress();
+      }
     };
-  }, []);
+  }, [currentFraction, flushProgress]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -672,19 +853,32 @@ export function ReaderPage() {
     restoredKeyRef.current = token;
     if (pendingAnchor.current?.ch === idx) return;
     const top = readScrollTop(bookKey, idx);
-    if (!top) return;
+    const resume = resumeFractionRef.current;
+    const fraction = resume && resume.ch === idx ? resume.scroll : 0;
     suppressSaveRef.current = true;
     let cancelled = false;
     const apply = () => {
       if (cancelled || !root.isConnected) return;
       const max = Math.max(0, root.scrollHeight - root.clientHeight);
-      root.scrollTop = Math.min(top, max);
-      setScrollPercent(max > 0 ? Math.min(100, (root.scrollTop / max) * 100) : 0);
+      const target = top > 0 ? top : Math.round(max * fraction);
+      root.scrollTop = Math.min(target, max);
+      if (max > 0) {
+        const restored = clampRatio(root.scrollTop / max);
+        setScrollPercent(restored * 100);
+        scrollFractionRef.current = restored;
+        if (restored > 0) queueProgress(idx, restored);
+      } else {
+        // 短章节整屏可见,滚不动也直接算读完
+        setScrollPercent(100);
+        scrollFractionRef.current = 1;
+        queueProgress(idx, 1);
+      }
     };
     const raf = window.requestAnimationFrame(apply);
     const timer = window.setTimeout(() => {
       apply();
       suppressSaveRef.current = false;
+      resumeFractionRef.current = null;
     }, 300);
     return () => {
       cancelled = true;
@@ -692,7 +886,7 @@ export function ReaderPage() {
       window.clearTimeout(timer);
       suppressSaveRef.current = false;
     };
-  }, [bookKey, chapter?.html, chapter?.text, idx, loadedIdx]);
+  }, [bookKey, chapter?.html, chapter?.text, idx, loadedIdx, queueProgress]);
 
   // EPUB 章节 HTML 注入后的增强:插图放大、脚注锚点、跨章节链接
   useEffect(() => {
@@ -786,9 +980,17 @@ export function ReaderPage() {
     return meta.chapters.slice(start, start + TOC_WINDOW);
   }, [idx, meta, tocQuery]);
 
-  const percent = total
-    ? Math.min(100, Math.max(0, ((idx - 1 + scrollPercent / 100) / total) * 100))
-    : 0;
+  const liveChapterMap = useMemo(() => {
+    const current = chapterMap[String(idx)];
+    const fraction = clampRatio(scrollPercent / 100);
+    if (current !== undefined && current >= fraction) return chapterMap;
+    return { ...chapterMap, [String(idx)]: fraction };
+  }, [chapterMap, idx, scrollPercent]);
+
+  const percent = useMemo(
+    () => continuousPercent({ total, ch: idx, scroll: scrollPercent / 100, chapters: liveChapterMap }),
+    [idx, liveChapterMap, scrollPercent, total],
+  );
   const readerFont = READER_FONTS.find((font) => font.key === layout.ff) ?? READER_FONTS[0];
   const readerStyle = {
     '--reader-width': `${layout.w}px`,
@@ -1233,18 +1435,35 @@ export function ReaderPage() {
               </button>
             </div>
             <div className="reader__toc-list">
-              {tocItems.map((item) => (
-                <button
-                  key={item.idx}
-                  type="button"
-                  className={`reader__toc-item${item.idx === idx ? ' is-current' : ''}`}
-                  onClick={() => jumpTo(item.idx)}
-                  title={item.title}
-                >
-                  {item.volume ? <span className="reader__toc-volume">{item.volume}</span> : null}
-                  <span>{item.title || `第 ${item.idx} 章`}</span>
-                </button>
-              ))}
+              {tocItems.map((item) => {
+                const fraction = normalizeFraction(liveChapterMap[String(item.idx)] ?? 0);
+                return (
+                  <button
+                    key={item.idx}
+                    type="button"
+                    className={`reader__toc-item${item.idx === idx ? ' is-current' : ''}`}
+                    onClick={() => jumpTo(item.idx)}
+                    title={item.title}
+                  >
+                    <span className="reader__toc-main">
+                      {item.volume ? (
+                        <span className="reader__toc-volume">{item.volume}</span>
+                      ) : null}
+                      <span className="reader__toc-title">
+                        {item.title || `第 ${item.idx} 章`}
+                      </span>
+                    </span>
+                    {fraction > 0 ? (
+                      <span
+                        className={`reader__toc-pct${fraction >= 1 ? ' is-done' : ''}`}
+                        title={`本章已读 ${Math.round(fraction * 100)}%`}
+                      >
+                        {fraction >= 1 ? '已读' : `${Math.round(fraction * 100)}%`}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
               {!tocItems.length ? <div className="reader__toc-empty">没有匹配的章节</div> : null}
             </div>
             {meta && meta.chapters.length > tocItems.length && !tocQuery ? (
@@ -1408,8 +1627,11 @@ export function ReaderPage() {
               <ChevronLeft size={16} />
               上一章
             </button>
-            <span className="reader__count">
-              {idx} / {total || '—'}
+            <span
+              className="reader__count"
+              title="总进度只统计从第 1 章起连续读过的部分，跳读不计入"
+            >
+              {idx} / {total || '—'} · 总进度 {percent}%
             </span>
             <button type="button" className="btn btn--ghost" onClick={() => go(idx + 1)} disabled={!total || idx >= total}>
               下一章

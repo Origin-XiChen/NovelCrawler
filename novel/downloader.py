@@ -381,7 +381,16 @@ def _download_epub(book, source, chapters, start, end, charset, fetcher,
     out_path = os.path.join(
         out_dir, f"{safe_filename(book.title or 'novel')}[{safe_filename(str(source['name']))}].epub"
     )
-    write_epub(book.title or "小说", source["name"], collected, out_path)
+    cover_data = b""
+    try:
+        from . import covers
+        cover_data = covers.cover_bytes_for(
+            os.path.basename(out_path), getattr(book, "cover", "")
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    write_epub(book.title or "小说", source["name"], collected, out_path,
+               cover=cover_data or None)
     # 完成后清理 partial
     try:
         os.remove(partial_path)
@@ -445,6 +454,12 @@ def _download_txt(book, source, chapters, start, end, charset, fetcher,
     written = _count_done(out_path)
     if failed_chapters:
         log(f"⚠️  下载完成但有 {len(failed_chapters)} 章失败: {failed_chapters[:10]}{'...' if len(failed_chapters) > 10 else ''}")
+    # TXT 没有内嵌容器,封面单独缓存在 .covers/,随手机离线包一起走
+    try:
+        from . import covers
+        covers.ensure_cover(out_path, getattr(book, "cover", ""))
+    except Exception:  # noqa: BLE001
+        pass
     log(f"完成!已保存 {written} 章 → {os.path.abspath(out_path)}")
     return out_path
 

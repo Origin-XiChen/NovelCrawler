@@ -1349,6 +1349,14 @@ a {
   margin: 0 0 5px;
 }
 
+.shelf-card__chapter {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .shelf-card__actions {
   display: flex;
   flex-wrap: wrap;
@@ -1715,7 +1723,9 @@ a {
 }
 
 .reader__toc-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   padding: 7px 10px;
   border: 0;
@@ -1725,9 +1735,33 @@ a {
   font-size: var(--fs-aux);
   line-height: 1.5;
   text-align: left;
+}
+
+.reader__toc-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.reader__toc-title {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.reader__toc-pct {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--reader-ink) 8%, transparent);
+  color: var(--reader-muted);
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.reader__toc-pct.is-done {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
 }
 
 .reader__toc-item:hover {

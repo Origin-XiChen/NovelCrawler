@@ -17,7 +17,8 @@ import BookCover from '../components/BookCover';
 import { DownloadButton, LocalChip } from '../components/OfflineControls';
 import { getActiveServer } from '../lib/connection';
 import { deleteLocalBook, localBookHref } from '../lib/content';
-import { errorMessage, formatDate, formatSize, percent } from '../lib/format';
+import { errorMessage, formatDate, formatSize } from '../lib/format';
+import { continuousPercent } from '../lib/reading-progress';
 import { importLocalFiles } from '../lib/offline/localImport';
 import { fetchCatalog, isOutdated } from '../lib/offline/transfer';
 import {
@@ -286,7 +287,7 @@ export default function ShelfPage() {
         <div className="shelf-list">
           {books.map((book) => {
             const record = library.progress[book.id];
-            const scale = record?.total ? percent(record.ch, record.total) : 0;
+            const scale = record ? continuousPercent(record) : 0;
             const dirty = Boolean(record?.dirty);
             return (
               <div className="shelf-row" key={book.id}>
@@ -311,7 +312,7 @@ export default function ShelfPage() {
                     </span>
                     {record && (
                       <span className="novel-row__progress">
-                        {progressLabel(book, record)}
+                        {progressLabel(book, record)} · 总进度 {scale}%
                         <i style={{ width: `${scale}%` }} />
                       </span>
                     )}

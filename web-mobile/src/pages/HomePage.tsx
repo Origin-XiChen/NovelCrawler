@@ -14,8 +14,9 @@ import {
 } from 'lucide-react';
 import BookCover from '../components/BookCover';
 import { getActiveServer } from '../lib/connection';
-import { errorMessage, formatSize, percent } from '../lib/format';
+import { errorMessage, formatSize } from '../lib/format';
 import { localReaderHref } from '../lib/content';
+import { continuousPercent } from '../lib/reading-progress';
 import { ensurePersistence, storageQuota } from '../lib/offline/db';
 import { syncProgress } from '../lib/offline/sync';
 import {
@@ -134,7 +135,7 @@ export default function HomePage() {
             </span>
           </div>
           <div className="continue-card__ring">
-            <span>{percent(recent.record.ch, recent.record.total)}%</span>
+            <span>{continuousPercent(recent.record)}%</span>
           </div>
         </button>
       )}

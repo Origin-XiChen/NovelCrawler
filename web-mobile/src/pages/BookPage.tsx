@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, BookOpen, FileText, Images, Loader2, Play, Search } from 'lucide-react';
-import { apiGet } from '../lib/api';
-import { errorMessage, gradientFor, initialOf, percent } from '../lib/format';
+import { apiGet, mediaUrl } from '../lib/api';
+import { errorMessage, gradientFor, initialOf } from '../lib/format';
+import {
+  continuousPercent,
+  normalizeFraction,
+  seedLegacyChapters,
+} from '../lib/reading-progress';
 import BookCover from '../components/BookCover';
 import { DownloadButton, LocalChip } from '../components/OfflineControls';
 import {
@@ -28,6 +33,23 @@ function Loading({ text }: { text: string }) {
     <div className="library-loading">
       <Loader2 size={24} className="spin" />
       <span>{text}</span>
+    </div>
+  );
+}
+
+function DetailCover({ title, epub, src }: { title: string; epub: boolean; src?: string }) {
+  const [failed, setFailed] = useState(false);
+  const image = src && !failed ? src : '';
+  return (
+    <div className="detail-cover" style={image ? undefined : { background: gradientFor(title) }}>
+      {image ? (
+        <img src={image} alt="" onError={() => setFailed(true)} />
+      ) : (
+        <>
+          <span>{initialOf(title)}</span>
+          <em>{epub ? 'EPUB' : 'TXT'}</em>
+        </>
+      )}
     </div>
   );
 }
@@ -83,6 +105,7 @@ function NovelDetail({
   const navigate = useNavigate();
   const [meta, setMeta] = useState<NovelMeta | null>(null);
   const [current, setCurrent] = useState(1);
+  const [chapterMap, setChapterMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -98,6 +121,11 @@ function NovelDetail({
         const chapters = data.chapters || [];
         setMeta({ ...data, chapters });
         setCurrent(Math.min(Math.max(1, saved?.ch || 1), Math.max(1, chapters.length)));
+        setChapterMap(
+          saved?.chapters && Object.keys(saved.chapters).length
+            ? saved.chapters
+            : seedLegacyChapters(saved?.ch || 0, saved?.scroll || 0, chapters.length),
+        );
       })
       .catch((cause) => {
         if (!cancelled) setError(errorMessage(cause));
@@ -117,6 +145,10 @@ function NovelDetail({
     return chapters.filter((item) => chapterLabel(item).toLowerCase().includes(keyword));
   }, [chapters, query]);
   const visible = filtered.slice(0, limit);
+  const overallPercent = useMemo(
+    () => continuousPercent({ total: chapters.length, ch: current, chapters: chapterMap }),
+    [chapterMap, chapters.length, current],
+  );
 
   return (
     <Shell
@@ -127,15 +159,17 @@ function NovelDetail({
         {local ? (
           <BookCover book={local} />
         ) : (
-          <div className="detail-cover" style={{ background: gradientFor(source.title) }}>
-            <span>{initialOf(source.title)}</span>
-            <em>{source.epub ? 'EPUB' : 'TXT'}</em>
-          </div>
+          <DetailCover
+            title={source.title}
+            epub={source.epub}
+            src={source.coverUrl ? mediaUrl(source.coverUrl) : ''}
+          />
         )}
         <div className="detail-info">
           <h1>{source.title}</h1>
           <p className="detail-info__row">
             <span>{loading ? '正在解析…' : `${chapters.length} 章`}</span>
+            {overallPercent > 0 && <span>总进度 {overallPercent}%</span>}
             {local && <LocalChip />}
           </p>
           <button
@@ -183,6 +217,7 @@ function NovelDetail({
           <div className="chapter-list">
             {visible.map((chapter) => {
               const active = chapter.idx === current;
+              const fraction = normalizeFraction(chapterMap[String(chapter.idx)] ?? 0);
               return (
                 <button
                   type="button"
@@ -192,6 +227,11 @@ function NovelDetail({
                 >
                   <span className="chapter-row__idx">{chapter.idx}</span>
                   <span className="chapter-row__title">{chapterLabel(chapter)}</span>
+                  {fraction > 0 && (
+                    <span className="chapter-row__badge">
+                      {fraction >= 1 ? '已读' : `${Math.round(fraction * 100)}%`}
+                    </span>
+                  )}
                   {active && <span className="chapter-row__badge">当前</span>}
                 </button>
               );
@@ -226,6 +266,7 @@ function ComicDetail({
   const [error, setError] = useState('');
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
   const [totalMap, setTotalMap] = useState<Record<string, number>>({});
+  const [chapterMaps, setChapterMaps] = useState<Record<string, Record<string, number>>>({});
   const [loading, setLoading] = useState(true);
 
   const files = source.files;
@@ -237,18 +278,21 @@ function ComicDetail({
     setError('');
     const progress: Record<string, number> = {};
     const totals: Record<string, number> = {};
+    const maps: Record<string, Record<string, number>> = {};
     Promise.all(
       files.map(async (file) => {
         const saved = await source.loadProgress(file);
         if (!saved) return;
         if (saved.ch) progress[file] = saved.ch;
         if (saved.total) totals[file] = saved.total;
+        if (saved.chapters) maps[file] = saved.chapters;
       }),
     )
       .then(() => {
         if (cancelled) return;
         setProgressMap(progress);
         setTotalMap(totals);
+        setChapterMaps(maps);
       })
       .catch((cause) => {
         if (!cancelled) setError(errorMessage(cause));
@@ -320,6 +364,9 @@ function ComicDetail({
           {files.map((pdf, index) => {
             const page = progressMap[pdf] || 0;
             const total = totalMap[pdf] || 0;
+            const percentRead = total
+              ? continuousPercent({ total, ch: page, chapters: chapterMaps[pdf] })
+              : 0;
             const mine = local || stored[`comic:${source.title}/${pdf}`];
             return (
               <div className="chapter-row chapter-row--split" key={pdf}>
@@ -332,7 +379,7 @@ function ComicDetail({
                   <span className="chapter-row__title">{pdf}</span>
                   {page > 0 && (
                     <span className="chapter-row__badge">
-                      {total ? `${percent(page, total)}%` : '已读'}
+                      {total ? `${percentRead}%` : '已读'}
                     </span>
                   )}
                   <FileText size={16} className="muted" />

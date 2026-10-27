@@ -2003,6 +2003,22 @@ img {
   font-variant-numeric: tabular-nums;
 }
 
+.toc-row__pct {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--reader-line);
+  color: var(--reader-muted);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.toc-row__pct.is-done {
+  background: rgba(44, 110, 99, 0.14);
+  color: var(--accent);
+}
+
 .toc-row.is-current {
   background: var(--reader-line);
   color: #2c6e63;

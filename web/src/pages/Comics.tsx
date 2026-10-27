@@ -32,6 +32,15 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, coverSrc } from '../lib/api';
 import { formatBytes, relativeTime } from '../lib/format';
+import {
+  basename,
+  continuousPercent,
+  fetchReadingProgress,
+  pushReadingProgress,
+  seedLegacyChapters,
+  type ReadingProgressInput,
+  type ReadingProgressRecord,
+} from '../lib/progress';
 import { useToast } from '../lib/toast';
 import { Modal } from '../components/Modal';
 import type {
@@ -157,6 +166,10 @@ function saveComicIndex(variant: Variant, index: number) {
   } catch {
     /* 忽略写入失败 */
   }
+}
+
+function comicProgressKey(title: string, file: string): string {
+  return `comic:${title}/${basename(file)}`;
 }
 
 function pdfPageImage(title: string, file: string, page: number): string {
@@ -369,6 +382,7 @@ export function ComicsPage() {
   );
   const [pdfTocOpen, setPdfTocOpen] = useState(false);
   const [pdfUiHidden, setPdfUiHidden] = useState(false);
+  const [pdfChapterMap, setPdfChapterMap] = useState<Record<string, number>>({});
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const searchSeq = useRef(0);
@@ -381,6 +395,9 @@ export function ComicsPage() {
   const lastPdfKeyRef = useRef('');
   const pdfAligningRef = useRef(false);
   const pdfAlignStopRef = useRef<() => void>(() => undefined);
+  const pdfChapterMapRef = useRef<Record<string, number>>({});
+  const pdfPushTimerRef = useRef(0);
+  const pdfLastPushRef = useRef<ReadingProgressInput | null>(null);
   const { toast } = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -566,8 +583,27 @@ export function ComicsPage() {
     return () => observer.disconnect();
   }, [reader?.pages, readerFit, readerTwoPage, readerZoom]);
 
+  const flushPdfProgress = useCallback(() => {
+    if (pdfPushTimerRef.current) {
+      window.clearTimeout(pdfPushTimerRef.current);
+      pdfPushTimerRef.current = 0;
+    }
+    const latest = pdfLastPushRef.current;
+    pdfLastPushRef.current = null;
+    if (latest) void pushReadingProgress(latest).catch(() => undefined);
+  }, []);
+
+  useEffect(() => () => flushPdfProgress(), [flushPdfProgress]);
+
   useEffect(() => {
     if (!pdfReader || pdfReader.loading || !pdfReader.pages) return;
+    const pageKey = String(pdfReader.page);
+    const map =
+      pdfChapterMapRef.current[pageKey] === 1
+        ? pdfChapterMapRef.current
+        : { ...pdfChapterMapRef.current, [pageKey]: 1 };
+    pdfChapterMapRef.current = map;
+    setPdfChapterMap(map);
     try {
       localStorage.setItem(
         PDFREAD_KEY,
@@ -576,11 +612,30 @@ export function ComicsPage() {
           file: pdfReader.file,
           page: pdfReader.page,
           ts: Date.now(),
+          chapters: map,
         }),
       );
     } catch {
       /* 存储不可用 */
     }
+    // 翻到的每一页都算"看过";总进度只累计从第 1 页连续翻过来的部分
+    const input: ReadingProgressInput = {
+      book: comicProgressKey(pdfReader.title, pdfReader.file),
+      kind: 'comic',
+      title: pdfReader.title,
+      total: pdfReader.pages,
+      ch: pdfReader.page,
+      chapterTitle: basename(pdfReader.file),
+      scroll: 0,
+      chapters: map,
+    };
+    pdfLastPushRef.current = input;
+    if (pdfPushTimerRef.current) window.clearTimeout(pdfPushTimerRef.current);
+    pdfPushTimerRef.current = window.setTimeout(() => {
+      const latest = pdfLastPushRef.current;
+      pdfLastPushRef.current = null;
+      if (latest) void pushReadingProgress(latest).catch(() => undefined);
+    }, 1500);
   }, [pdfReader?.file, pdfReader?.loading, pdfReader?.page, pdfReader?.pages, pdfReader?.title]);
 
   const startPdfAlign = useCallback((targetPage: number) => {
@@ -765,6 +820,7 @@ export function ComicsPage() {
         if (pdfTocOpen) setPdfTocOpen(false);
         else if (pdfUiHidden) setPdfUiHidden(false);
         else {
+          flushPdfProgress();
           setPdfReader(null);
           setPdfTocOpen(false);
           setPdfUiHidden(false);
@@ -953,6 +1009,7 @@ export function ComicsPage() {
     }
     const target = index ?? savedComicIndex(variant, chapters);
     setDetail(null);
+    flushPdfProgress();
     setPdfReader(null);
     setReaderTocOpen(false);
     setReaderUiHidden(false);
@@ -1030,6 +1087,7 @@ export function ComicsPage() {
 
   const openPdf = async (title: string, file: string) => {
     const seq = ++pdfSeq.current;
+    flushPdfProgress();
     setReader(null);
     setPdfTocOpen(false);
     setPdfUiHidden(false);
@@ -1046,12 +1104,24 @@ export function ComicsPage() {
       const actualFile = file || files[0] || '';
       if (!actualFile) throw new Error('未找到 PDF 文件');
       let savedPage = 1;
+      let savedTs = 0;
+      let savedChapters: Record<string, number> = {};
       try {
         const saved = JSON.parse(localStorage.getItem(PDFREAD_KEY) || 'null') as
-          | { title?: string; file?: string; page?: number }
+          | {
+              title?: string;
+              file?: string;
+              page?: number;
+              ts?: number;
+              chapters?: Record<string, number>;
+            }
           | null;
         if (saved && saved.title === title && saved.file === actualFile) {
           savedPage = Math.max(1, Number(saved.page) || 1);
+          savedTs = Number(saved.ts) || 0;
+          if (saved.chapters && typeof saved.chapters === 'object') {
+            savedChapters = saved.chapters;
+          }
         }
       } catch {
         /* 忽略损坏的进度记录 */
@@ -1062,13 +1132,53 @@ export function ComicsPage() {
       });
       if (seq !== pdfSeq.current) return;
       const pages = pageData.num_pages ?? 0;
+
+      const book = comicProgressKey(title, actualFile);
+      let shared: ReadingProgressRecord | undefined;
+      try {
+        shared = (await fetchReadingProgress(book))[book];
+      } catch {
+        shared = undefined;
+      }
+      if (seq !== pdfSeq.current) return;
+      const sharedUpdated = Number(shared?.updated) || 0;
+      let startPage = 1;
+      let chapters: Record<string, number> = {};
+      if (shared && sharedUpdated > savedTs) {
+        startPage = Math.max(1, Number(shared.ch) || 1);
+        chapters =
+          shared.chapters && Object.keys(shared.chapters).length
+            ? { ...shared.chapters }
+            : seedLegacyChapters(startPage, 0, pages);
+      } else {
+        startPage = savedPage;
+        chapters = Object.keys(savedChapters).length
+          ? { ...savedChapters }
+          : seedLegacyChapters(savedPage, 0, pages);
+        if (savedTs > sharedUpdated) {
+          // 本机进度比电脑上的共享记录新:顺手补传,免得换设备读丢
+          void pushReadingProgress({
+            book,
+            kind: 'comic',
+            title,
+            total: pages,
+            ch: savedPage,
+            chapterTitle: basename(actualFile),
+            scroll: 0,
+            chapters,
+            updated: savedTs,
+          }).catch(() => undefined);
+        }
+      }
+      pdfChapterMapRef.current = chapters;
+      setPdfChapterMap(chapters);
       setPdfReader((prev) =>
         prev && prev.title === title
           ? {
               ...prev,
               file: actualFile,
               pages,
-              page: Math.min(pages || 1, savedPage),
+              page: Math.min(pages || 1, startPage),
               loading: false,
               files,
               meta: metaData.meta ?? null,
@@ -1089,6 +1199,12 @@ export function ComicsPage() {
     () => (pdfReader?.meta?.volumes ?? []).flatMap((volume) => volume.chapters ?? []),
     [pdfReader?.meta],
   );
+
+  const pdfPercent = useMemo(() => {
+    if (!pdfReader || !pdfReader.pages) return 0;
+    const chapters = { ...pdfChapterMap, [String(pdfReader.page)]: 1 };
+    return continuousPercent({ total: pdfReader.pages, ch: pdfReader.page, chapters });
+  }, [pdfChapterMap, pdfReader?.page, pdfReader?.pages]);
 
   const changeReaderZoom = (delta: number) => {
     setReaderZoom((value) =>
@@ -2445,6 +2561,7 @@ export function ComicsPage() {
               type="button"
               className="btn btn--ghost btn--sm"
               onClick={() => {
+                flushPdfProgress();
                 setPdfReader(null);
                 setPdfTocOpen(false);
                 setPdfUiHidden(false);
@@ -2460,7 +2577,9 @@ export function ComicsPage() {
               </div>
               <div className="comic-reader__sub" title={pdfReader.file}>
                 {pdfReader.file}
-                {pdfReader.pages ? ` · ${pdfReader.page}/${pdfReader.pages} 页` : ''}
+                {pdfReader.pages
+                  ? ` · ${pdfReader.page}/${pdfReader.pages} 页 · 总进度 ${pdfPercent}%`
+                  : ''}
               </div>
             </div>
             <div className="comic-reader__controls">
@@ -2532,6 +2651,7 @@ export function ComicsPage() {
                 </button>
                 <span className="comic-reader__zoomval">
                   {pdfReader.page} / {pdfReader.pages || '—'}
+                  {pdfReader.pages ? ` · ${pdfPercent}%` : ''}
                 </span>
                 <button
                   type="button"
@@ -2730,7 +2850,7 @@ export function ComicsPage() {
           ) : null}
           {pdfContinuous && pdfReader.pages && !pdfReader.error ? (
             <div className="comic-reader__hud">
-              {pdfReader.page} / {pdfReader.pages}
+              {pdfReader.page} / {pdfReader.pages} · {pdfPercent}%
             </div>
           ) : null}
         </div>

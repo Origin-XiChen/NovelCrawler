@@ -12,6 +12,11 @@ import {
 import { apiDelete, apiGet, apiPost, coverSrc } from '../lib/api';
 import { useToast } from '../lib/toast';
 import { Modal } from '../components/Modal';
+import {
+  fetchReadingProgress,
+  shelfProgressKeys,
+  type ReadingProgressRecord,
+} from '../lib/progress';
 import type { ShelfEntry } from '../lib/types';
 import { relativeTime } from '../lib/format';
 
@@ -37,8 +42,24 @@ function localFileOf(entry: ShelfEntry): string {
   return entry.url.startsWith('file:') ? entry.url.slice(5) : '';
 }
 
+function readingOf(
+  entry: ShelfEntry,
+  records: Record<string, ReadingProgressRecord>,
+): ReadingProgressRecord | undefined {
+  const localFile = localFileOf(entry);
+  const isEpub = Boolean(
+    entry.local_epub || entry.source === 'OPDS' || localFile.toLowerCase().endsWith('.epub'),
+  );
+  for (const key of shelfProgressKeys(localFile, entry.url, isEpub)) {
+    const record = records[key];
+    if (record && record.ch > 0) return record;
+  }
+  return undefined;
+}
+
 export function ShelfPage() {
   const [entries, setEntries] = useState<ShelfEntry[]>([]);
+  const [progressMap, setProgressMap] = useState<Record<string, ReadingProgressRecord>>({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -60,6 +81,11 @@ export function ShelfPage() {
     try {
       const data = await apiGet<{ shelf: ShelfEntry[] }>('/api/shelf');
       setEntries(data.shelf ?? []);
+      try {
+        setProgressMap(await fetchReadingProgress());
+      } catch {
+        setProgressMap({});
+      }
     } catch (error) {
       if (!silent) toast(error instanceof Error ? error.message : '书架加载失败', 'error');
     } finally {
@@ -281,6 +307,7 @@ export function ShelfPage() {
             const working = busy[entry.url];
             const localFile = localFileOf(entry);
             const fromFile = entry.url.startsWith('file:');
+            const reading = readingOf(entry, progressMap);
             return (
               <article key={entry.url} className="shelf-card">
                 <div className="shelf-card__top">
@@ -304,7 +331,22 @@ export function ShelfPage() {
                       </div>
                     ) : null}
                     <div className="shelf-card__progress">
-                      {checked > 0 ? (
+                      {reading ? (
+                        <>
+                          <div className="progress-track">
+                            <i style={{ width: `${reading.percent}%` }} />
+                          </div>
+                          <span>
+                            读到 {reading.ch} 章 · 总进度 {reading.percent}%
+                            {checked > 0 ? ` · 本地 ${local}/${checked}` : ''}
+                          </span>
+                          {reading.chapterTitle ? (
+                            <span className="shelf-card__chapter" title={reading.chapterTitle}>
+                              {reading.chapterTitle}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : checked > 0 ? (
                         <>
                           <div className="progress-track">
                             <i style={{ width: `${Math.min(100, Math.round((local / checked) * 100))}%` }} />
@@ -332,7 +374,7 @@ export function ShelfPage() {
                       onClick={() => navigate(`/read?file=${encodeURIComponent(localFile)}`)}
                     >
                       <BookOpen size={14} />
-                      阅读
+                      {reading ? '继续阅读' : '阅读'}
                     </button>
                   ) : (
                     <button type="button" className="btn btn--sm" onClick={() => setDownloadTarget(entry)}>
@@ -358,7 +400,7 @@ export function ShelfPage() {
                       }
                     >
                       <BookOpen size={14} />
-                      在线阅读
+                      {reading ? '继续阅读' : '在线阅读'}
                     </button>
                   ) : null}
                   {localFile && !fromFile ? (

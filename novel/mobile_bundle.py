@@ -90,6 +90,25 @@ def _epub_cover(src: str) -> str:
     return ""
 
 
+def _add_sidecar_cover(zf: zipfile.ZipFile, fname: str, assets: dict[str, str]) -> str:
+    """把下载时缓存的封面放进离线包(EPUB 没内嵌封面时的兜底 / TXT 唯一来源)。"""
+    try:
+        from .covers import find_cover
+        path = find_cover(fname)
+        if not path:
+            return ""
+        with open(path, "rb") as f:
+            data = f.read()
+        if not data:
+            return ""
+        arc = _asset_name(len(assets) + 1, path)
+        zf.writestr(arc, data, compress_type=zipfile.ZIP_STORED)
+        assets[os.path.basename(path)] = arc
+        return arc
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def novel_bundle(src: str, out_path: str, clean_rules: list | None = None,
                  on_stage=None) -> dict:
     """导出整本(TXT 或 EPUB),返回写入 manifest.json 的内容。
@@ -146,6 +165,8 @@ def novel_bundle(src: str, out_path: str, clean_rules: list | None = None,
                     pass
             if not cover:
                 cover = assets.get(cover_path, "")
+                if not cover:
+                    cover = _add_sidecar_cover(zf, fname, assets)
         else:
             from .clean import clean_text
             from .reader import parse_txt
@@ -161,6 +182,8 @@ def novel_bundle(src: str, out_path: str, clean_rules: list | None = None,
                     ensure_ascii=False))
                 toc.append({"idx": idx, "title": c.get("title", "")})
                 _report(on_stage, idx, total)
+            # TXT 没有内嵌资源,封面在下载时单独缓存在 .covers/
+            cover = _add_sidecar_cover(zf, fname, assets)
         size, mtime = _stat(src)
         manifest = {
             "bundle_version": BUNDLE_VERSION,

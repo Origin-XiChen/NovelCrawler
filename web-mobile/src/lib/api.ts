@@ -2,7 +2,10 @@ import { getActiveServer } from './connection';
 import type { PairResult, PingResult, ServerEntry } from './types';
 import { b64ToBlob, wrtcAlive, wrtcRequest } from './wrtc';
 
-type Query = Record<string, string | number | boolean | undefined | null>;
+type Query = Record<
+  string,
+  string | number | boolean | undefined | null | Array<string | number>
+>;
 
 export class ApiError extends Error {
   status: number;
@@ -21,6 +24,13 @@ function buildQuery(params?: Query): string {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue;
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (entry === '') continue;
+        qs.append(key, String(entry));
+      }
+      continue;
+    }
     qs.set(key, String(value));
   }
   const text = qs.toString();

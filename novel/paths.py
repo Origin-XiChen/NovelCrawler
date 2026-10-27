@@ -77,6 +77,8 @@ NOTES_PATH = os.path.join(APP_DATA_DIR, "notes.json")
 MOBILE_DEVICES_PATH = os.path.join(APP_DATA_DIR, "mobile_devices.json")
 # 手机 App 离线阅读进度回传(按设备分片)
 MOBILE_PROGRESS_PATH = os.path.join(APP_DATA_DIR, "mobile_progress.json")
+# 电脑/手机共享的逐章阅读进度(总进度只算连续读过的部分)
+READING_PROGRESS_PATH = os.path.join(APP_DATA_DIR, "reading_progress.json")
 
 
 def resolve_out_dir(configured: str) -> str:

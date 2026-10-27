@@ -55,13 +55,16 @@ def write_epub(
     chapters: list[dict],
     out_path: str,
     images: dict[str, bytes] | None = None,
+    cover: bytes | None = None,
 ) -> str:
     """生成 EPUB 文件到 out_path,返回路径。chapters: [{title, text, images?}]。
 
     每章生成独立 chapN.xhtml(spine 多项)——阅读器按 spine 正确分章,
     外部阅读 App(掌阅/微信读书/Calibre)也能正常识别章节。
-    images: {文件名: 字节} 额外嵌入的图片(如封面/彩插),章节内用
+    images: {文件名: 字节} 额外嵌入的图片(如彩插),章节内用
             ch.get("images") = [文件名...] 引用,会渲染成 <img>。
+    cover: 封面图字节,按 EPUB3 cover-image 写入(同时带 EPUB2 meta),
+           离线阅读器和手机书架都能直接取到。
     """
     uid = md5((book_title or "novel").encode("utf-8")).hexdigest()[:16]
     safe_title = _esc(book_title or "小说")
@@ -101,6 +104,27 @@ def write_epub(
                 f'media-type="{_img_media_type((images or {}).get(img_name) or b"")}"/>'
             )
 
+    # ---------- 封面(EPUB3 cover-image,兼容 EPUB2 meta) ----------
+    cover_item = ""
+    cover_meta = ""
+    cover_name = ""
+    cover_bytes = b""
+    if cover:
+        cover_mime = _img_media_type(cover)
+        cover_ext = {
+            "image/png": "png",
+            "image/gif": "gif",
+            "image/webp": "webp",
+            "image/bmp": "bmp",
+        }.get(cover_mime, "jpg")
+        cover_name = f"cover.{cover_ext}"
+        cover_item = (
+            f'<item id="cover-image" href="images/{cover_name}" '
+            f'media-type="{cover_mime}" properties="cover-image"/>'
+        )
+        cover_meta = '\n    <meta name="cover" content="cover-image"/>'
+        cover_bytes = cover
+
     # ---------- 容器 / OPF / NCX ----------
     container_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -118,12 +142,13 @@ def write_epub(
     <dc:language>zh-CN</dc:language>
     <dc:creator>网络小说</dc:creator>
     <dc:source>{_esc(source_name)}</dc:source>
-    <meta property="dcterms:modified">{datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</meta>
+    <meta property="dcterms:modified">{datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</meta>{cover_meta}
   </metadata>
   <manifest>
 {chr(10).join('    ' + it for it in manifest_items)}
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
 {chr(10).join('    ' + it for it in img_manifest)}
+{("    " + cover_item) if cover_item else ""}
   </manifest>
   <spine toc="ncx">
 {chr(10).join('    ' + it for it in spine_items)}
@@ -159,4 +184,6 @@ def write_epub(
             zf.writestr("OEBPS/" + fname, content)
         for img_name, img_bytes in (images or {}).items():
             zf.writestr("OEBPS/images/" + img_name, img_bytes)
+        if cover_bytes and cover_name:
+            zf.writestr("OEBPS/images/" + cover_name, cover_bytes)
     return out_path

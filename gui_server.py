@@ -273,6 +273,7 @@ from novel import mobile_auth
 from novel import mobile_bundle
 from novel import mobile_progress
 from novel import mobile_sync
+from novel import reading_progress
 from novel.downloader import download_book, fetch_toc, safe_filename
 from novel.fetcher import Fetcher
 from novel.paths import APP_DATA_DIR, COMIC_OUT_DIR, OPDS_COOKIES_PATH
@@ -513,10 +514,10 @@ def _run_download(task_id: str, book: Book, opts: dict) -> None:
                      source=book.source)
         except Exception:  # noqa: BLE001
             pass
-        # 下载完成 → 默认加入书架(本地文件收藏)
+        # 下载完成 → 默认加入书架(本地文件收藏;带上封面地址,手机书库可显示)
         try:
             from novel.shelf import add_to_shelf as _add_shelf
-            _add_shelf(book.title, book.url, book.source)
+            _add_shelf(book.title, book.url, book.source, getattr(book, "cover", ""))
         except Exception:  # noqa: BLE001
             pass
     except DownloadCancelled as exc:  # 用户停止/暂停后被取消
@@ -586,6 +587,12 @@ def _run_opds_download(task_id: str, url: str, title: str, mode: str = "server")
         try:
             from novel.shelf import add_to_shelf as _add_shelf
             _add_shelf(title, url, "OPDS", t.get("cover", ""))
+        except Exception:  # noqa: BLE001
+            pass
+        # EPUB 没内嵌封面时,把 OPDS 封面缓存到 .covers/,手机离线包才带得走
+        try:
+            from novel import covers as _covers
+            _covers.ensure_cover(path, t.get("cover", ""))
         except Exception:  # noqa: BLE001
             pass
 
@@ -1119,7 +1126,7 @@ class Handler(BaseHTTPRequestHandler):
             "version": APP_VERSION,
             "api": mobile_auth.API_VERSION,
             "auth": "pair",
-            "capabilities": ["library", "novel", "comic", "downloads", "offline"],
+            "capabilities": ["library", "novel", "comic", "downloads", "offline", "progress"],
             "mobile_build": mobile_build_id(),
             "t": int(time.time()),
         }
@@ -1176,7 +1183,7 @@ class Handler(BaseHTTPRequestHandler):
                 "name": self._mobile_server_name(),
                 "version": APP_VERSION,
                 "api": mobile_auth.API_VERSION,
-                "capabilities": ["library", "novel", "comic", "downloads", "offline"],
+                "capabilities": ["library", "novel", "comic", "downloads", "offline", "progress"],
             }
         status = 200 if result.get("ok") else int(result.get("status") or 400)
         return self._send_json(result, status)
@@ -1406,8 +1413,22 @@ class Handler(BaseHTTPRequestHandler):
         device_id = self._mobile_device_id()
         if not device_id:
             return self._send_json({"error": "需要配对令牌", "code": "unauthorized"}, 401)
-        return self._send_json({"ok": True,
-                                "records": mobile_progress.get_many(device_id, qs.get("book"))})
+        books = qs.get("book")
+        records = mobile_progress.get_many(device_id, books)
+        # 把共享进度也并进来:老手机不升级也能读到电脑/新手机同步过来的位置
+        for book, rec in reading_progress.get_many(books).items():
+            old = records.get(book) or {}
+            if rec.get("updated", 0) > int((old.get("ts") or 0) * 1000):
+                records[book] = {
+                    "kind": rec.get("kind") or "novel",
+                    "title": rec.get("title") or "",
+                    "chapter": rec.get("chapterTitle") or "",
+                    "ch": rec.get("ch") or 0,
+                    "total": rec.get("total") or 0,
+                    "scroll": rec.get("scroll") or 0,
+                    "ts": int((rec.get("updated") or 0) / 1000),
+                }
+        return self._send_json({"ok": True, "records": records})
 
     def _api_mobile_progress_save(self):
         """POST /api/mobile/progress {book, kind, title, chapter, ch, total, scroll} → 回传一本。
@@ -1425,8 +1446,41 @@ class Handler(BaseHTTPRequestHandler):
         book = str(body.get("book") or "").strip()[:200]
         if not book:
             return self._send_json({"error": "缺少 book"}, 400)
+        entry = mobile_progress.save(device_id, book, body)
+        # 同一条进度也写进共享表:电脑端和新版手机都从这里接读
+        reading_progress.save(book, body, legacy=True)
+        return self._send_json({"ok": True, "record": entry})
+
+    def _api_reading_progress(self, qs: dict):
+        """GET /api/reading_progress[?book=id&book=..] → 电脑/手机共享的逐章进度。
+
+        不分设备:同一本书在电脑和手机上读到哪汇总成一份;返回的 percent
+        只累计从第 1 章起连续读过的部分,跳读不会抬高总进度。
+        """
+        if not self._mobile_device_id():
+            return self._send_json({"error": "需要配对令牌", "code": "unauthorized"}, 401)
         return self._send_json({"ok": True,
-                                "record": mobile_progress.save(device_id, book, body)})
+                                "records": reading_progress.get_many(qs.get("book"))})
+
+    def _api_reading_progress_save(self):
+        """POST /api/reading_progress {book, kind, title, ch, total, scroll, chapters}
+
+        chapters 是 {"章节序号": 完成比例};带 legacy=true 表示只知当前位置的
+        旧记录,服务端按"从第 1 章连续读过来"补章,保住升级前的百分比。
+        """
+        if not self._mobile_device_id():
+            return self._send_json({"error": "需要配对令牌", "code": "unauthorized"}, 401)
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            return self._send_json({"error": "请求体非法"}, 400)
+        if not isinstance(body, dict):
+            return self._send_json({"error": "请求体非法"}, 400)
+        book = str(body.get("book") or "").strip()[:200]
+        if not book:
+            return self._send_json({"error": "缺少 book"}, 400)
+        record = reading_progress.save(book, body, legacy=bool(body.get("legacy")))
+        return self._send_json({"ok": True, "record": record})
 
     # ---------------- 手机书回传(手机本地导入的 EPUB/TXT) ----------------
     def _api_mobile_sync_pending(self):
@@ -1647,6 +1701,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_mobile_bundle(qs)
         if path == "/api/mobile/progress":
             return self._api_mobile_progress(qs)
+        if path == "/api/reading_progress":
+            return self._api_reading_progress(qs)
         if path == "/api/mobile/sync/pending":
             return self._api_mobile_sync_pending()
         if path == "/api/mobile/sync/local":
@@ -1669,6 +1725,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_epub_online_asset(qs)
         if path == "/api/cover":
             return self._api_cover(qs)
+        if path == "/api/book_cover":
+            return self._api_book_cover(qs)
         if path == "/api/task_history":
             return self._api_task_history()
         if path == "/api/window/state":
@@ -1776,6 +1834,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_mobile_revoke()
         if parsed.path == "/api/mobile/progress":
             return self._api_mobile_progress_save()
+        if parsed.path == "/api/reading_progress":
+            return self._api_reading_progress_save()
         if parsed.path == "/api/mobile/sync/request":
             return self._api_mobile_sync_request()
         if parsed.path == "/api/mobile/sync/upload":
@@ -4792,6 +4852,31 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(r.content)
 
+    def _api_book_cover(self, qs):
+        """GET /api/book_cover?file= → 已下载书籍的封面(缓存/EPUB 内嵌/书架补抓)。"""
+        fname = (qs.get("file") or [""])[0].strip()
+        src = self._resolve_book_file(fname)
+        if src is None:
+            return self._send_json({"error": "文件不存在"}, 404)
+        try:
+            from novel import covers
+            path = covers.ensure_cover(src)
+        except Exception:  # noqa: BLE001
+            path = ""
+        if not path or not os.path.isfile(path):
+            return self._send_json({"error": "没有可用封面"}, 404)
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            return self._send_json({"error": "封面读取失败"}, 500)
+        self.send_response(200)
+        self.send_header("Content-Type", covers.content_type(path))
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "max-age=86400")
+        self.end_headers()
+        self.wfile.write(data)
+
     def _api_convert(self):
         """POST /api/convert {file} → 已下载 TXT 转 EPUB(同目录生成 .epub)。"""
         try:
@@ -4828,7 +4913,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"error": "文件内容为空"}, 400)
             book_title = os.path.splitext(fname)[0].split("[")[0].strip() or "小说"
             out_path = os.path.join(out_dir, os.path.splitext(fname)[0] + ".epub")
-            write_epub(book_title, "TXT转换", chapters, out_path)
+            cover_data = b""
+            try:
+                from novel import covers as _covers
+                cover_data = _covers.cover_bytes_for(fname)
+            except Exception:  # noqa: BLE001
+                pass
+            write_epub(book_title, "TXT转换", chapters, out_path,
+                       cover=cover_data or None)
             return self._send_json({"ok": True, "file": os.path.basename(out_path),
                                     "chapters": len(chapters), "size": os.path.getsize(out_path)})
         except Exception as exc:  # noqa: BLE001
@@ -4876,7 +4968,15 @@ class Handler(BaseHTTPRequestHandler):
                 fp = os.path.join(root, fn)
                 if (fn.endswith(".txt") or fn.endswith(".epub")) and os.path.getsize(fp) > 0:
                     seen.add(fn)
-                    files.append({"name": fn, "size": os.path.getsize(fp)})
+                    cover = ""
+                    try:
+                        from novel import covers
+                        if covers.has_cover(fp):
+                            cover = "/api/book_cover?file=" + _url_quote(fn)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    files.append({"name": fn, "size": os.path.getsize(fp),
+                                  "cover_url": cover})
         return self._send_json({"files": files})
 
     def _build_offline_page(self, qs: dict):

@@ -36,12 +36,14 @@
 | 📤 **手机本地上传** | 手机书架直接导入本机 TXT / EPUB / 旧离线包 ZIP,旧版离线书一键迁入新书架 |
 | 🔌 **四种连接方式** | 局域网 / 手机热点 / 内网穿透 / WebRTC 点对点直连,手机端与电脑端能力对齐 |
 | 💻 **手机书同步回电脑** | 电脑端「同步手机本地」向手机取书,暂存确认后收入电脑书架,重名可自动改名 |
+| 🖼 **封面随书保存** | 下载时把封面写入 EPUB / 离线包,断网、手机上都能显示封面 |
+| 📊 **逐章/逐页进度** | 每章每页单独记进度,总进度只累计从第 1 章连续读过的部分,跳读不虚高,电脑手机双向同步 |
 
-## 桌面版（Electron，v1.5.0）
+## 桌面版（Electron，v1.6.0）
 
 > 普通用户推荐安装版,不需要本机安装 Python。
 
-1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Setup-1.5.0.exe`。
+1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Setup-1.6.0.exe`。
 2. 双击安装。当前构建未做代码签名,Windows SmartScreen 若拦截,点「更多信息」→「仍要运行」。
 3. 启动后自动检查新版本;也可在「设置 → 版本更新」手动检查、下载并重启安装。
 
@@ -57,7 +59,7 @@
 4. 手机页面随桌面端同步更新:已打开的页面会自动检测电脑端新版本并提示刷新,无需重新配对。
 5. 与 App 共用同一套离线能力:在「电脑」页把书「下载到手机」后,断网也能从「书架」直接阅读。
 
-## Android App（Capacitor，v1.5.0）
+## Android App（Capacitor，v1.6.0）
 
 1.4.0 起 App 不再只是电脑的遥控器:**App 有自己的首页和书架**,把书下载到手机后完全离线可用,连电脑只用于挑选新书、下载和同步进度。
 
@@ -73,7 +75,7 @@
 
 安装(手机与电脑连同一 Wi-Fi):
 
-1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Mobile-1.5.0.apk`,传到手机后点开安装(需允许「安装未知来源应用」)。
+1. 到 [Releases](https://github.com/Origin-XiChen/NovelCrawler/releases/latest) 下载 `NovelCrawler-Mobile-1.6.0.apk`,传到手机后点开安装(需允许「安装未知来源应用」)。
 2. 电脑端打开「手机连接」并生成配对码。
 3. 在 App 里点「扫码连接」直接扫描电脑上的二维码,或手动输入电脑地址与 6 位配对码。
 

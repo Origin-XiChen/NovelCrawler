@@ -19,6 +19,11 @@ import {
   onlineComicSource,
   type ComicSource,
 } from '../lib/content';
+import {
+  continuousPercent,
+  flushSharedProgress,
+  seedLegacyChapters,
+} from '../lib/reading-progress';
 import type { ComicPdfMeta } from '../lib/types';
 
 const NIGHT_KEY = 'nc_mobile_comic_night_v1';
@@ -63,11 +68,13 @@ export default function ComicReaderPage() {
   const [night, setNight] = useState(() => readFlag(NIGHT_KEY));
   const [fit, setFit] = useState<FitMode>(() => readFit());
   const [draftPage, setDraftPage] = useState('1');
+  const [chapterMap, setChapterMap] = useState<Record<string, number>>({});
   const touchRef = useRef({ x: 0, y: 0, time: 0 });
   const pageRef = useRef(page);
   const totalRef = useRef(numPages);
   const sourceRef = useRef<ComicSource | null>(null);
   const fileRef = useRef(file);
+  const chapterMapRef = useRef<Record<string, number>>({});
   pageRef.current = page;
   totalRef.current = numPages;
   sourceRef.current = source;
@@ -141,6 +148,12 @@ export default function ComicReaderPage() {
       .then(([count, saved]) => {
         if (cancelled) return;
         setNumPages(count);
+        const seeded =
+          saved?.chapters && Object.keys(saved.chapters).length
+            ? saved.chapters
+            : seedLegacyChapters(saved?.ch || 0, 0, count);
+        chapterMapRef.current = seeded;
+        setChapterMap(seeded);
         setPage((prev) => {
           const target = prev || initialPage || saved?.ch || 1;
           return Math.min(Math.max(1, target), Math.max(1, count));
@@ -188,7 +201,11 @@ export default function ComicReaderPage() {
 
   useEffect(() => {
     if (!source || !file || !page || numPages <= 0) return;
-    source.saveProgress(file, page, numPages);
+    // 看过的页记 1:总进度只累计从第 1 页连续翻过来的部分
+    const next = { ...chapterMapRef.current, [String(page)]: 1 };
+    chapterMapRef.current = next;
+    setChapterMap(next);
+    source.saveProgress(file, page, numPages, next);
   }, [file, numPages, page, source]);
 
   // 本地页是 ZIP 里的 JPEG,取出来才能给 img;所以图片地址是异步的
@@ -265,12 +282,24 @@ export default function ComicReaderPage() {
     const save = () => {
       const current = sourceRef.current;
       if (!current || !fileRef.current || totalRef.current <= 0 || !pageRef.current) return;
-      current.saveProgress(fileRef.current, pageRef.current, totalRef.current);
+      current.saveProgress(
+        fileRef.current,
+        pageRef.current,
+        totalRef.current,
+        chapterMapRef.current,
+      );
     };
-    document.addEventListener('visibilitychange', save);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        save();
+        flushSharedProgress();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
-      document.removeEventListener('visibilitychange', save);
+      document.removeEventListener('visibilitychange', handleVisibility);
       save();
+      flushSharedProgress();
     };
   }, []);
 
@@ -301,6 +330,7 @@ export default function ComicReaderPage() {
   };
 
   const active = page || 1;
+  const totalPercent = continuousPercent({ total: numPages, ch: page, chapters: chapterMap });
   const backHref = source?.detailHref || (id ? '/shelf' : '/library');
 
   return (
@@ -318,6 +348,7 @@ export default function ComicReaderPage() {
           <strong>{source?.title || title || '正在打开…'}</strong>
           <span>
             {displayName(file) || '正在读取…'} · {page} / {numPages || '?'}
+            {numPages > 0 ? ` · 总进度 ${totalPercent}%` : ''}
           </span>
         </div>
         <button
@@ -445,7 +476,7 @@ export default function ComicReaderPage() {
               <div>
                 <h2>跳转页面</h2>
                 <p>
-                  第 {active} 页 · 共 {numPages} 页
+                  第 {active} 页 · 共 {numPages} 页 · 总进度 {totalPercent}%
                 </p>
               </div>
               <button type="button" className="icon-btn" aria-label="关闭" onClick={() => setSheetOpen(false)}>
