@@ -95,3 +95,8 @@ design/tools/_work/
 _diag/
 .tmpbuild/
 nc-http-*/
+
+# 运行时机密 / 用户数据(禁止入库)
+sshd/
+reading_progress.json
+mobile_progress.json
