@@ -6037,7 +6037,8 @@ async function loadLanInfo() {
     wrap.style.display = 'flex';
     document.getElementById('gsSyncWrap').style.display = '';
     document.getElementById('gsLanWarn').style.display = lan ? 'none' : '';
-    const url = ips.length ? `http://${ips[0]}:${port}/mobile` : '';
+    // 后端已按「手机可达性」排好序(热点 > 虚拟组网 > 有线 > 无线),直接用首选地址
+    const url = j.app_url || (ips.length ? `http://${ips[0]}:${port}/m` : '');
     document.getElementById('gsLanUrl').textContent = url ? url + ' (手机阅读页)' : '未检测到局域网 IP';
     const qrEl = document.getElementById('gsLanQr');
     if (j.qr_b64) {

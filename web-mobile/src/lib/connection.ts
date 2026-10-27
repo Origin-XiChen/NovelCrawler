@@ -87,6 +87,48 @@ export function removeServer(id: string): void {
   }
 }
 
+/** 去掉尾部斜杠;只保留 http/https 基址。 */
+export function trimBase(value: unknown): string {
+  const url = String(value || '').trim().replace(/\/+$/, '');
+  return /^https?:\/\//i.test(url) ? url : '';
+}
+
+/** 同一台电脑的全部候选地址:当前基址在最前,其余按记录顺序去重。 */
+export function getCandidates(server: ServerEntry | null | undefined): string[] {
+  if (!server) return [];
+  const list: string[] = [];
+  for (const raw of [server.baseUrl, ...(server.candidates || [])]) {
+    const url = trimBase(raw);
+    if (url && !list.includes(url)) list.push(url);
+  }
+  return list;
+}
+
+/** 切换当前使用的基址(自动选路/故障转移后调用)。 */
+export function updateServerBase(id: string, baseUrl: string): void {
+  const base = trimBase(baseUrl);
+  if (!id || !base) return;
+  const list = getServers();
+  const item = list.find((entry) => entry.id === id);
+  if (!item || item.baseUrl === base) return;
+  item.baseUrl = base;
+  item.lastUsed = Date.now();
+  writeJson(SERVERS_KEY, list);
+}
+
+/** 把新发现的候选地址合并进记录(去重保序)。 */
+export function mergeCandidates(id: string, extra: string[]): string[] {
+  const list = getServers();
+  const item = list.find((entry) => entry.id === id);
+  if (!item) return [];
+  const merged = getCandidates({ ...item, candidates: [...(item.candidates || []), ...extra] });
+  if (merged.length !== (item.candidates || []).length) {
+    item.candidates = merged;
+    writeJson(SERVERS_KEY, list);
+  }
+  return merged;
+}
+
 export function getDeviceId(): string {
   try {
     const existing = localStorage.getItem(DEVICE_KEY) || '';
@@ -139,6 +181,18 @@ export function normalizeBaseUrl(input: string): string {
   return `${url.protocol}//${url.host}${path}`;
 }
 
+/** 二维码 alt 参数是逗号分隔的 host:port 列表,补上协议转成候选基址。 */
+function altCandidates(protocol: string, alt: string | null, primary: string): string[] {
+  const out: string[] = [];
+  for (const raw of String(alt || '').split(',')) {
+    const host = raw.trim();
+    if (!host || !/^[A-Za-z0-9.:\-[\]]+$/.test(host)) continue;
+    const url = `${protocol}//${host}`.replace(/\/+$/, '');
+    if (url !== primary && !out.includes(url)) out.push(url);
+  }
+  return out;
+}
+
 export function parsePairPayload(raw: string): PairPayload | null {
   const text = String(raw || '').trim();
   if (!text) return null;
@@ -152,17 +206,40 @@ export function parsePairPayload(raw: string): PairPayload | null {
       const port = url.searchParams.get('port') || '';
       if (!host) return null;
       const scheme = url.searchParams.get('scheme') || 'http';
-      return { baseUrl: `${scheme}://${host}${port ? ':' + port : ''}`, code, name };
+      return {
+        baseUrl: `${scheme}://${host}${port ? ':' + port : ''}`,
+        code,
+        name,
+        pin: url.searchParams.get('pin') || undefined,
+      };
     }
     if (url.protocol === 'http:' || url.protocol === 'https:') {
       let path = url.pathname.replace(/\/+$/, '');
       if (path.toLowerCase().endsWith('/mobile')) path = path.slice(0, -7);
       if (path.toLowerCase().endsWith('/m')) path = path.slice(0, -2);
       if (path === '/') path = '';
-      return { baseUrl: `${url.protocol}//${url.host}${path}`, code, name };
+      const baseUrl = `${url.protocol}//${url.host}${path}`;
+      return {
+        baseUrl,
+        code,
+        name,
+        candidates: altCandidates(url.protocol, url.searchParams.get('alt'), baseUrl),
+        pin: url.searchParams.get('pin') || undefined,
+        ssh: url.searchParams.get('ssh') || undefined,
+        sshPassword: url.searchParams.get('sshp') || undefined,
+      };
     }
   } catch {
     // 不是 URL
   }
   return null;
+}
+
+/** 把 CA 短指纹写进服务器条目,后续换址/重启仍能校验同一张证书。 */
+export function setServerPin(id: string, pin: string): void {
+  const list = getServers();
+  const item = list.find((entry) => entry.id === id);
+  if (!item || !pin) return;
+  item.pin = pin;
+  writeJson(SERVERS_KEY, list);
 }

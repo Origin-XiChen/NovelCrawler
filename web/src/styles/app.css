@@ -3407,6 +3407,295 @@ a {
   color: var(--text-2);
 }
 
+/* 连接地址(网卡)选择:校园网 AP 隔离下手机只能走虚拟组网那张网卡 */
+.mobile-nic {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.mobile-nic__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.mobile-nic__item:hover {
+  border-color: var(--border-strong);
+}
+
+.mobile-nic__item.is-active {
+  border-color: var(--primary);
+  background: var(--primary-50);
+}
+
+.mobile-nic__radio {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.mobile-nic__item.is-active .mobile-nic__radio {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 3px var(--primary);
+}
+
+.mobile-nic__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mobile-nic__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-body2);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.mobile-nic__badge {
+  font-style: normal;
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--primary-50);
+  color: var(--primary);
+}
+
+.mobile-nic__ip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-aux);
+  color: var(--text-2);
+}
+
+/* 连接体检:逐项结果 + SSH 加密通道引导 */
+.doctor-summary {
+  margin-top: 10px;
+  padding: 8px 11px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-aux);
+  line-height: 1.7;
+}
+
+.doctor-summary.is-ok {
+  background: var(--success-50);
+  color: var(--success);
+}
+
+.doctor-summary.is-bad {
+  background: var(--danger-50);
+  color: var(--danger);
+}
+
+.doctor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.doctor-item {
+  display: flex;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.doctor-item__dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.doctor-item--ok .doctor-item__dot {
+  background: var(--success);
+}
+
+.doctor-item--warn .doctor-item__dot {
+  background: var(--warn);
+}
+
+.doctor-item--fail .doctor-item__dot {
+  background: var(--danger);
+}
+
+.doctor-item__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.doctor-item__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--fs-body2);
+  color: var(--text);
+}
+
+.doctor-item__badge {
+  font-style: normal;
+  font-size: var(--fs-caption);
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--primary-50);
+  color: var(--primary);
+}
+
+.doctor-item__detail {
+  margin-top: 2px;
+  font-size: var(--fs-aux);
+  line-height: 1.6;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.doctor-item__hint {
+  margin-top: 3px;
+  font-size: var(--fs-aux);
+  line-height: 1.6;
+  color: var(--warn);
+  white-space: pre-line;
+}
+
+.doctor-pill {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: var(--fs-caption);
+  background: var(--success-50);
+  color: var(--success);
+}
+
+.doctor-cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+}
+
+.doctor-cmd code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-aux);
+  color: var(--text);
+  word-break: break-all;
+}
+
+.doctor-steps {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: var(--fs-aux);
+  line-height: 1.8;
+  color: var(--text-2);
+}
+
+.doctor-steps li {
+  margin-bottom: 4px;
+}
+
+.doctor-steps code {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+/* ---- 加密访问(自签 HTTPS)卡片 ---- */
+.tls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 0;
+}
+
+/* 分隔线只出现在两行之间:贴着标题的第一行不加,免得标题下多一道横线 */
+.tls-row + .tls-row {
+  border-top: 1px solid var(--border);
+}
+
+.mobile-card__title + .tls-row {
+  padding-top: 2px;
+}
+
+.tls-pill {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.tls-pill.is-on {
+  background: var(--success-50);
+  color: var(--success);
+}
+
+.tls-pill.is-warn {
+  background: var(--warn-50);
+  color: var(--warn);
+}
+
+.tls-fp {
+  margin-top: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 10px);
+  background: var(--surface-2, var(--surface-3));
+}
+
+.tls-fp__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-aux);
+  color: var(--text-2);
+}
+
+.tls-fp__value {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  line-height: 1.7;
+  color: var(--text);
+  word-break: break-all;
+  letter-spacing: 0.2px;
+}
+
+.tls-fp .mobile-actions {
+  margin-top: 10px;
+}
+
 .mobile-warn {
   margin-top: 8px;
   padding: 8px 11px;

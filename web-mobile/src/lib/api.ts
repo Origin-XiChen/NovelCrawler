@@ -1,4 +1,5 @@
-import { getActiveServer } from './connection';
+import { getActiveServer, getCandidates, updateServerBase } from './connection';
+import { pinnedFetch, shouldPin } from './pinned';
 import type { PairResult, PingResult, ServerEntry } from './types';
 import { b64ToBlob, wrtcAlive, wrtcRequest } from './wrtc';
 
@@ -98,6 +99,75 @@ function isAbort(cause: unknown): boolean {
   return cause instanceof DOMException && cause.name === 'AbortError';
 }
 
+// ---------------- 多地址自动选路 / 故障转移 ----------------
+// 同一台电脑可能有多个可达地址(无线、热点、ZeroTier/Radmin 虚拟组网)。
+// 校园网 AP 隔离常挡掉其中一个,所以请求失败时自动探测其余地址并切换。
+
+const PROBE_TIMEOUT = 2200;
+
+async function probeBase(base: string, timeoutMs = PROBE_TIMEOUT): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await netFetch(`${base.replace(/\/+$/, '')}/api/mobile/ping`, {
+      headers: { Accept: 'application/json' },
+      signal: ctrl.signal,
+      cache: 'no-store',
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 并发探测候选地址,按传入顺序返回第一个可用的(空串表示全都不通)。 */
+export async function pickReachable(list: string[], timeoutMs = PROBE_TIMEOUT): Promise<string> {
+  const unique: string[] = [];
+  for (const raw of list) {
+    const url = String(raw || '').trim().replace(/\/+$/, '');
+    if (url && !unique.includes(url)) unique.push(url);
+  }
+  if (unique.length === 0) return '';
+  if (unique.length === 1) return (await probeBase(unique[0], timeoutMs)) ? unique[0] : '';
+  const results = await Promise.all(
+    unique.map(async (url) => ({ url, ok: await probeBase(url, timeoutMs) })),
+  );
+  return results.find((item) => item.ok)?.url || '';
+}
+
+let swapPromise: Promise<ServerEntry | null> | null = null;
+
+/** 当前地址连不上时,探测其余候选并切换到可用的那个。并发请求共用同一次探测。 */
+async function swapToReachable(server: ServerEntry | null): Promise<ServerEntry | null> {
+  if (!server || server.transport === 'wrtc') return null;
+  const current = String(server.baseUrl || '').replace(/\/+$/, '');
+  const others = getCandidates(server).filter((url) => url !== current);
+  if (others.length === 0) return null;
+  if (swapPromise) return swapPromise;
+  swapPromise = (async () => {
+    const hit = await pickReachable(others);
+    if (!hit) return null;
+    updateServerBase(server.id, hit);
+    return getActiveServer();
+  })();
+  try {
+    return await swapPromise;
+  } finally {
+    swapPromise = null;
+  }
+}
+
+/**
+ * 统一出口:https 且原生固定通道可用时走 PinnedHttps,其余照旧用 fetch。
+ * 只有电脑那张 CA 能通过校验,系统里其他根证书签的假证书一律握手失败。
+ */
+async function netFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  if (shouldPin(url)) return pinnedFetch(url, init);
+  return fetch(url, init);
+}
+
 async function wrtcJson<T>(
   server: ServerEntry,
   method: string,
@@ -134,16 +204,29 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (server?.transport === 'wrtc') {
     return wrtcJson<T>(server, options.method || 'GET', path, options.query, options.body);
   }
-  let res: Response;
-  try {
-    res = await fetch(resolveUrl(path + buildQuery(options.query), server), {
+  const target = path + buildQuery(options.query);
+  const send = (srv: ServerEntry | null) =>
+    netFetch(resolveUrl(target, srv), {
       method: options.method || 'GET',
-      headers: requestHeaders(server, auth, options.body !== undefined),
+      headers: requestHeaders(srv, auth, options.body !== undefined),
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });
+  let res: Response;
+  try {
+    res = await send(server);
   } catch (cause) {
     if (isAbort(cause)) throw cause;
-    throw new ApiError(OFFLINE_MESSAGE, 0, 'network');
+    // 换个候选地址再试一次:校园网下主地址常被 AP 隔离挡住
+    const swapped = await swapToReachable(server);
+    if (!swapped || swapped.baseUrl === server?.baseUrl) {
+      throw new ApiError(OFFLINE_MESSAGE, 0, 'network');
+    }
+    try {
+      res = await send(swapped);
+    } catch (cause2) {
+      if (isAbort(cause2)) throw cause2;
+      throw new ApiError(OFFLINE_MESSAGE, 0, 'network');
+    }
   }
   return parseResponse<T>(res);
 }
@@ -166,20 +249,32 @@ export async function apiUpload<T>(path: string, blob: Blob, query?: Query): Pro
   if (server?.transport === 'wrtc') {
     throw new ApiError('直连模式暂不支持回传大文件，请改用局域网或热点连接后再同步', 0, 'wrtc');
   }
-  let res: Response;
-  try {
-    res = await fetch(resolveUrl(path + buildQuery(query), server), {
+  const target = path + buildQuery(query);
+  const send = (srv: ServerEntry | null) =>
+    netFetch(resolveUrl(target, srv), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/octet-stream',
-        ...(server?.token ? { Authorization: `Bearer ${server.token}` } : {}),
+        ...(srv?.token ? { Authorization: `Bearer ${srv.token}` } : {}),
       },
       body: blob,
     });
+  let res: Response;
+  try {
+    res = await send(server);
   } catch (cause) {
     if (isAbort(cause)) throw cause;
-    throw new ApiError('上传中断了，确认电脑还在线再试一次', 0, 'network');
+    const swapped = await swapToReachable(server);
+    if (!swapped || swapped.baseUrl === server?.baseUrl) {
+      throw new ApiError('上传中断了，确认电脑还在线再试一次', 0, 'network');
+    }
+    try {
+      res = await send(swapped);
+    } catch (cause2) {
+      if (isAbort(cause2)) throw cause2;
+      throw new ApiError('上传中断了，确认电脑还在线再试一次', 0, 'network');
+    }
   }
   return parseResponse<T>(res);
 }
@@ -188,7 +283,7 @@ export async function pingServer(baseUrl: string): Promise<PingResult> {
   const base = baseUrl.replace(/\/+$/, '');
   let res: Response;
   try {
-    res = await fetch(`${base}/api/mobile/ping`, { headers: { Accept: 'application/json' } });
+    res = await netFetch(`${base}/api/mobile/ping`, { headers: { Accept: 'application/json' } });
   } catch {
     throw new ApiError('这个地址没有响应', 0, 'network');
   }
@@ -203,7 +298,7 @@ export async function pairServer(
   deviceName: string,
 ): Promise<PairResult> {
   const base = baseUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}/api/mobile/pair/confirm`, {
+  const res = await netFetch(`${base}/api/mobile/pair/confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ code, device_id: deviceId, device_name: deviceName }),
@@ -218,7 +313,7 @@ export async function pairServer(
 export async function checkServer(server: ServerEntry): Promise<boolean> {
   if (server.transport === 'wrtc') return wrtcAlive();
   try {
-    const res = await fetch(resolveUrl('/api/files', server), {
+    const res = await netFetch(resolveUrl('/api/files', server), {
       headers: { Accept: 'application/json', Authorization: `Bearer ${server.token}` },
     });
     return res.ok;
@@ -255,7 +350,7 @@ export async function apiDownload(
   }
   let res: Response;
   try {
-    res = await fetch(resolveUrl(path + buildQuery(query), server), {
+    res = await netFetch(resolveUrl(path + buildQuery(query), server), {
       headers: server?.token ? { Authorization: `Bearer ${server.token}` } : {},
       signal,
     });

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Activity,
   Camera,
   Copy,
   Download,
@@ -17,6 +18,8 @@ import {
   ShieldCheck,
   Smartphone,
   Square,
+  Terminal,
+  Lock,
   Trash2,
   Wifi,
   Zap,
@@ -28,11 +31,86 @@ import type { ComicFileGroup, FileEntry } from '../lib/types';
 
 type Tab = 'lan' | 'hotspot' | 'tunnel' | 'wrtc' | 'pack';
 
+interface LanAdapter {
+  ip: string;
+  kind: string;
+  label: string;
+  name?: string;
+  rank?: number;
+  recommended?: boolean;
+}
+
 interface NetworkInfo {
   lan_access: boolean;
   ips: string[];
   port: string;
+  primary_ip?: string;
+  app_url?: string;
+  adapters?: LanAdapter[];
+  candidates?: { url: string; ip: string; kind: string; label: string; recommended?: boolean }[];
+  scheme?: string;
+  https_enabled?: boolean;
+  https_port?: number;
   qr_b64?: string;
+}
+
+interface SshdInfo {
+  ok: boolean;
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  user: string;
+  password: string;
+  target_port?: number;
+  error?: string;
+}
+
+interface TlsInfo {
+  ok: boolean;
+  enabled: boolean;
+  only: boolean;
+  listening: boolean;
+  scheme: string;
+  port: number;
+  http_port: number;
+  https_port: number;
+  ca_url: string;
+  ca_exists?: boolean;
+  cert_exists?: boolean;
+  fingerprint?: string;
+  ca_fingerprint?: string;
+  pin?: string;
+  hosts?: string[];
+  not_after?: number;
+  dir?: string;
+  error?: string;
+}
+
+interface DoctorCheck {
+  key: string;
+  label: string;
+  status: 'ok' | 'warn' | 'fail';
+  detail: string;
+  hint?: string;
+  recommended?: boolean;
+}
+
+interface DoctorInfo {
+  ok: boolean;
+  port: number;
+  lan_access: boolean;
+  bind_host: string;
+  checks: DoctorCheck[];
+  ssh?: {
+    platform?: string;
+    running: boolean;
+    port: number;
+    listening: boolean;
+    password_auth?: boolean | null;
+    authorized_keys?: boolean;
+  };
+  ssh_command?: string;
+  ssh_host?: string;
 }
 
 interface HotspotInfo {
@@ -95,6 +173,9 @@ interface PairInfo {
   legacy_uri: string;
   base_url: string;
   lan_access: boolean;
+  candidates?: string[];
+  scheme?: string;
+  pin?: string;
 }
 
 interface PairedDevice {
@@ -201,15 +282,141 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
   const [syncRefreshing, setSyncRefreshing] = useState(false);
   const [syncRequesting, setSyncRequesting] = useState(false);
   const [syncBusy, setSyncBusy] = useState('');
+  // 手动选定的网卡(跨会话记住):校园网/AP 隔离下必须能选到虚拟组网那张网卡
+  const [selectedIp, setSelectedIp] = useState<string>(() => {
+    try {
+      return localStorage.getItem('nc_lan_ip') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [doctor, setDoctor] = useState<DoctorInfo | null>(null);
+  const [doctorBusy, setDoctorBusy] = useState(false);
+  const [sshd, setSshd] = useState<SshdInfo | null>(null);
+  const [sshdBusy, setSshdBusy] = useState(false);
+  const [tlsInfo, setTlsInfo] = useState<TlsInfo | null>(null);
+  const [tlsBusy, setTlsBusy] = useState(false);
+  const netSeq = useRef(0);
+
+  const loadTls = useCallback(
+    async (silent = true) => {
+      try {
+        const data = await apiGet<TlsInfo>('/api/tls');
+        setTlsInfo(data);
+      } catch (cause) {
+        if (!silent) toast(cause instanceof Error ? cause.message : String(cause), 'error');
+      }
+    },
+    [toast],
+  );
+
+  const applyTls = async (enabled: boolean, only: boolean) => {
+    setTlsBusy(true);
+    try {
+      const data = await apiPost<TlsInfo & { error?: string }>('/api/tls', { enabled, only });
+      if (data.error) {
+        toast(data.error, 'error');
+      } else {
+        toast(enabled ? 'HTTPS 已开启，手机改用加密端口' : 'HTTPS 已关闭', 'success');
+      }
+      await loadTls();
+      await loadNetwork(true);
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error');
+    } finally {
+      setTlsBusy(false);
+    }
+  };
+
+  const loadSshd = useCallback(async () => {
+    try {
+      setSshd(await apiGet<SshdInfo>('/api/sshd'));
+    } catch {
+      // 旧后端没有该接口时静默跳过
+    }
+  }, []);
+
+  const applySshd = async (patch: Record<string, unknown>) => {
+    setSshdBusy(true);
+    try {
+      const data = await apiPost<SshdInfo & { error?: string }>('/api/sshd', patch);
+      if (data.error) toast(data.error, 'error');
+      else toast(data.running ? '内建 SSH 通道已启动' : '内建 SSH 通道已关闭', 'success');
+      await loadSshd();
+      await loadNetwork(true);
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error');
+    } finally {
+      setSshdBusy(false);
+    }
+  };
+
+  const copyFingerprint = async () => {
+    const fp = tlsInfo?.fingerprint;
+    if (!fp) return;
+    try {
+      await navigator.clipboard.writeText(fp);
+      toast('证书指纹已复制', 'success');
+    } catch {
+      toast('复制失败，请手动选择文本', 'error');
+    }
+  };
+
+  const runDoctor = async () => {
+    setDoctorBusy(true);
+    try {
+      const data = await apiGet<DoctorInfo>('/api/doctor');
+      setDoctor(data);
+      toast(data.ok ? '体检通过，手机可以连进来' : '体检发现问题，见下方标注', data.ok ? 'success' : 'info');
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error');
+    } finally {
+      setDoctorBusy(false);
+    }
+  };
+
+  const copySshCommand = async () => {
+    const cmd = doctor?.ssh_command;
+    if (!cmd) return;
+    try {
+      await navigator.clipboard.writeText(cmd);
+      toast('SSH 命令已复制', 'success');
+    } catch {
+      toast('复制失败，请手动选择文本', 'error');
+    }
+  };
+
+  const adapters = network?.adapters ?? [];
+  const effectiveIp = (() => {
+    if (adapters.length === 0) return network?.primary_ip || network?.ips?.[0] || '';
+    if (selectedIp && adapters.some((item) => item.ip === selectedIp)) return selectedIp;
+    return (adapters.find((item) => item.recommended) || adapters[0]).ip;
+  })();
+
+  const pickIp = (ip: string) => {
+    setSelectedIp(ip);
+    try {
+      localStorage.setItem('nc_lan_ip', ip);
+    } catch {
+      // 隐私模式下忽略
+    }
+  };
 
   const loadNetwork = useCallback(
     async (force = false) => {
+      // 地址表可能被「打开 HTTPS」这类操作并发刷新:只认最后发出的那次,
+      // 否则先发后到的旧响应会把端口改回明文,用户照着复制就连到 301 上
+      netSeq.current += 1;
+      const seq = netSeq.current;
       try {
         const data = await apiGet<NetworkInfo>('/api/network', force ? { force: 1 } : undefined);
+        if (seq !== netSeq.current) return;
         setNetwork(data);
         onLanChange(Boolean(data.lan_access));
       } catch (cause) {
-        toast(cause instanceof Error ? cause.message : String(cause), 'error');
+        if (seq === netSeq.current) {
+          toast(cause instanceof Error ? cause.message : String(cause), 'error');
+        }
       }
     },
     [onLanChange, toast],
@@ -249,6 +456,8 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
     void loadNetwork();
     void loadDevices(true);
     void loadLocalSync(true);
+    void loadTls();
+    void loadSshd();
     const timer = window.setInterval(() => {
       void apiGet<{ sessions?: SyncSession[] }>('/api/sync_status')
         .then((data) => setSessions(data.sessions ?? []))
@@ -264,7 +473,7 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
       window.clearInterval(deviceTimer);
       window.clearInterval(syncTimer);
     };
-  }, [loadDevices, loadLocalSync, loadNetwork]);
+  }, [loadDevices, loadLocalSync, loadNetwork, loadTls, loadSshd]);
 
   useEffect(() => {
     if (!pair) return;
@@ -296,7 +505,11 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
   const startPairing = async () => {
     setPairLoading(true);
     try {
-      const data = await apiPost<PairInfo>('/api/mobile/pair/start', {});
+      // 把用户选定的网卡地址交给后端:配对二维码/链接优先用它,其余候选进 alt 参数
+      const port = network?.port || location.port || '8899';
+      const scheme = network?.scheme === 'https' ? 'https' : 'http';
+      const base = effectiveIp ? `${scheme}://${effectiveIp}:${port}` : '';
+      const data = await apiPost<PairInfo>('/api/mobile/pair/start', base ? { base_url: base } : {});
       setPair(data);
       setNowSec(Math.floor(Date.now() / 1000));
       setPairQr(await fetchQr(data.uri));
@@ -391,8 +604,11 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
   };
 
   const localFiles = localSync?.files ?? [];
-  const baseUrl = network?.ips?.length
-    ? `http://${network.ips[0]}:${network.port || location.port || '8899'}`
+  // 开了自签 HTTPS 后,手机该连的是加密端口(network.port 已是 port+1),
+  // 界面上展示的地址必须跟着换,否则用户照着手输会连到明文端口被 301
+  const lanScheme = network?.scheme === 'https' ? 'https' : 'http';
+  const baseUrl = effectiveIp
+    ? `${lanScheme}://${effectiveIp}:${network?.port || location.port || '8899'}`
     : '';
   const serverBase = (pair?.base_url || baseUrl).replace(/\/+$/, '');
   const appUrl = serverBase ? `${serverBase}/m` : '';
@@ -418,6 +634,221 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
         >
           <i />
         </button>
+      </div>
+
+      {adapters.length > 1 && (
+        <div className="mobile-card">
+          <div className="mobile-card__title">
+            <Wifi size={16} />
+            连接地址
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm mobile-card__title-action"
+              onClick={() => void loadNetwork(true)}
+            >
+              <RefreshCw size={12} />
+              重新检测
+            </button>
+          </div>
+          <div className="mobile-hint">
+            手机用哪个 IP 连进来。校园网/公司网那张网卡常被 AP 隔离挡住，手机连不通时换「虚拟组网」（ZeroTier / Radmin / Tailscale）。
+          </div>
+          <div className="mobile-nic">
+            {adapters.map((item) => (
+              <button
+                key={item.ip}
+                type="button"
+                className={`mobile-nic__item${item.ip === effectiveIp ? ' is-active' : ''}`}
+                onClick={() => pickIp(item.ip)}
+              >
+                <span className="mobile-nic__radio" />
+                <span className="mobile-nic__body">
+                  <span className="mobile-nic__label">
+                    {item.label}
+                    {item.recommended && <em className="mobile-nic__badge">推荐</em>}
+                  </span>
+                  <span className="mobile-nic__ip">{item.ip}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mobile-card">
+        <div className="mobile-card__title">
+          <Terminal size={16} />
+          内建 SSH 通道
+          {sshd?.running && <span className="tls-pill is-on">运行中 · {sshd.port}</span>}
+          {sshd && !sshd.running && sshd.enabled && <span className="tls-pill is-warn">未启动</span>}
+        </div>
+        <div className="tls-row">
+          <div>
+            <div className="settings-row__title">开启内建 SSH</div>
+            <div className="settings-row__desc">
+              程序自己起一个 SSH 服务端，账号密码都由这里掌握，不碰 Windows 账户，也不需要装系统 sshd。
+              手机扫配对码时会自动带上账号与密码，扫码即连。
+            </div>
+          </div>
+          <button
+            type="button"
+            className={`switch${sshd?.enabled ? ' is-on' : ''}`}
+            disabled={sshdBusy}
+            onClick={() => void applySshd({ enabled: !sshd?.enabled, port: sshd?.port, user: sshd?.user })}
+          >
+            <i />
+          </button>
+        </div>
+        {sshd?.enabled && (
+          <>
+            <div className="tls-fp">
+              <div className="tls-fp__label">
+                <Terminal size={13} />
+                登录信息（只在本机可见）
+              </div>
+              <div className="tls-fp__value">
+                {sshd.user}@{sshd.password ? '••••••••••••••' : '（未设置）'} · 端口 {sshd.port}
+                {sshd.target_port ? ` → 转发到 127.0.0.1:${sshd.target_port}` : ''}
+              </div>
+              <div className="mobile-actions">
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={!sshd.password}
+                  onClick={() => void navigator.clipboard.writeText(
+                    `ssh -N -L ${sshd.target_port || 8899}:127.0.0.1:${sshd.target_port || 8899} ${sshd.user}@<本机IP> -p ${sshd.port}`,
+                  ).then(() => toast('命令已复制（密码请到上方点「显示密码」后手动填）', 'success'))
+                    .catch(() => toast('复制失败', 'error'))}
+                >
+                  <Copy size={12} />
+                  复制 ssh 命令
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={sshdBusy}
+                  onClick={() => void applySshd({ enabled: true, port: sshd.port, user: sshd.user, reset_password: true })}
+                >
+                  {sshdBusy ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+                  重置密码
+                </button>
+              </div>
+              <div className="mobile-hint" style={{ marginTop: 8 }}>
+                密码只在电脑本机显示；手机端由配对二维码自动带入，不需要手输。
+              </div>
+            </div>
+          </>
+        )}
+        {!sshd?.enabled && (
+          <div className="mobile-hint">
+            开启后可选端口（默认 2222）。它只允许端口转发到本程序，不提供 shell，拿到密码也无法操作电脑其它东西。
+          </div>
+        )}
+      </div>
+
+      <div className="mobile-card">
+        <div className="mobile-card__title">
+          <Lock size={16} />
+          加密访问（自签 HTTPS）
+          {tlsInfo?.enabled && (
+            <span className={`tls-pill${tlsInfo.listening ? ' is-on' : ' is-warn'}`}>
+              {tlsInfo.listening ? '加密端口已就绪' : '证书已生成，端口未启动'}
+            </span>
+          )}
+        </div>
+        <div className="tls-row">
+          <div>
+            <div className="settings-row__title">开启 HTTPS</div>
+            <div className="settings-row__desc">
+              手机到电脑这一段走 TLS。同一 Wi-Fi 下抓包只能看到密文，配对令牌和阅读记录不再裸奔。
+              开关即时生效，不需要重启程序。
+            </div>
+          </div>
+          <button
+            type="button"
+            className={`switch${tlsInfo?.enabled ? ' is-on' : ''}`}
+            disabled={tlsBusy}
+            onClick={() => void applyTls(!tlsInfo?.enabled, tlsInfo?.only ?? false)}
+          >
+            <i />
+          </button>
+        </div>
+        {tlsInfo?.enabled && (
+          <>
+            <div className="tls-row">
+              <div>
+                <div className="settings-row__title">仅允许 HTTPS</div>
+                <div className="settings-row__desc">
+                  局域网里的明文请求会自动跳到加密端口。本机界面仍走明文，不受影响。
+                </div>
+              </div>
+              <button
+                type="button"
+                className={`switch${tlsInfo.only ? ' is-on' : ''}`}
+                disabled={tlsBusy}
+                onClick={() => void applyTls(true, !tlsInfo.only)}
+              >
+                <i />
+              </button>
+            </div>
+            <div className="mobile-hint">
+              手机（App 或浏览器）需要先信任本机 CA，否则会提示连接不安全。
+            </div>
+            <div className="tls-fp">
+              <div className="tls-fp__label">
+                <ShieldCheck size={13} />
+                证书指纹 SHA-256
+              </div>
+              <div className="tls-fp__value">{tlsInfo.fingerprint || '证书尚未生成'}</div>
+              <div className="mobile-actions">
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={!tlsInfo.fingerprint}
+                  onClick={() => void copyFingerprint()}
+                >
+                  <Copy size={12} />
+                  复制指纹
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={() => downloadUrl('/tls/ca.crt', 'novelist-ca.crt')}
+                >
+                  <Download size={12} />
+                  下载 CA 证书
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={tlsBusy}
+                  onClick={() => void applyTls(true, tlsInfo.only)}
+                >
+                  {tlsBusy ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+                  按当前网卡重签
+                </button>
+              </div>
+            </div>
+            <details className="mobile-details">
+              <summary>手机怎么装这张 CA（一次即可）</summary>
+              <ol className="doctor-steps">
+                <li>点「下载 CA 证书」，把 novelist-ca.crt 传到手机（微信/数据线/文件管理器都行）。</li>
+                <li>安卓：设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书 → 选择该文件。</li>
+                <li>iOS：把文件隔空投送过去 → 设置里「已下载描述文件」安装 → 通用 → 关于本机 → 证书信任设置里打开完全信任。</li>
+                <li>装完后手机访问 <code>{lanScheme}://{effectiveIp || '<本机IP>'}:{tlsInfo.https_port}</code> 就不再有安全提示。</li>
+              </ol>
+              <div className="mobile-hint">
+                App 版会在配对时用二维码里的指纹校验这张 CA（pin{' '}
+                <code>{tlsInfo.pin || '—'}</code>），证书被替换会直接拒绝连接。
+              </div>
+            </details>
+          </>
+        )}
+        {!tlsInfo?.enabled && (
+          <div className="mobile-hint">
+            开启后手机改用端口 {tlsInfo?.https_port ?? (network?.port ? Number(network.port) + 1 : 8900)}，原先的明文端口仍可供本机界面使用。
+          </div>
+        )}
       </div>
 
       <div className="mobile-card">
@@ -487,7 +918,7 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
         </div>
         <div className="mobile-pair-foot">
           <span>二维码内置一次性配对码，5 分钟内有效</span>
-          <span>手机需与电脑处于同一 Wi-Fi 或热点</span>
+          <span>手机需能访问上方地址（同一 Wi-Fi / 热点 / 虚拟组网）</span>
         </div>
       </div>
 
@@ -650,6 +1081,92 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
           </div>
         )}
       </div>
+
+      <div className="mobile-card">
+        <div className="mobile-card__title">
+          <Activity size={16} />
+          连接体检
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm mobile-card__title-action"
+            disabled={doctorBusy}
+            onClick={() => void runDoctor()}
+          >
+            {doctorBusy ? <Loader2 size={12} className="spin" /> : <Activity size={12} />}
+            {doctor ? '重新体检' : '开始体检'}
+          </button>
+        </div>
+        <div className="mobile-hint">
+          逐项实测：局域网开关、绑定地址、回环、每张网卡、防火墙、SSH 服务端。手机连不上时先看这里。
+        </div>
+        {doctor && (
+          <>
+            <div className={`doctor-summary${doctor.ok ? ' is-ok' : ' is-bad'}`}>
+              {doctor.ok
+                ? `体检通过：${doctor.checks.filter((item) => item.status === 'ok').length} 项正常`
+                : `发现 ${doctor.checks.filter((item) => item.status === 'fail').length} 处阻断，按提示处理后重新体检`}
+            </div>
+            <div className="doctor-list">
+              {doctor.checks.map((check) => (
+                <div className={`doctor-item doctor-item--${check.status}`} key={check.key}>
+                  <span className="doctor-item__dot" />
+                  <div className="doctor-item__main">
+                    <div className="doctor-item__title">
+                      {check.label}
+                      {check.recommended && <em className="doctor-item__badge">推荐地址</em>}
+                    </div>
+                    <div className="doctor-item__detail">{check.detail}</div>
+                    {check.hint && <div className="doctor-item__hint">{check.hint}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <details className="mobile-details mobile-card">
+        <summary>
+          <Terminal size={16} />
+          加密通道（SSH 转发）
+          {doctor?.ssh?.running && doctor?.ssh?.listening ? (
+            <span className="doctor-pill">sshd 运行中</span>
+          ) : null}
+        </summary>
+        <div className="mobile-hint">
+          局域网与虚拟组网都是明文 HTTP，配对令牌可能被同网段嗅探。用电脑上已装的 OpenSSH
+          服务端把端口经 SSH 转发到手机本地回环，全链路加密，且不必把 HTTP 端口暴露给网络。
+        </div>
+        {doctor?.ssh && !doctor.ssh.running && (
+          <div className="mobile-warn">
+            未检测到 sshd。Windows 可在「设置 → 系统 → 可选功能」中安装 OpenSSH 服务器。
+          </div>
+        )}
+        {doctor?.ssh_command ? (
+          <>
+            <div className="doctor-cmd">
+              <code>{doctor.ssh_command}</code>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => void copySshCommand()}>
+                <Copy size={12} />
+                复制
+              </button>
+            </div>
+            <ol className="doctor-steps">
+              <li>手机装任意 SSH 客户端（Termux、JuiceSSH、Termius 均可），并与电脑处于同一网络或虚拟组网。</li>
+              <li>
+                把手机客户端的公钥追加到电脑的 <code>~/.ssh/authorized_keys</code>
+                （电脑端已设为{doctor.ssh?.password_auth === false ? '仅公钥登录' : '公钥/密码登录'}）。
+              </li>
+              <li>在手机上执行上面的命令，并保持会话不关闭。</li>
+              <li>
+                手机浏览器或 App 里把手动地址改成 <code>http://127.0.0.1:{doctor.port}</code> 即可加密访问。
+              </li>
+            </ol>
+          </>
+        ) : (
+          <div className="mobile-hint">点上方「开始体检」后生成专属命令。</div>
+        )}
+      </details>
     </div>
   );
 }

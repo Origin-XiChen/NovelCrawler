@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  手机连电脑自签 HTTPS:
+  Android 7+ 的 App 默认只信任系统根证书,用户自己装的 CA(我们那张)不会被采用,
+  WebView 里打开 https://<电脑IP> 就会报「证书无效」。这里显式放开 user 证书。
+
+  注意:放开 user CA 只影响 WebView 里的图片/页面加载;真正带令牌的接口请求走
+  PinnedHttps 插件(只认电脑那一张 CA + 二维码指纹),不会被系统里其他 CA 顶替。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

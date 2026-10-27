@@ -25,6 +25,7 @@ import math
 import os
 import re
 import socket
+import ssl
 import sys
 import tempfile
 import threading
@@ -149,7 +150,186 @@ def start_remote_services(srv) -> None:
         pass
 
 
+# ---------------- 自签 HTTPS 监听(手机走加密端口,本机前端不受影响) ----------------
+# 为什么另起一个 Server 而不是给原 socket 套 SSL:
+#   1) 本机 React 界面(WebView2)用 http://127.0.0.1 打开,套上自签证书会被拦;
+#   2) 手机只认 https,两者并存才能既不影响本机、又给手机加密;
+#   3) 端口固定为「主端口 +1」,手机端不用额外配置。
+_TLS_LOCK = threading.Lock()
+_TLS_SRV = None
+_TLS_INFO: dict = {}
+
+
+class _TLSHTTPServer(ThreadingHTTPServer):
+    """把 TLS 握手下放到工作线程。
+
+    直接在监听 socket 上 wrap(server_side=True) 会让握手发生在 accept() 里:
+    一个握手慢/半开连接的客户端就能卡住整个接受队列(手机侧表现为「一直转圈」)。
+    这里改成 accept 之后在各自线程里 do_handshake。
+    """
+
+    def __init__(self, addr, handler, ctx: ssl.SSLContext):
+        self._ctx = ctx
+        super().__init__(addr, handler)
+        self.socket = ctx.wrap_socket(self.socket, server_side=True,
+                                      do_handshake_on_connect=False)
+
+    def finish_request(self, request, client_address):
+        try:
+            request.do_handshake()
+        except (ssl.SSLError, OSError):
+            # 手机换了地址/中途取消连接时的正常噪音,不写 traceback
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
+        super().finish_request(request, client_address)
+
+    def handle_error(self, request, client_address):
+        import sys as _sys
+        exc = _sys.exc_info()[1]
+        if isinstance(exc, (ssl.SSLError, ConnectionResetError, BrokenPipeError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
+
+def _tls_bind_host() -> str:
+    """HTTPS 监听地址:与 HTTP 一致地跟随「局域网访问」开关。"""
+    try:
+        return "0.0.0.0" if load_settings().get("lan_access") else "127.0.0.1"
+    except Exception:  # noqa: BLE001
+        return "0.0.0.0"
+
+
+# ---------------- 内建 SSH 服务端(程序自己开一个,密码自理) ----------------
+_SSHD_LOCK = threading.Lock()
+
+
+def _sshd_password(cfg: dict | None = None) -> str:
+    """取内建 sshd 的密码;没有就生成一个并存回配置(只在第一次需要时写盘)。"""
+    cfg = cfg if cfg is not None else load_settings()
+    pwd = str(cfg.get("sshd_password") or "")
+    if pwd:
+        return pwd
+    import secrets as _secrets
+    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    pwd = "".join(_secrets.choice(alphabet) for _ in range(14))
+    try:
+        save_settings({"sshd_password": pwd})
+    except (ValueError, OSError):
+        pass
+    return pwd
+
+
+def apply_sshd_runtime(target_port: int) -> dict:
+    """按配置启停内建 SSH 服务端;返回状态字典。"""
+    from novel import sshd as _sshd
+    try:
+        cfg = load_settings()
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    if not cfg.get("sshd_enabled"):
+        _sshd.stop()
+        return {"running": False, "enabled": False}
+    port = int(cfg.get("sshd_port") or 2222)
+    user = str(cfg.get("sshd_user") or "novelist")
+    password = _sshd_password(cfg)
+    with _SSHD_LOCK:
+        st = _sshd.status()
+        if st.get("running") and st.get("port") == port and st.get("target_port") == target_port:
+            return dict(st, enabled=True)
+        _sshd.stop()
+        res = _sshd.start(port=port, user=user, password=password,
+                          target_port=target_port)
+    res["enabled"] = True
+    return res
+
+
+def _stop_tls_listener() -> None:
+    """停掉 HTTPS 监听(关闭开关 / 重启前调用)。"""
+    global _TLS_SRV
+    with _TLS_LOCK:
+        srv, _TLS_SRV = _TLS_SRV, None
+    if srv is None:
+        return
+    try:
+        srv.shutdown()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        srv.server_close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _start_tls_listener(base_port: int):
+    """在 base_port+1 上启动 HTTPS 服务(自签)。成功返回 server,失败返回 None。
+
+    证书按当前网卡地址重签(SAN 必须覆盖手机实际访问的 IP),CA 保持不动,
+    手机只需装一次 CA。
+    """
+    global _TLS_SRV, _TLS_INFO
+    from novel import netinfo as _ni
+    from novel import tls as _tls
+
+    hosts: list[str] = []
+    try:
+        hosts = _ni.local_ips()
+    except Exception:  # noqa: BLE001
+        pass
+    info = _tls.ensure(hosts)
+    _TLS_INFO = dict(info or {})
+    if not info.get("ok"):
+        print(f"  HTTPS 启动失败: {info.get('error') or '证书生成失败'}", file=sys.stderr)
+        return None
+    port = base_port + 1
+    if port > 65535:
+        print(f"  HTTPS 启动失败: 端口 {port} 超出范围", file=sys.stderr)
+        return None
+    try:
+        srv = _TLSHTTPServer((_tls_bind_host(), port), Handler, ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER))
+    except OSError as exc:
+        print(f"  HTTPS 端口 {port} 不可用: {exc}", file=sys.stderr)
+        return None
+    srv._base_port = base_port      # 让 Handler 里的 _https_port() 始终等于 base+1
+    srv._tls_server = True
+    try:
+        srv._ctx.load_cert_chain(info["cert"], info["key"])
+        srv._ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    except (ssl.SSLError, OSError) as exc:
+        print(f"  HTTPS 证书加载失败: {exc}", file=sys.stderr)
+        try:
+            srv.server_close()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+    with _TLS_LOCK:
+        _TLS_SRV = srv
+    threading.Thread(target=srv.serve_forever, name="novelist-https", daemon=True).start()
+    return srv
+
+
+def apply_tls_runtime(base_port: int) -> bool:
+    """按当前设置启用/停用 HTTPS 监听,返回是否正在监听。
+
+    改了开关不用重启整个程序 —— 手机连不上时用户最不想做的就是「关掉重开」。
+    """
+    enabled = False
+    try:
+        enabled = bool(load_settings().get("https_enabled"))
+    except Exception:  # noqa: BLE001
+        enabled = False
+    if not enabled:
+        _stop_tls_listener()
+        return False
+    if _TLS_SRV is not None:
+        return True
+    return _start_tls_listener(base_port) is not None
+
+
 def _kill_webview_children() -> None:
+
     """退出前清理本实例的 WebView2 子进程。
 
     实测(原"子进程检测到父进程退出自动清理"的结论有误):宿主被
@@ -1074,6 +1254,34 @@ class Handler(BaseHTTPRequestHandler):
                 return False
         return True
 
+    def _https_redirect(self) -> bool:
+        """「仅 HTTPS」模式下,把非本机的明文请求 301 到加密端口。
+
+        返回 True 表示已经处理(调用方应直接 return)。本机回环流量放行,
+        否则 WebView2 里的 React 界面会把自己跳去 https 打不开。
+        """
+        if getattr(self.server, "_tls_server", False):
+            return False
+        enabled, only = self._tls_state()
+        if not (enabled and only):
+            return False
+        ip = self.client_address[0] if self.client_address else ""
+        if ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            return False
+        host = (self.headers.get("Host") or "").strip()
+        if host.startswith("["):
+            hostname = host[1:host.index("]")] if "]" in host else ""
+        else:
+            hostname = host.rsplit(":", 1)[0] if ":" in host else host
+        if not hostname:
+            return False
+        self.send_response(301)
+        self.send_header("Location", f"https://{hostname}:{self._https_port()}{self.path}")
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        return True
+
     def _request_token(self) -> str:
         auth = (self.headers.get("Authorization") or "").strip()
         if auth.lower().startswith("bearer "):
@@ -1111,6 +1319,54 @@ class Handler(BaseHTTPRequestHandler):
             name = ""
         return name or "NovelCrawler"
 
+    def _mobile_port(self) -> int:
+        """当前请求所在服务的监听端口。"""
+        try:
+            return int(self.server.server_address[1])
+        except Exception:  # noqa: BLE001
+            return 8899
+
+    def _base_port(self) -> int:
+        """主(HTTP)端口。TLS 服务固定是主端口 +1,用它避免在 TLS 服务上再 +1。"""
+        base = getattr(self.server, "_base_port", None)
+        return int(base) if base else self._mobile_port()
+
+    def _https_port(self) -> int:
+        return self._base_port() + 1
+
+    def _tls_state(self) -> tuple[bool, bool]:
+        """(https_enabled, https_only)"""
+        try:
+            st = load_settings()
+            return bool(st.get("https_enabled")), bool(st.get("https_only"))
+        except Exception:  # noqa: BLE001
+            return False, False
+
+    def _mobile_base_scheme(self) -> tuple[str, int]:
+        """手机该用(http|https, 端口)。开启 HTTPS 后手机走 port+1 的加密端口。"""
+        enabled, _ = self._tls_state()
+        return ("https", self._https_port()) if enabled else ("http", self._base_port())
+
+    def _mobile_candidates(self) -> list[str]:
+        """本机全部候选地址(按手机可达性排序)。手机端据此做自动选路/故障转移。"""
+        try:
+            from novel.netinfo import candidates as _cands
+            scheme, port = self._mobile_base_scheme()
+            return [c["url"] for c in _cands(port, scheme=scheme)]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _tls_pin(self) -> str:
+        """开启 HTTPS 时返回本机 CA 的短指纹(写进配对二维码给手机固定)。"""
+        enabled, _ = self._tls_state()
+        if not enabled:
+            return ""
+        try:
+            from novel import tls as _tls
+            return _tls.short_fingerprint(_tls.CA_CERT)
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _api_mobile_ping(self):
         token = self._request_token()
         device = None
@@ -1128,6 +1384,9 @@ class Handler(BaseHTTPRequestHandler):
             "auth": "pair",
             "capabilities": ["library", "novel", "comic", "downloads", "offline", "progress"],
             "mobile_build": mobile_build_id(),
+            "candidates": self._mobile_candidates(),
+            "https": scheme == "https",
+            "pin": self._tls_pin(),
             "t": int(time.time()),
         }
         if device:
@@ -1143,27 +1402,56 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:  # noqa: BLE001
             body = {}
         base = str(body.get("base_url") or "").strip().rstrip("/")
+        chosen_host = ""
         if base:
             parsed = urlparse(base)
-            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            if not parsed.hostname:
                 return self._send_json({"ok": False, "error": "base_url 不合法"}, 400)
-        else:
+            chosen_host = parsed.hostname
+        # 协议与端口一律按当前 TLS 状态归一:界面即使还传着旧的 http 地址也不会错配
+        scheme, port = self._mobile_base_scheme()
+        # 全部候选地址(按手机可达性排序):手机端会逐个探测,自动改连到通的那个
+        candidates = self._mobile_candidates()
+        if not chosen_host:
             try:
                 from novel.hotspot import best_lan_ip
-                host = best_lan_ip()
+                chosen_host = best_lan_ip()
             except Exception:  # noqa: BLE001
-                host = ""
-            if not host or host == "127.0.0.1":
-                host = (self.headers.get("Host") or "").split(":")[0] or "127.0.0.1"
-            port = self.server.server_address[1]
-            base = f"http://{host}:{port}"
+                chosen_host = ""
+            if not chosen_host or chosen_host == "127.0.0.1":
+                chosen_host = (self.headers.get("Host") or "").split(":")[0] or "127.0.0.1"
+        base = f"{scheme}://{chosen_host}:{port}"
+        ordered = [base] + [u for u in candidates if u.rstrip("/") != base]
         try:
             lan = bool(load_settings().get("lan_access"))
         except Exception:  # noqa: BLE001
             lan = False
-        result = mobile_auth.start_pair(self._mobile_server_name(), base)
+        # 内建 SSH 通道账号(user@host:port):密码认证,不传密钥文件
+        ssh_target = ""
+        ssh_password = ""
+        try:
+            from novel import sshd as _sshd_mod
+            _st = _sshd_mod.status()
+            if _st.get("running"):
+                # 内建服务端:账号密码都由本程序掌握,二维码直接带上,手机端零输入
+                ssh_target = f"{_st.get('user') or 'novelist'}@{chosen_host}:{_st.get('port')}"
+                ssh_password = _sshd_password()
+            else:
+                from novel.doctor import sshd_status as _sys_sshd
+                _ssh = _sys_sshd()
+                if _ssh.get("running") and _ssh.get("listening") and _ssh.get("password_auth"):
+                    _user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+                    if _user:
+                        ssh_target = f"{_user}@{chosen_host}:{_ssh.get('port') or 22}"
+        except Exception:  # noqa: BLE001
+            pass
+        result = mobile_auth.start_pair(self._mobile_server_name(), base,
+                                        candidates=ordered[:5], pin=self._tls_pin(),
+                                        ssh=ssh_target, ssh_password=ssh_password)
         result["base_url"] = base
+        result["candidates"] = ordered[:5]
         result["lan_access"] = lan
+        result["scheme"] = scheme
         return self._send_json(result)
 
     def _api_mobile_pair_confirm(self):
@@ -1184,6 +1472,9 @@ class Handler(BaseHTTPRequestHandler):
                 "version": APP_VERSION,
                 "api": mobile_auth.API_VERSION,
                 "capabilities": ["library", "novel", "comic", "downloads", "offline", "progress"],
+                "candidates": self._mobile_candidates(),
+                "https": self._mobile_base_scheme()[0] == "https",
+                "pin": self._tls_pin(),
             }
         status = 200 if result.get("ok") else int(result.get("status") or 400)
         return self._send_json(result, status)
@@ -1556,6 +1847,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------------- 路由 ----------------
     def do_GET(self):
+        if self._https_redirect():
+            return
         if not self._guard():
             return
         parsed = urlparse(self.path)
@@ -1679,6 +1972,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_notes(qs)
         if path == "/api/network":
             return self._api_network(qs)
+        if path == "/api/doctor":
+            return self._api_doctor()
+        if path == "/api/sshd":
+            return self._api_sshd()
+        if path == "/api/tls":
+            return self._api_tls()
+        if path == "/tls/ca.crt":
+            return self._api_tls_ca()
         if path == "/api/hotspot":
             return self._api_hotspot(qs)
         if path == "/api/tunnel":
@@ -1823,6 +2124,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if self._https_redirect():
+            return
         if not self._guard():
             return
         parsed = urlparse(self.path)
@@ -1923,6 +2226,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_subscriptions_refresh()
         if parsed.path == "/api/open_dir":
             return self._api_open_dir()
+        if parsed.path == "/api/sshd":
+            return self._api_sshd_toggle()
+        if parsed.path == "/api/tls":
+            return self._api_tls_toggle()
         if parsed.path == "/api/tunnel":
             return self._api_tunnel_ctrl()
         if parsed.path == "/api/webrtc/answer":
@@ -1988,6 +2295,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": "not found"}, 404)
 
     def do_PUT(self):
+        if self._https_redirect():
+            return
         if not self._guard():
             return
         parsed = urlparse(self.path)
@@ -1996,6 +2305,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": "not found"}, 404)
 
     def do_DELETE(self):
+        if self._https_redirect():
+            return
         if not self._guard():
             return
         parsed = urlparse(self.path)
@@ -2155,6 +2466,12 @@ class Handler(BaseHTTPRequestHandler):
             search_timeout = cur.get("search_timeout", 60)
         old_lan = bool(cur.get("lan_access", False))
         new_lan = bool(data.get("lan_access", cur.get("lan_access", False)))
+        old_https = bool(cur.get("https_enabled", False))
+        new_https = bool(data.get("https_enabled", cur.get("https_enabled", False)))
+        old_only = bool(cur.get("https_only", False))
+        new_only = bool(data.get("https_only", cur.get("https_only", False)))
+        if not new_https:
+            new_only = False   # 没开 HTTPS 就谈不上「仅 HTTPS」
         # 净化规则:请求未携带时保留现有规则(新设置页不管理该字段,
         # 若直接 or [] 会在每次保存时清空用户规则);显式传 [] 仍表示清空
         clean_rules = data.get("clean_rules")
@@ -2215,6 +2532,8 @@ class Handler(BaseHTTPRequestHandler):
                 "out_dir": data.get("out_dir", cur.get("out_dir", "downloads")),
                 "verify_ssl": bool(data.get("verify_ssl", cur.get("verify_ssl", True))),
                 "lan_access": new_lan,
+                "https_enabled": new_https,
+                "https_only": new_only,
                 "clean_rules": clean_rules,
                 "manga_cdn_custom": manga_cdn_custom,
                 "pdf_quality": pdf_quality,
@@ -2230,8 +2549,20 @@ class Handler(BaseHTTPRequestHandler):
                 **task_payload,
             })
             _sync_fetcher()
-            # 监听地址(127.0.0.1/0.0.0.0)在启动时绑定,运行中无法切换 → 提示重启
-            return self._send_json({"ok": True, "restart_required": old_lan != new_lan})
+            # HTTPS 监听可以热启停(不用重启);只有监听地址(0.0.0.0/127.0.0.1)变更
+            # 因为 socket 已经绑死才必须重启
+            if new_https:
+                try:
+                    from novel import netinfo as _ni
+                    from novel import tls as _tls
+                    _tls.ensure(_ni.local_ips())   # 地址可能又变了,先按当前网卡重签
+                except Exception:  # noqa: BLE001
+                    pass
+            apply_tls_runtime(self._base_port())
+            self.server._lan_cache = None
+            restart = (old_lan != new_lan)
+            return self._send_json({"ok": True, "restart_required": restart,
+                                    "https_listening": _TLS_SRV is not None})
         except (ValueError, OSError) as exc:
             return self._send_json({"error": str(exc)}, 500)
 
@@ -4160,39 +4491,39 @@ class Handler(BaseHTTPRequestHandler):
         if cache and not force and now - cache["ts"] < 30:
             return self._send_json(cache["data"])
         lan = bool(_ls3().get("lan_access"))
-        port = ""
-        try:
-            port = str(self.server.server_address[1])
-        except Exception:  # noqa: BLE001
-            pass
+        # 开启 HTTPS 后,手机应访问 port+1 的加密端口;二维码/候选地址跟着切
+        scheme, mobile_port = self._mobile_base_scheme()
+        port = str(mobile_port)
+        # 网卡明细统一走 novel.netinfo:只取默认路由那张网卡会在校园网/AP 隔离下
+        # 选中手机连不上的地址,这里改为列出全部候选并排序(热点 > 虚拟组网 > 有线 > 无线)
+        adapters: list[dict] = []
         ips: list[str] = []
         try:
-            s = _sk.socket(_sk.AF_INET, _sk.SOCK_DGRAM)
-            s.settimeout(0.5)
-            s.connect(("8.8.8.8", 80))
-            ips.append(s.getsockname()[0])
-            s.close()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            for info in _sk.getaddrinfo(_sk.gethostname(), None, _sk.AF_INET):
-                ip = info[4][0]
-                if ip not in ips and not ip.startswith("127."):
-                    ips.append(ip)
-        except Exception:  # noqa: BLE001
-            pass
-        # 去掉了 ipconfig subprocess(134ms 阻塞),getaddrinfo 已足够
-        # 热点网段 IP 置顶(校园网下手机连电脑热点后扫码,IP 即 192.168.137.1)
-        try:
             from novel.hotspot import detect as _hs_detect
-            _hs = _hs_detect()
-            for ip in reversed(_hs.get("hotspot_ips") or []):
-                if ip in ips:
-                    ips.remove(ip)
-                ips.insert(0, ip)
+            _hs = _hs_detect(force=force)
+            adapters = _hs.get("adapters") or []
+            ips = [a["ip"] for a in (adapters or [])] or list(_hs.get("ips") or [])
         except Exception:  # noqa: BLE001
             pass
+        if not ips:
+            try:
+                s = _sk.socket(_sk.AF_INET, _sk.SOCK_DGRAM)
+                s.settimeout(0.5)
+                s.connect(("8.8.8.8", 80))
+                ips.append(s.getsockname()[0])
+                s.close()
+            except Exception:  # noqa: BLE001
+                pass
+        candidates = [{
+            "url": f"{scheme}://{a['ip']}:{port}",
+            "ip": a["ip"],
+            "kind": a.get("kind") or "",
+            "label": a.get("label") or "",
+            "name": a.get("name") or "",
+            "recommended": bool(a.get("recommended")),
+        } for a in adapters if port]
         qr_b64 = ""
+        primary_ip = ""
         try:
             import base64 as _b64
             import io as _io
@@ -4200,16 +4531,211 @@ class Handler(BaseHTTPRequestHandler):
             from novel.hotspot import best_lan_ip as _best_lan
             primary_ip = _best_lan() or (ips[0] if ips else "127.0.0.1")
             qr = _qr.QRCode(box_size=4, border=1, error_correction=_qr.constants.ERROR_CORRECT_M)
-            qr.add_data(f"http://{primary_ip}:{port}/mobile")
+            qr.add_data(f"{scheme}://{primary_ip}:{port}/m")
             qr.make(fit=True)
             img = qr.make_image(fill_color="#1d1d1f", back_color="white")
             buf = _io.BytesIO(); img.save(buf, format="PNG")
             qr_b64 = _b64.b64encode(buf.getvalue()).decode()
         except Exception:  # noqa: BLE001
             pass
-        data = {"lan_access": lan, "ips": ips[:6], "port": port, "qr_b64": qr_b64}
+        data = {
+            "lan_access": lan,
+            "ips": ips[:8],
+            "port": port,
+            "primary_ip": primary_ip or (ips[0] if ips else ""),
+            "app_url": f"{scheme}://{primary_ip}:{port}/m" if primary_ip and port else "",
+            "adapters": adapters,
+            "candidates": candidates,
+            "scheme": scheme,
+            "https_enabled": scheme == "https",
+            "https_port": self._https_port(),
+            "qr_b64": qr_b64,
+        }
         self.server._lan_cache = {"ts": now, "data": data}
         return self._send_json(data)
+
+    def _api_doctor(self):
+        """GET /api/doctor → 手机连接体检:开关/绑定/回环/每张网卡/防火墙/sshd。
+
+        手机连不上时不用猜是哪一环:这里逐项实测(自连用真实 socket 连接),
+        失败项直接给出可执行的修复动作。
+        """
+        from novel.config import load_settings as _ls4
+        try:
+            lan = bool(_ls4().get("lan_access"))
+        except Exception:  # noqa: BLE001
+            lan = False
+        try:
+            bind_host = str(self.server.server_address[0])
+            port = int(self.server.server_address[1])
+        except Exception:  # noqa: BLE001
+            bind_host, port = "", 8899
+        # 手机实际访问的是「手机该用的那个端口/协议」——开了 HTTPS 就是 port+1,
+        # 体检必须按这个口径实测,否则加密端口没起来也会报「全部正常」
+        scheme, mobile_port = self._mobile_base_scheme()
+        _, only = self._tls_state()
+        try:
+            from novel.doctor import diagnose
+            data = diagnose(mobile_port, lan, bind_host, scheme, only)
+        except Exception as exc:  # noqa: BLE001
+            return self._send_json({"ok": False, "error": f"体检失败: {exc}"}, 500)
+        data["http_port"] = self._base_port()
+        return self._send_json(data)
+
+    def _api_sshd(self):
+        """GET /api/sshd → 内建 SSH 通道状态(仅本机可读,含登录信息)。"""
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机查看"}, 403)
+        from novel import sshd as _sshd
+        try:
+            cfg = load_settings()
+        except Exception:  # noqa: BLE001
+            cfg = {}
+        st = _sshd.status()
+        return self._send_json({
+            "ok": True,
+            "enabled": bool(cfg.get("sshd_enabled")),
+            "running": bool(st.get("running")),
+            "port": int(cfg.get("sshd_port") or 2222),
+            "user": str(cfg.get("sshd_user") or "novelist"),
+            "password": _sshd_password(cfg),
+            "target_port": st.get("target_port") or self._base_port(),
+            "error": st.get("error") or "",
+            "available": True,
+        })
+
+    def _api_sshd_toggle(self):
+        """POST /api/sshd {enabled, port, user, reset_password} → 启停/改端口/重置密码。"""
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机修改"}, 403)
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            body = {}
+        cfg = load_settings()
+        enabled = bool(body.get("enabled", cfg.get("sshd_enabled", False)))
+        port = int(body.get("port") or cfg.get("sshd_port") or 2222)
+        user = str(body.get("user") or cfg.get("sshd_user") or "novelist").strip() or "novelist"
+        if not (1 <= port <= 65535):
+            return self._send_json({"ok": False, "error": "端口需在 1~65535 之间"}, 400)
+        payload = {"sshd_enabled": enabled, "sshd_port": port, "sshd_user": user}
+        if body.get("reset_password"):
+            payload["sshd_password"] = ""
+        try:
+            save_settings(payload)
+        except (ValueError, OSError) as exc:
+            return self._send_json({"ok": False, "error": str(exc)}, 500)
+        res = apply_sshd_runtime(self._base_port())
+        if not res.get("running") and enabled:
+            return self._send_json({
+                "ok": False,
+                "error": res.get("error") or "内建 SSH 未能启动",
+                "enabled": enabled, "running": False,
+            }, 500)
+        self.server._lan_cache = None
+        return self._send_json({
+            "ok": True,
+            "enabled": enabled,
+            "running": bool(res.get("running")),
+            "port": port,
+            "user": user,
+            "password": _sshd_password(),
+            "error": res.get("error") or "",
+        })
+
+    def _api_tls(self):
+        """GET /api/tls → 自签 HTTPS 状态(指纹/地址/端口/证书是否就绪)。"""
+        from novel import netinfo as _ni
+        from novel import tls as _tls
+        enabled, only = self._tls_state()
+        scheme, mobile_port = self._mobile_base_scheme()
+        try:
+            st = _tls.status(_ni.local_ips())
+        except Exception as exc:  # noqa: BLE001
+            st = {"available": False, "error": str(exc)[:200]}
+        return self._send_json({
+            "ok": True,
+            "enabled": enabled,
+            "only": only,
+            "listening": _TLS_SRV is not None,
+            "scheme": scheme,
+            "port": mobile_port,
+            "http_port": self._base_port(),
+            "https_port": self._https_port(),
+            "ca_url": "/tls/ca.crt",
+            **(st or {}),
+        })
+
+    def _api_tls_toggle(self):
+        """POST /api/tls {enabled, only} → 保存开关,并当场启停 HTTPS 监听。
+
+        不要求重启:改完立刻能在手机上连上/断开,省掉「关掉程序再开」这一步。
+        """
+        if not self._is_trusted_local():
+            return self._send_json({"ok": False, "error": "仅限电脑本机修改"}, 403)
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            body = {}
+        st = load_settings()
+        enabled = bool(body.get("enabled", st.get("https_enabled", False)))
+        only = bool(body.get("only", st.get("https_only", False)))
+        if not enabled:
+            only = False
+        fingerprint = ""
+        if enabled:
+            # 立刻生成证书,让界面马上能显示指纹(约 1~3 秒,只在新生成时需要)
+            try:
+                from novel import netinfo as _ni
+                from novel import tls as _tls
+                info = _tls.ensure(_ni.local_ips())
+                if not info.get("ok"):
+                    return self._send_json({"ok": False, "error": info.get("error") or "生成证书失败"}, 500)
+                fingerprint = info.get("fingerprint") or ""
+                ca_fingerprint = info.get("ca_fingerprint") or ""
+            except Exception as exc:  # noqa: BLE001
+                return self._send_json({"ok": False, "error": f"生成证书失败: {exc}"}, 500)
+        else:
+            ca_fingerprint = ""
+        try:
+            save_settings({"https_enabled": enabled, "https_only": only})
+        except (ValueError, OSError) as exc:
+            return self._send_json({"ok": False, "error": str(exc)}, 500)
+        listening = apply_tls_runtime(self._base_port())
+        self.server._lan_cache = None       # 地址表里的 scheme/端口变了,清缓存
+        error = ""
+        if enabled and not listening:
+            error = f"端口 {self._https_port()} 被占用,HTTPS 未能启动"
+        return self._send_json({
+            "ok": not error,
+            "error": error or None,
+            "enabled": enabled,
+            "only": only,
+            "listening": listening,
+            "fingerprint": fingerprint,
+            "ca_fingerprint": ca_fingerprint,
+            "scheme": self._mobile_base_scheme()[0],
+            "port": self._mobile_base_scheme()[1],
+            "restart_required": False,
+        })
+
+    def _api_tls_ca(self):
+        """GET /tls/ca.crt → 下载本地 CA(手机装一次,之后 HTTPS 不再报警)。"""
+        from novel import tls as _tls
+        pem = _tls.read_ca_pem()
+        if not pem:
+            return self._send_json({"error": "证书尚未生成,请先开启 HTTPS"}, 404)
+        body = pem.encode("ascii", "ignore")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-x509-ca-cert")
+        self.send_header("Content-Disposition", 'attachment; filename="novelist-ca.crt"')
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     # ---------------- 远程连接:热点检测 / 内网穿透 / WebRTC 扫码 ----------------
     def _api_hotspot(self, qs=None):
@@ -5512,7 +6038,19 @@ def main() -> None:
     if getattr(sys, "frozen", False):
         os.chdir(os.path.dirname(sys.executable))  # 数据文件(downloads等)落在 exe 目录
 
+    https_enabled = False
+    https_only = False
+    try:
+        from novel.config import load_settings as _ls_tls
+        _st = _ls_tls() or {}
+        https_enabled = bool(_st.get("https_enabled"))
+        https_only = bool(_st.get("https_only"))
+    except Exception:  # noqa: BLE001
+        pass
+
     # 局域网访问:config 开启 lan_access 时绑定 0.0.0.0
+    # 「仅 HTTPS」不再靠「把 HTTP 收回本机」实现(那样用户改开关必须重启),
+    # 改为在请求层把非本机的明文请求 301 到加密端口,见 Handler._https_redirect
     if args.host == "127.0.0.1":
         try:
             from novel.config import load_settings as _ls2
@@ -5522,7 +6060,13 @@ def main() -> None:
             pass
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    srv._base_port = args.port
     start_remote_services(srv)  # WebRTC 端口注册 + 隧道自动启动
+    tls_srv = _start_tls_listener(args.port) if https_enabled else None
+    try:
+        _sshd_state = apply_sshd_runtime(args.port)
+    except Exception:  # noqa: BLE001
+        _sshd_state = {}
     # 0.0.0.0 只是监听通配,不是可访问地址;本机访问/自动打开浏览器用 127.0.0.1
     url = f"http://127.0.0.1:{args.port}/"
     print("=" * 52)
@@ -5530,6 +6074,11 @@ def main() -> None:
     print(f"  请用浏览器打开: {url}")
     if args.host == "0.0.0.0":
         print("  已开启局域网访问:手机/其他电脑请用本机局域网 IP 访问(设置页可查)")
+    if tls_srv is not None:
+        print(f"  HTTPS 已开启(自签):手机用 https://<本机IP>:{args.port + 1}")
+        fp = (_TLS_INFO or {}).get("fingerprint") or ""
+        if fp:
+            print(f"  证书指纹 SHA-256: {fp}")
     print("  按 Ctrl+C 停止服务")
     print("=" * 52)
     if args.open:
