@@ -13,7 +13,7 @@ const ASSET_RE = /\/api\/epub_asset\?[^"'()\s]*?[&?]path=([^"'()\s)]+)/g;
 
 interface BundleManifest {
   bundle_version: number;
-  kind: 'txt' | 'epub' | 'comic';
+  kind: 'txt' | 'epub' | 'comic' | 'snapshot';
   id: string;
   title: string;
   file: string;
@@ -26,6 +26,17 @@ interface BundleManifest {
   generated: number;
   num_pages?: number;
   meta?: unknown;
+  /** kind==="snapshot":电脑端「整包离线」里装了多本书 */
+  books?: SnapshotBook[];
+}
+
+interface SnapshotBook {
+  file: string;
+  title?: string;
+  size?: number;
+  chapters?: number;
+  has_data?: boolean;
+  data: string;
 }
 
 export interface LocalImportProgress {
@@ -96,6 +107,14 @@ async function importBundleZip(file: File): Promise<LocalBook> {
   }
   if ((manifest.bundle_version || 0) > BUNDLE_VERSION) {
     throw new Error('离线包版本过新,请先把手机 App 升级到最新版');
+  }
+  if (manifest.kind === 'snapshot') {
+    // 电脑端整包快照:多本书共用一个 zip,章节在 data/<书名>.json 里。
+    // 这里按 App 的 bundle 布局(chapters/NNNNN.json)给每本书重新打包一份,
+    // 之后的阅读/进度逻辑与普通导入完全一致。
+    const imported = await importSnapshotZip(zip, manifest);
+    if (!imported.length) throw new Error('离线包里没有可导入的书');
+    return imported[0];
   }
   if (!manifest.kind || !manifest.file) throw new Error('manifest.json 缺少必要字段');
 
@@ -561,4 +580,69 @@ async function persistBundle(manifest: BundleManifest, blob: Blob, file: File): 
   await saveSource(id, file);
   await putBook(book);
   return book;
+}
+
+// ---------------- 电脑端整包快照:一包多本,拆成各自的 bundle ----------------
+
+async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<LocalBook[]> {
+  const out: LocalBook[] = [];
+  for (const item of manifest.books || []) {
+    if (!item?.file || !item?.data) continue;
+    const entry = zip.file(item.data);
+    if (!entry) continue;
+    let chapters: { title?: string; text?: string; html?: string }[] = [];
+    try {
+      const payload = JSON.parse(await entry.async('string')) as { chapters?: typeof chapters };
+      chapters = payload.chapters || [];
+    } catch {
+      continue;
+    }
+    if (!chapters.length) continue;
+
+    const id = `novel:${item.file}`;
+    // 重新打包成 App 认的布局:manifest.json + chapters/00001.json
+    const bundle = new JSZip();
+    bundle.file('manifest.json', JSON.stringify({
+      bundle_version: 1,
+      kind: 'txt',
+      id,
+      title: item.title || item.file.replace(/\.[^.]+$/, ''),
+      file: item.file,
+      chapters: chapters.map((c, i) => ({ idx: i + 1, title: c.title || `第${i + 1}章` })),
+      total: chapters.length,
+      assets: {},
+      cover: '',
+      src_size: item.size || 0,
+      src_mtime: 0,
+      generated: Math.floor(Date.now() / 1000),
+    }));
+    chapters.forEach((c, i) => {
+      bundle.file(`chapters/${String(i + 1).padStart(5, '0')}.json`, JSON.stringify(c));
+    });
+    const blob = await bundle.generateAsync({ type: 'blob' });
+
+    const book: LocalBook = {
+      id,
+      kind: 'novel',
+      format: 'txt',
+      title: item.title || item.file.replace(/\.[^.]+$/, ''),
+      file: item.file,
+      total: chapters.length,
+      chapters: chapters.map((c, i) => ({ idx: i + 1, title: c.title || `第${i + 1}章` })),
+      assets: {},
+      coverArc: '',
+      size: item.size || blob.size,
+      srcMtime: 0,
+      srcSize: item.size || 0,
+      importedAt: Date.now(),
+      serverId: '',
+      serverName: '本地导入',
+      origin: 'import',
+    };
+    releaseZip(id);
+    await saveChunk(id, blob);
+    await putBook(book);
+    out.push(book);
+  }
+  return out;
 }
