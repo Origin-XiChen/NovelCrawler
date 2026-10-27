@@ -91,3 +91,7 @@ Desktop.ini
 # ================= UI 分析/截图工具的临时工作目录(隔离数据目录 + TEMP) =================
 design/tools/_work/
 
+# 临时产物(截图/探针脚本/构建临时目录)
+_diag/
+.tmpbuild/
+nc-http-*/

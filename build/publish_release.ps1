@@ -52,10 +52,16 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $za = [System.IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $names = $za.Entries | ForEach-Object { $_.FullName }
-    $bad = $names | Where-Object {
-        $_ -match '(?i)(config|bookshelf|comic_shelf|subscriptions|comic_subs|task_history|' +
-                  'verify_|notes|source_candidates|window_state|opds_cookies|comic_base_overrides|' +
-                  'comic_sources_custom|\.webview2-cache|playwright_driver)'
+    # 只看「exe 同级的用户数据」:依赖目录 _internal 里必然有一堆 config.py
+    # (cv2 就带三个),按名字一刀切会误判,这里先排除 _internal。
+    $top = $names | Where-Object { $_ -notmatch '(?i)/_internal/' }
+    $bad = $top | Where-Object {
+        $_ -match '(?i)(^|/)(config\.json|bookshelf\.json|comic_shelf\.json|subscriptions\.json|' +
+                  'comic_subs\.json|task_history\.json|verify_.*\.json|notes\.json|' +
+                  'source_candidates\.json|window_state\.json|opds_cookies\.json|' +
+                  'comic_base_overrides\.json|comic_sources_custom\.json|mobile_devices\.json|' +
+                  'mobile_progress\.json|reading_progress\.json|\.webview2-cache|' +
+                  'playwright_driver|downloads/)'
     }
     if ($bad) { throw ("压缩包里含本机数据文件,拒绝上传: " + ($bad -join ', ')) }
     Write-Host ("包内 {0} 个条目,未发现个人数据文件 ✓" -f $names.Count)
