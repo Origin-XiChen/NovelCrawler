@@ -79,14 +79,27 @@ interface RequestOptions {
   auth?: boolean;
 }
 
+/** fetch 抛 TypeError 时浏览器只给 "Failed to fetch",这里换成能行动的提示。 */
+export const OFFLINE_MESSAGE = '连不上电脑，确认电脑端 Novelist 已打开、且和手机在同一网络';
+
+function isAbort(cause: unknown): boolean {
+  return cause instanceof DOMException && cause.name === 'AbortError';
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const server = options.server === undefined ? getActiveServer() : options.server;
   const auth = options.auth !== false;
-  const res = await fetch(resolveUrl(path + buildQuery(options.query), server), {
-    method: options.method || 'GET',
-    headers: requestHeaders(server, auth, options.body !== undefined),
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(resolveUrl(path + buildQuery(options.query), server), {
+      method: options.method || 'GET',
+      headers: requestHeaders(server, auth, options.body !== undefined),
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+  } catch (cause) {
+    if (isAbort(cause)) throw cause;
+    throw new ApiError(OFFLINE_MESSAGE, 0, 'network');
+  }
   return parseResponse<T>(res);
 }
 
@@ -104,7 +117,12 @@ export function apiDelete<T>(path: string, query?: Query): Promise<T> {
 
 export async function pingServer(baseUrl: string): Promise<PingResult> {
   const base = baseUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}/api/mobile/ping`, { headers: { Accept: 'application/json' } });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/mobile/ping`, { headers: { Accept: 'application/json' } });
+  } catch {
+    throw new ApiError('这个地址没有响应', 0, 'network');
+  }
   if (!res.ok) throw new ApiError(`电脑无响应 (${res.status})`, res.status);
   return (await res.json()) as PingResult;
 }
@@ -137,4 +155,60 @@ export async function checkServer(server: ServerEntry): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * 取一个二进制附件(整本离线包),按已收字节回报进度。
+ * 电脑打包时先用小 body 回 JSON 错误,所以这里要按 content-type 分流。
+ */
+export async function apiDownload(
+  path: string,
+  query?: Query,
+  onProgress?: (received: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const server = getActiveServer();
+  let res: Response;
+  try {
+    res = await fetch(resolveUrl(path + buildQuery(query), server), {
+      headers: server?.token ? { Authorization: `Bearer ${server.token}` } : {},
+      signal,
+    });
+  } catch (cause) {
+    if (isAbort(cause)) throw cause;
+    throw new ApiError('下载中断了，确认电脑还在线再试一次', 0, 'network');
+  }
+  if (!res.ok) {
+    let message = `下载失败 (${res.status})`;
+    let code: string | undefined;
+    try {
+      const body = (await res.json()) as Record<string, unknown>;
+      message = String(body.error || message);
+      code = typeof body.code === 'string' ? body.code : undefined;
+    } catch {
+      // 非 JSON 错误体,保留默认提示
+    }
+    if (res.status === 401) window.dispatchEvent(new CustomEvent('nc-unauthorized'));
+    throw new ApiError(message, res.status, code);
+  }
+  const total = Number(res.headers.get('content-length')) || 0;
+  const type = res.headers.get('content-type') || '';
+  if (!res.body || type.includes('application/json')) {
+    // 没有流(旧 WebView)或电脑误回 JSON:整块读完
+    const blob = await res.blob();
+    onProgress?.(blob.size, blob.size || total);
+    return blob;
+  }
+  const reader = res.body.getReader();
+  const chunks: BlobPart[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    chunks.push(value as unknown as BlobPart);
+    received += value.byteLength;
+    onProgress?.(received, total);
+  }
+  return new Blob(chunks, { type: 'application/zip' });
 }

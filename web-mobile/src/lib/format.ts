@@ -59,3 +59,21 @@ export function errorMessage(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
   return String(cause);
 }
+
+/** 只到"哪一天":书架要的是导入日期,不是几点几分。 */
+export function formatDate(milliseconds: number): string {
+  if (!milliseconds) return '更早';
+  const date = new Date(milliseconds);
+  const today = new Date();
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (sameDay(date, today)) return '今天';
+  if (sameDay(date, new Date(today.getTime() - 86400000))) return '昨天';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return date.getFullYear() === today.getFullYear()
+    ? `${month}-${day}`
+    : `${date.getFullYear()}-${month}-${day}`;
+}

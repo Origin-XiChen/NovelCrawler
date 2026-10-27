@@ -7,9 +7,11 @@ import NativeBackButton from './components/NativeBackButton';
 import BookPage from './pages/BookPage';
 import ComicReaderPage from './pages/ComicReaderPage';
 import ConnectPage from './pages/ConnectPage';
+import HomePage from './pages/HomePage';
 import LibraryPage from './pages/LibraryPage';
 import NovelReaderPage from './pages/NovelReaderPage';
 import SettingsPage from './pages/SettingsPage';
+import ShelfPage from './pages/ShelfPage';
 import { apiGet } from './lib/api';
 import { loadedBuildId } from './lib/build';
 import { getActiveServer } from './lib/connection';
@@ -81,26 +83,14 @@ function RequireServer({ children }: { children: ReactNode }) {
 function RootRedirect() {
   const hasPair = /[?&](pair|code)=/.test(window.location.search);
   if (hasPair) return <Navigate to="/connect" replace />;
-  return <Navigate to={getActiveServer() ? '/library' : '/connect'} replace />;
+  // 手机有自己的首页:断网也进得来,连接状态只是一个角落里的提示
+  return <Navigate to="/home" replace />;
 }
 
-function LibraryLayout() {
+function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell">
-      <div className="app-shell__main">
-        <LibraryPage />
-      </div>
-      <BottomNav />
-    </div>
-  );
-}
-
-function SettingsLayout() {
-  return (
-    <div className="app-shell">
-      <div className="app-shell__main">
-        <SettingsPage />
-      </div>
+      <div className="app-shell__main">{children}</div>
       <BottomNav />
     </div>
   );
@@ -116,11 +106,15 @@ export default function App() {
       <Routes>
         <Route path="/" element={<RootRedirect />} />
         <Route path="/connect" element={<ConnectPage />} />
+        <Route path="/home" element={<Shell><HomePage /></Shell>} />
+        <Route path="/shelf" element={<Shell><ShelfPage /></Shell>} />
         <Route
           path="/library"
           element={
             <RequireServer>
-              <LibraryLayout />
+              <Shell>
+                <LibraryPage />
+              </Shell>
             </RequireServer>
           }
         />
@@ -128,7 +122,9 @@ export default function App() {
           path="/settings"
           element={
             <RequireServer>
-              <SettingsLayout />
+              <Shell>
+                <SettingsPage />
+              </Shell>
             </RequireServer>
           }
         />
@@ -156,6 +152,10 @@ export default function App() {
             </RequireServer>
           }
         />
+        {/* 本地路由不检查电脑连接:离线包已在手机里,读它不需要网络 */}
+        <Route path="/local/book/:id" element={<BookPage />} />
+        <Route path="/local/read/:id" element={<NovelReaderPage />} />
+        <Route path="/local/comic/:id" element={<ComicReaderPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </HashRouter>

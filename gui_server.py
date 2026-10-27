@@ -270,6 +270,8 @@ from novel.config import (
 )
 from novel import __version__ as APP_VERSION
 from novel import mobile_auth
+from novel import mobile_bundle
+from novel import mobile_progress
 from novel.downloader import download_book, fetch_toc, safe_filename
 from novel.fetcher import Fetcher
 from novel.paths import APP_DATA_DIR, COMIC_OUT_DIR, OPDS_COOKIES_PATH
@@ -1116,7 +1118,7 @@ class Handler(BaseHTTPRequestHandler):
             "version": APP_VERSION,
             "api": mobile_auth.API_VERSION,
             "auth": "pair",
-            "capabilities": ["library", "novel", "comic", "downloads"],
+            "capabilities": ["library", "novel", "comic", "downloads", "offline"],
             "mobile_build": mobile_build_id(),
             "t": int(time.time()),
         }
@@ -1173,7 +1175,7 @@ class Handler(BaseHTTPRequestHandler):
                 "name": self._mobile_server_name(),
                 "version": APP_VERSION,
                 "api": mobile_auth.API_VERSION,
-                "capabilities": ["library", "novel", "comic", "downloads"],
+                "capabilities": ["library", "novel", "comic", "downloads", "offline"],
             }
         status = 200 if result.get("ok") else int(result.get("status") or 400)
         return self._send_json(result, status)
@@ -1195,11 +1197,235 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:  # noqa: BLE001
             body = {}
         if body.get("all"):
+            ids = [d.get("id", "") for d in mobile_auth.list_devices()]
             count = mobile_auth.revoke_all()
+            for did in ids:
+                if did:
+                    mobile_progress.drop_device(did)
             return self._send_json({"ok": True, "revoked": count})
         device_id = str(body.get("device_id") or body.get("id") or "").strip()
         ok = mobile_auth.revoke(device_id)
+        if ok and device_id:
+            # 令牌都撤销了,进度也没必要留(换机重配时会读旧值,反而误导)
+            mobile_progress.drop_device(device_id)
         return self._send_json({"ok": ok, "error": None if ok else "未找到该设备"})
+
+    # ---------------- 手机离线包 / 离线书目 / 进度回传 ----------------
+    # 手机 App 有自己的书架与本地内容:联网时把整本书打成 ZIP 导进手机,
+    # 之后断网也能读;进度按设备回传,换设备/重装 App 能接着读。
+    _bundle_lock = threading.RLock()
+
+    def _mobile_book_roots(self) -> list[str]:
+        """小说文件搜索目录,与 _resolve_book_file 保持一致(当前输出目录 + 旧版残留)。"""
+        roots = [os.path.abspath(get_out_dir())]
+        legacy = os.path.abspath(os.path.join(APP_DATA_DIR, "downloads"))
+        if legacy != roots[0]:
+            roots.append(legacy)
+        return roots
+
+    def _mobile_device_id(self) -> str:
+        """当前请求所属手机设备 id;电脑本机直连(调试/桌面自用)记为 local。"""
+        device = getattr(self, "_mobile_device", None) or {}
+        if device.get("id"):
+            return str(device["id"])
+        return "local" if self._is_trusted_local() else ""
+
+    def _api_mobile_catalog(self, qs: dict):
+        """GET /api/mobile/catalog → 手机可离线导入的书目(体积/更新时间/章节或页数)。
+
+        /api/files 只有 name+size、/api/shelf 是书架语义,手机书架需要知道
+        "这本多大、电脑更新过没有",这里一次给全。计数一律走轻量统计:
+        TXT 用 reader 内存缓存,EPUB 只读 spine,漫画只读页树。"""
+        novels = []
+        seen: set[str] = set()
+        for root in self._mobile_book_roots():
+            try:
+                names = sorted(os.listdir(root))
+            except OSError:
+                continue
+            for fn in names:
+                if fn in seen:
+                    continue
+                low = fn.lower()
+                if low.endswith(".txt"):
+                    kind, counter = "txt", chapter_count
+                elif low.endswith(".epub"):
+                    kind, counter = "epub", mobile_bundle.epub_chapter_count
+                else:
+                    continue
+                fp = os.path.join(root, fn)
+                try:
+                    st = os.stat(fp)
+                except OSError:
+                    continue
+                if not os.path.isfile(fp):
+                    continue
+                seen.add(fn)
+                novels.append({
+                    "id": f"novel:{fn}", "file": fn, "kind": kind,
+                    "title": os.path.splitext(fn)[0],
+                    "size": st.st_size, "mtime": int(st.st_mtime),
+                    "chapters": counter(fp),
+                })
+        comics = []
+        try:
+            dirs = sorted(os.listdir(COMIC_OUT_DIR)) if os.path.isdir(COMIC_OUT_DIR) else []
+        except OSError:
+            dirs = []
+        for name in dirs:
+            d = os.path.join(COMIC_OUT_DIR, name)
+            try:
+                pdfs = sorted(f for f in os.listdir(d) if f.lower().endswith(".pdf"))
+            except OSError:
+                continue
+            for pdf in pdfs:
+                fp = os.path.join(d, pdf)
+                try:
+                    st = os.stat(fp)
+                except OSError:
+                    continue
+                comics.append({
+                    "id": f"comic:{name}/{pdf}", "file": pdf, "title": name,
+                    "kind": "comic", "size": st.st_size, "mtime": int(st.st_mtime),
+                    "pages": mobile_bundle.pdf_page_count(fp),
+                })
+        return self._send_json({"ok": True, "novels": novels, "comics": comics,
+                                "generated": int(time.time())})
+
+    def _bundle_prune(self, cache_dir: str, keep: int = 10) -> None:
+        """离线包缓存只留最近 keep 个,避免打包缓存把数据目录撑爆。
+
+        正在打包的临时文件(pack-*.zip)不计入:否则一次并发打包就会把
+        别的书挤出新、下次导入又得重打。
+        """
+        with self._bundle_lock:
+            try:
+                files = [os.path.join(cache_dir, f) for f in os.listdir(cache_dir)
+                         if f.endswith(".zip") and not f.startswith("pack-")]
+            except OSError:
+                return
+            for p in sorted(files, key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0,
+                            reverse=True)[keep:]:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+    def _api_mobile_bundle(self, qs: dict):
+        """GET /api/mobile/bundle?kind=novel&file=x.epub 或
+                            ?kind=comic&title=x&file=y.pdf[&sid=]
+
+        整本书现打成 ZIP 附件回给手机。缓存键含源文件 mtime+大小与清洗规则,
+        所以电脑上更新过书会自动重打、重复导入直接用缓存;打包与传输都按 sid
+        上报进度,手机显示"电脑打包中 120/3000 章"而不是干等。"""
+        import hashlib as _hl
+        kind = (qs.get("kind") or ["novel"])[0].strip().lower()
+        sid = (qs.get("sid") or [""])[0].strip()[:64]
+        rules = load_settings().get("clean_rules") or []
+        if kind == "comic":
+            src = self._resolve_comic_pdf(qs)
+            if not src:
+                return self._send_json({"error": "漫画文件不存在"}, 404)
+            title = (qs.get("title") or [""])[0].strip()
+            meta = None
+            try:
+                with open(os.path.join(os.path.dirname(src), "meta.json"), encoding="utf-8") as f:
+                    meta = json.load(f)
+            except (OSError, ValueError):
+                meta = None
+            def build(out_path, on_stage=None):
+                return mobile_bundle.comic_bundle(src, out_path, meta, title,
+                                                  on_stage=on_stage)
+        else:
+            fname = (qs.get("file") or [""])[0].strip()
+            if not fname or ".." in fname or "/" in fname or "\\" in fname:
+                return self._send_json({"error": "非法文件名"}, 400)
+            src = self._resolve_book_file(fname)
+            if src is None:
+                return self._send_json({"error": "文件不存在"}, 404)
+            def build(out_path, on_stage=None):
+                return mobile_bundle.novel_bundle(src, out_path, rules,
+                                                  on_stage=on_stage)
+        try:
+            st = os.stat(src)
+        except OSError:
+            return self._send_json({"error": "文件不存在"}, 404)
+        stem = os.path.splitext(os.path.basename(src))[0]
+        task = f"{stem}(离线包)"
+        rules_key = json.dumps(rules, ensure_ascii=False, sort_keys=True)
+        key = _hl.sha1(
+            f"{kind}|{os.path.abspath(src)}|{st.st_mtime_ns}|{st.st_size}|{rules_key}".encode("utf-8")
+        ).hexdigest()[:24]
+        cache_dir = os.path.join(APP_DATA_DIR, "mobile_bundles")
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+        except OSError:
+            return self._send_json({"error": "无法创建离线包缓存目录"}, 500)
+        cache = os.path.join(cache_dir, f"{kind}-{key}.zip")
+
+        def touch(sent=-1, size=0, status=""):
+            if sid:
+                self._sync_touch(sid, task=task, size=size, sent=sent, status=status)
+
+        if not os.path.isfile(cache):
+            touch(status="packing")
+            fd, tmp = tempfile.mkstemp(prefix="pack-", suffix=".zip", dir=cache_dir)
+            os.close(fd)
+            try:
+                try:
+                    build(tmp, lambda done, total: touch(status=f"packing {done}/{total}"))
+                except Exception as exc:  # noqa: BLE001
+                    touch(status="failed")
+                    return self._send_json({"error": f"打包失败: {str(exc)[:200]}"}, 500)
+                try:
+                    os.replace(tmp, cache)
+                    tmp = None  # 已进缓存,交给后续请求复用
+                    send_path = cache
+                except OSError:
+                    send_path = tmp  # 缓存正被别的请求占用:直接发临时文件
+            finally:
+                if tmp and os.path.exists(tmp):
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+        else:
+            send_path = cache
+        # 命中缓存也要修剪:缓存总量只由"打过多少本、重打过几次"决定
+        self._bundle_prune(cache_dir)
+        total = os.path.getsize(send_path)
+        touch(size=total, status="downloading")
+        dl_name = f"{stem}-离线包.zip"
+        self._send_file(send_path, "application/zip", as_attachment=True, filename=dl_name,
+                        progress=lambda sent, tot: touch(
+                            sent=sent, status="done" if sent >= tot else "downloading"))
+
+    def _api_mobile_progress(self, qs: dict):
+        """GET /api/mobile/progress[?book=id&book=..] → 本机已配对设备的进度表。"""
+        device_id = self._mobile_device_id()
+        if not device_id:
+            return self._send_json({"error": "需要配对令牌", "code": "unauthorized"}, 401)
+        return self._send_json({"ok": True,
+                                "records": mobile_progress.get_many(device_id, qs.get("book"))})
+
+    def _api_mobile_progress_save(self):
+        """POST /api/mobile/progress {book, kind, title, chapter, ch, total, scroll} → 回传一本。
+
+        book 用书目/离线包一致的 id(novel:<文件名> / comic:<目录名>/<文件名>);
+        ch 是章节或页序号(从 1 起),chapter 只是标题原文,供电脑端展示。
+        """
+        device_id = self._mobile_device_id()
+        if not device_id:
+            return self._send_json({"error": "需要配对令牌", "code": "unauthorized"}, 401)
+        try:
+            body = self._body()
+        except Exception:  # noqa: BLE001
+            return self._send_json({"error": "请求体非法"}, 400)
+        book = str(body.get("book") or "").strip()[:200]
+        if not book:
+            return self._send_json({"error": "缺少 book"}, 400)
+        return self._send_json({"ok": True,
+                                "record": mobile_progress.save(device_id, book, body)})
 
     # ---------------- 路由 ----------------
     def do_GET(self):
@@ -1342,6 +1568,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_mobile_ping()
         if path == "/api/mobile/devices":
             return self._api_mobile_devices()
+        if path == "/api/mobile/catalog":
+            return self._api_mobile_catalog(qs)
+        if path == "/api/mobile/bundle":
+            return self._api_mobile_bundle(qs)
+        if path == "/api/mobile/progress":
+            return self._api_mobile_progress(qs)
         if path == "/api/snapshot_status":
             return self._api_snapshot_status(qs)
         if path == "/api/snapshot_download":
@@ -1465,6 +1697,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_mobile_pair_confirm()
         if parsed.path == "/api/mobile/devices/revoke":
             return self._api_mobile_revoke()
+        if parsed.path == "/api/mobile/progress":
+            return self._api_mobile_progress_save()
         if parsed.path == "/api/download":
             return self._api_download()
         if parsed.path == "/api/snapshot_start":
@@ -3470,11 +3704,9 @@ class Handler(BaseHTTPRequestHandler):
         """GET /api/comic_page_image?title=&file=&page= → 单页最大内嵌图(JPEG)。
 
         图片直读模式核心:绕过 pdf.js 直接抽取 PDF 内嵌位图流,客户端零解码
-        内存占用最小。JPEG 原样透传零重编码;其他格式用 PIL 兜底转 JPEG;
-        无图/损坏页返回白页占位,保持页序可见。"""
-        import io as _io
-        from pypdf import PdfReader
-        from novel.comic import white_page_jpeg
+        内存占用最小。抽图与格式兜底统一在 novel.comic.page_jpeg,
+        手机离线包导出走同一份实现,两端出图一致。"""
+        from novel.comic import page_jpeg
         path = self._resolve_comic_pdf(qs)
         if not path:
             return self._send_json({"error": "文件不存在"}, 404)
@@ -3482,35 +3714,7 @@ class Handler(BaseHTTPRequestHandler):
             page_no = int((qs.get("page") or ["1"])[0])
         except ValueError:
             page_no = 1
-        data = b""
-        if page_no >= 1:
-            try:
-                with open(path, "rb") as f:
-                    pages = PdfReader(f).pages
-                    if page_no <= len(pages):
-                        best = b""
-                        for im in pages[page_no - 1].images:
-                            if len(im.data) > len(best):
-                                best = im.data
-                        data = best
-            except Exception:  # noqa: BLE001
-                data = b""
-        if data and data[:2] != b"\xff\xd8":
-            # 非 JPEG 内嵌图(JBIG2/Flate/PNG 等):PIL 兜底转 JPEG
-            try:
-                from PIL import Image
-                im = Image.open(_io.BytesIO(data))
-                im.seek(0)  # 动图取首帧
-                if im.mode not in ("RGB", "L"):
-                    im = im.convert("RGB")
-                out = _io.BytesIO()
-                im.save(out, "JPEG", quality=85, optimize=True)
-                data = out.getvalue()
-            except Exception:  # noqa: BLE001
-                data = b""
-        if not data:
-            data = white_page_jpeg()
-        self._send_binary(data, "image/jpeg", cache=True)
+        self._send_binary(page_jpeg(path, page_no), "image/jpeg", cache=True)
 
     def _api_comic_compress(self):
         """POST /api/comic_compress {title} → 存量漫画 PDF 一键压缩。

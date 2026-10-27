@@ -75,6 +75,8 @@ OPDS_COOKIES_PATH = os.path.join(APP_DATA_DIR, "opds_cookies.json")
 TASK_HISTORY_PATH = os.path.join(APP_DATA_DIR, "task_history.json")
 NOTES_PATH = os.path.join(APP_DATA_DIR, "notes.json")
 MOBILE_DEVICES_PATH = os.path.join(APP_DATA_DIR, "mobile_devices.json")
+# 手机 App 离线阅读进度回传(按设备分片)
+MOBILE_PROGRESS_PATH = os.path.join(APP_DATA_DIR, "mobile_progress.json")
 
 
 def resolve_out_dir(configured: str) -> str:

@@ -10,17 +10,19 @@ import {
   Plus,
   X,
 } from 'lucide-react';
-import { apiGet, mediaUrl } from '../lib/api';
-import { getActiveServer } from '../lib/connection';
-import { displayName, errorMessage, percent } from '../lib/format';
+import { mediaUrl } from '../lib/api';
+import { errorMessage, percent } from '../lib/format';
 import {
-  loadProgress,
+  localBook,
+  localNovelSource,
+  onlineNovelSource,
+  type NovelSource,
+} from '../lib/content';
+import {
   loadReaderPrefs,
-  saveProgress,
   saveReaderPrefs,
   type ReaderPrefs,
   type ReaderTheme,
-  type ReadingProgress,
 } from '../lib/progress';
 import type { NovelChapter, NovelMeta } from '../lib/types';
 
@@ -31,6 +33,7 @@ const THEMES: { id: ReaderTheme; label: string; color: string }[] = [
   { id: 'night', label: '夜间', color: '#15171c' },
 ];
 
+/** 在线章节里的 /api/... 资源要补上电脑地址;本地章节已经是 blob,不能再动。 */
 function cleanHtml(html: string): string {
   return html
     .replace(
@@ -52,18 +55,14 @@ function readRatio(element: HTMLElement | null): number {
 
 export default function NovelReaderPage() {
   const navigate = useNavigate();
-  const { file = '' } = useParams();
+  // /read/:file 读电脑上的书,/local/read/:id 读手机里的离线包
+  const { file = '', id = '' } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [server] = useState(() => getActiveServer());
-  const epub = /\.epub$/i.test(file);
-  const [initialProgress] = useState<ReadingProgress | null>(() =>
-    server ? loadProgress(server.id, file) : null,
-  );
-  const requestedChapter = Number(searchParams.get('ch')) || 0;
-  const startChapter = Math.max(1, requestedChapter || initialProgress?.chapter || 1);
+  const [source, setSource] = useState<NovelSource | null>(null);
+  const [initialChapter] = useState(() => Number(searchParams.get('ch')) || 0);
 
   const [meta, setMeta] = useState<NovelMeta | null>(null);
-  const [chapter, setChapter] = useState(startChapter);
+  const [chapter, setChapter] = useState(0);
   const [chapterData, setChapterData] = useState<NovelChapter | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [loadingChapter, setLoadingChapter] = useState(false);
@@ -78,14 +77,14 @@ export default function NovelReaderPage() {
   const scrollRef = useRef<HTMLElement>(null);
   const chapterRef = useRef(chapter);
   const metaRef = useRef<NovelMeta | null>(meta);
+  const sourceRef = useRef<NovelSource | null>(null);
   const chapterTitleRef = useRef('');
-  const pendingScrollRef = useRef(
-    initialProgress && initialProgress.chapter === startChapter ? initialProgress.scroll : 0,
-  );
+  const pendingScrollRef = useRef(0);
   const scrollTimerRef = useRef(0);
 
   chapterRef.current = chapter;
   metaRef.current = meta;
+  sourceRef.current = source;
 
   const total = meta?.chapters.length || 0;
   const currentTitle =
@@ -94,43 +93,75 @@ export default function NovelReaderPage() {
     `第 ${chapter} 章`;
   const progressPercent = total ? percent(chapter, total) : 0;
 
-  const persist = useCallback(
-    (ratio?: number) => {
-      const currentMeta = metaRef.current;
-      if (!server || !currentMeta) return;
-      const value = ratio === undefined ? readRatio(scrollRef.current) : ratio;
-      saveProgress(server.id, file, {
-        chapter: chapterRef.current,
-        total: currentMeta.chapters.length,
-        bookTitle: displayName(file),
-        chapterTitle: chapterTitleRef.current,
-        scroll: value,
-        updated: Date.now(),
-      });
-    },
-    [file, server],
-  );
+  const persist = useCallback((ratio?: number) => {
+    const current = sourceRef.current;
+    const currentMeta = metaRef.current;
+    if (!current || !currentMeta || !chapterRef.current) return;
+    const value = ratio === undefined ? readRatio(scrollRef.current) : ratio;
+    current.saveProgress(
+      chapterRef.current,
+      currentMeta.chapters.length,
+      chapterTitleRef.current,
+      value,
+    );
+  }, []);
   const persistRef = useRef(persist);
   persistRef.current = persist;
 
   useEffect(() => {
-    if (!server) {
-      navigate('/connect', { replace: true });
-      return;
+    let cancelled = false;
+    if (id) {
+      setLoadingMeta(true);
+      setError('');
+      localBook(id)
+        .then((book) => {
+          if (cancelled) return;
+          if (!book || book.kind !== 'novel') {
+            setError('这本书不在手机里,请先在"电脑"页下载到手机');
+            setLoadingMeta(false);
+            return;
+          }
+          setSource(localNovelSource(book));
+        })
+        .catch((cause) => {
+          if (!cancelled) {
+            setError(errorMessage(cause));
+            setLoadingMeta(false);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
     }
+    if (!file) {
+      navigate('/home', { replace: true });
+      return undefined;
+    }
+    const online = onlineNovelSource(file);
+    if (!online) {
+      navigate('/connect', { replace: true });
+      return undefined;
+    }
+    setSource(online);
+    return undefined;
+  }, [file, id, navigate]);
+
+  useEffect(() => {
+    if (!source) return;
     let cancelled = false;
     setLoadingMeta(true);
     setError('');
-    apiGet<NovelMeta>(epub ? '/api/epub_meta' : '/api/read_meta', { file })
-      .then((data) => {
+    Promise.all([source.loadMeta(), source.loadProgress()])
+      .then(([data, saved]) => {
         if (cancelled) return;
         const chapters = data.chapters || [];
         setMeta({ ...data, chapters });
-        setChapter((prev) => {
-          const next = Math.min(Math.max(1, prev), Math.max(1, chapters.length));
-          if (next !== prev) pendingScrollRef.current = 0;
-          return next;
-        });
+        const maximum = Math.max(1, chapters.length);
+        const start = Math.min(Math.max(1, initialChapter || saved?.ch || 1), maximum);
+        // 明确跳章时不回滚滚动位置,只有"接着上次读"才恢复
+        pendingScrollRef.current =
+          initialChapter && initialChapter !== saved?.ch ? 0 : saved?.scroll || 0;
+        setChapter(start);
       })
       .catch((cause) => {
         if (!cancelled) setError(errorMessage(cause));
@@ -141,10 +172,10 @@ export default function NovelReaderPage() {
     return () => {
       cancelled = true;
     };
-  }, [epub, file, navigate, server]);
+  }, [initialChapter, reloadToken, source]);
 
   useEffect(() => {
-    if (!meta) return;
+    if (!meta || !chapter) return;
     if (Number(searchParams.get('ch')) === chapter) return;
     const next = new URLSearchParams(searchParams);
     next.set('ch', String(chapter));
@@ -152,27 +183,19 @@ export default function NovelReaderPage() {
   }, [chapter, meta, searchParams, setSearchParams]);
 
   useEffect(() => {
-    if (!meta || meta.chapters.length === 0) return;
+    if (!source || !meta || !chapter) return;
     let cancelled = false;
     setLoadingChapter(true);
     setError('');
     setChapterData(null);
-    apiGet<NovelChapter>(epub ? '/api/epub_read' : '/api/read', { file, ch: chapter })
+    source
+      .loadChapter(chapter)
       .then((data) => {
         if (cancelled) return;
         setChapterData(data);
         chapterTitleRef.current = data.title || '';
         const savedScroll = pendingScrollRef.current;
-        if (server) {
-          saveProgress(server.id, file, {
-            chapter,
-            total: meta.chapters.length,
-            bookTitle: displayName(file),
-            chapterTitle: data.title || '',
-            scroll: savedScroll,
-            updated: Date.now(),
-          });
-        }
+        source.saveProgress(chapter, meta.chapters.length, data.title || '', savedScroll);
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             const element = scrollRef.current;
@@ -190,7 +213,7 @@ export default function NovelReaderPage() {
     return () => {
       cancelled = true;
     };
-  }, [chapter, epub, file, meta, reloadToken, server]);
+  }, [chapter, meta, reloadToken, source]);
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -291,10 +314,11 @@ export default function NovelReaderPage() {
     });
   };
 
-  const renderedHtml = useMemo(
-    () => (chapterData?.html ? cleanHtml(chapterData.html) : ''),
-    [chapterData],
-  );
+  const renderedHtml = useMemo(() => {
+    const html = chapterData?.html || '';
+    if (!html) return '';
+    return source?.mode === 'online' ? cleanHtml(html) : html;
+  }, [chapterData, source]);
   const tocItems = useMemo(() => {
     const chapters = meta?.chapters || [];
     const keyword = tocQuery.trim().toLowerCase();
@@ -311,7 +335,7 @@ export default function NovelReaderPage() {
       ? '"Noto Serif SC", "Songti SC", STSong, SimSun, serif'
       : 'system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
 
-  if (!server) return null;
+  const backHref = source?.detailHref || (id ? '/shelf' : '/library');
 
   return (
     <div className="reader" data-theme={prefs.theme}>
@@ -326,14 +350,14 @@ export default function NovelReaderPage() {
           aria-label="返回目录"
           onClick={() => {
             persist();
-            navigate(`/book/${encodeURIComponent(file)}?kind=novel`);
+            navigate(backHref);
           }}
         >
           <ArrowLeft size={22} />
         </button>
         <div className="reader-top__title">
-          <strong>{displayName(file)}</strong>
-          <span>{currentTitle}</span>
+          <strong>{source?.title || '正在打开…'}</strong>
+          <span>{chapter ? currentTitle : ''}</span>
         </div>
         <button
           type="button"
@@ -357,9 +381,15 @@ export default function NovelReaderPage() {
         {error ? (
           <div className="reader-message">
             <p>{error}</p>
-            <button type="button" className="btn btn--primary" onClick={() => setReloadToken((v) => v + 1)}>
-              重试
-            </button>
+            {source && (
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => setReloadToken((v) => v + 1)}
+              >
+                重试
+              </button>
+            )}
           </div>
         ) : loadingMeta || loadingChapter ? (
           <div className="reader-message">
@@ -377,7 +407,7 @@ export default function NovelReaderPage() {
             onClick={handleArticleClick}
           >
             <h1 className="reader-chapter-title">{chapterData?.title || currentTitle}</h1>
-            {epub ? (
+            {source?.epub ? (
               <div className="epub-body" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
             ) : (
               <div className="txt-body">
@@ -428,7 +458,7 @@ export default function NovelReaderPage() {
           type="button"
           className="icon-btn"
           aria-label="下一章"
-          disabled={chapter >= total || loadingChapter}
+          disabled={!total || chapter >= total || loadingChapter}
           onClick={() => goChapter(chapter + 1)}
         >
           <ChevronRight size={24} />
@@ -440,7 +470,9 @@ export default function NovelReaderPage() {
           <header className="reader-sheet__head">
             <div>
               <h2>目录</h2>
-              <p>{total} 章 · 当前第 {chapter} 章</p>
+              <p>
+                {total} 章 · 当前第 {chapter} 章
+              </p>
             </div>
             <button type="button" className="icon-btn" aria-label="关闭目录" onClick={() => setTocOpen(false)}>
               <X size={22} />
@@ -466,7 +498,10 @@ export default function NovelReaderPage() {
                   className={`toc-row${item.idx === chapter ? ' is-current' : ''}`}
                   onClick={() => goChapter(item.idx)}
                 >
-                  <span>{item.volume ? `${item.volume} · ` : ''}{item.title || `第 ${item.idx} 章`}</span>
+                  <span>
+                    {item.volume ? `${item.volume} · ` : ''}
+                    {item.title || `第 ${item.idx} 章`}
+                  </span>
                   <em>{item.idx}</em>
                 </button>
               ))

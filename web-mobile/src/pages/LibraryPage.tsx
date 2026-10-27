@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Search,
   Server,
+  WifiOff,
 } from 'lucide-react';
 import { apiGet, mediaUrl } from '../lib/api';
 import { getActiveServer, touchServer } from '../lib/connection';
@@ -21,6 +22,11 @@ import {
   percent,
 } from '../lib/format';
 import { loadAllProgress } from '../lib/progress';
+import { DownloadButton } from '../components/OfflineControls';
+import { syncProgress } from '../lib/offline/sync';
+import { isOutdated } from '../lib/offline/transfer';
+import { useLocalLibrary } from '../lib/offline/useLibrary';
+import type { LocalBook } from '../lib/offline/db';
 import type { ComicFileGroup, FileEntry } from '../lib/types';
 
 type ShelfTab = 'novel' | 'comic';
@@ -66,6 +72,12 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const library = useLocalLibrary();
+  const stored = useMemo(() => {
+    const map: Record<string, LocalBook> = {};
+    for (const book of library.books) map[book.id] = book;
+    return map;
+  }, [library.books]);
 
   const load = useCallback(
     async (background = false) => {
@@ -98,6 +110,12 @@ export default function LibraryPage() {
     }
     void load();
   }, [load, navigate, server]);
+
+  // 连上电脑就把手机上攒的离线进度送回去
+  useEffect(() => {
+    if (!server) return;
+    void syncProgress();
+  }, [server]);
 
   const progressMap = useMemo(
     () => (server ? loadAllProgress(server.id) : {}),
@@ -133,12 +151,17 @@ export default function LibraryPage() {
 
   if (!server) return null;
 
+  const disconnected = Boolean(error) && !loading;
+  // 首次加载就没连上:别再显示"电脑上还没有小说"误导人
+  const offline = disconnected && novels.length === 0 && comics.length === 0;
+
   return (
     <div className="library-page">
       <header className="library-header">
         <div>
           <div className="library-header__eyebrow">
-            <span className="status-dot" /> 已连接
+            <span className={`status-dot${disconnected ? ' is-offline' : ''}`} />
+            {disconnected ? '连接断开' : '已连接'}
           </div>
           <h1>{server.name}</h1>
           <p>{server.baseUrl.replace(/^https?:\/\//, '')}</p>
@@ -154,38 +177,42 @@ export default function LibraryPage() {
         </button>
       </header>
 
-      <div className="search-row">
-        <Search size={18} />
-        <input
-          type="search"
-          placeholder="搜索书名"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
+      {!offline && (
+        <>
+          <div className="search-row">
+            <Search size={18} />
+            <input
+              type="search"
+              placeholder="搜索书名"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
 
-      <div className="segmented" role="tablist" aria-label="书库类型">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'novel'}
-          className={tab === 'novel' ? 'is-active' : ''}
-          onClick={() => setTab('novel')}
-        >
-          <BookOpen size={17} /> 小说 <em>{novels.length}</em>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'comic'}
-          className={tab === 'comic' ? 'is-active' : ''}
-          onClick={() => setTab('comic')}
-        >
-          <Images size={17} /> 漫画 <em>{comics.length}</em>
-        </button>
-      </div>
+          <div className="segmented" role="tablist" aria-label="书库类型">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'novel'}
+              className={tab === 'novel' ? 'is-active' : ''}
+              onClick={() => setTab('novel')}
+            >
+              <BookOpen size={17} /> 小说 <em>{novels.length}</em>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'comic'}
+              className={tab === 'comic' ? 'is-active' : ''}
+              onClick={() => setTab('comic')}
+            >
+              <Images size={17} /> 漫画 <em>{comics.length}</em>
+            </button>
+          </div>
+        </>
+      )}
 
-      {error && (
+      {error && !offline && (
         <div className="banner banner--error">
           <span>{error}</span>
           <button type="button" className="text-btn" onClick={() => void load()}>
@@ -198,6 +225,16 @@ export default function LibraryPage() {
         <div className="library-loading">
           <Loader2 size={26} className="spin" />
           <span>正在读取书库…</span>
+        </div>
+      ) : offline ? (
+        <div className="library-offline">
+          <WifiOff size={30} />
+          <h3>连不上电脑</h3>
+          <p>{error}</p>
+          <button type="button" className="btn btn--ghost" onClick={() => void load()}>
+            <RefreshCw size={15} />
+            重新连接
+          </button>
         </div>
       ) : tab === 'novel' ? (
         <>
@@ -240,30 +277,43 @@ export default function LibraryPage() {
                 const scale = progress?.total
                   ? percent(progress.chapter, progress.total)
                   : 0;
+                const local = stored[`novel:${item.name}`];
                 return (
-                  <button
-                    type="button"
-                    key={item.name}
-                    className="novel-row"
-                    onClick={() =>
-                      navigate(`/book/${encodeURIComponent(item.name)}?kind=novel`)
-                    }
-                  >
-                    <NovelCover name={item.name} epub={/\.epub$/i.test(item.name)} />
-                    <div className="novel-row__main">
-                      <strong>{displayName(item.name)}</strong>
-                      <span className="novel-row__meta">
-                        {/\.epub$/i.test(item.name) ? 'EPUB' : 'TXT'} · {formatSize(item.size)}
-                      </span>
-                      {progress && (
-                        <span className="novel-row__progress">
-                          {progress.chapterTitle || `第 ${progress.chapter} 章`}
-                          <i style={{ width: `${scale}%` }} />
+                  <div className="shelf-row" key={item.name}>
+                    <button
+                      type="button"
+                      className="shelf-row__main"
+                      onClick={() =>
+                        navigate(`/book/${encodeURIComponent(item.name)}?kind=novel`)
+                      }
+                    >
+                      <NovelCover name={item.name} epub={/\.epub$/i.test(item.name)} />
+                      <div className="novel-row__main">
+                        <strong>{displayName(item.name)}</strong>
+                        <span className="novel-row__meta">
+                          {/\.epub$/i.test(item.name) ? 'EPUB' : 'TXT'} · {formatSize(item.size)}
+                          {local ? ' · 已在手机' : ''}
                         </span>
-                      )}
+                        {progress && (
+                          <span className="novel-row__progress">
+                            {progress.chapterTitle || `第 ${progress.chapter} 章`}
+                            <i style={{ width: `${scale}%` }} />
+                          </span>
+                        )}
+                      </div>
+                      <ChevronRight size={18} className="muted" />
+                    </button>
+                    <div className="shelf-row__actions">
+                      <DownloadButton
+                        compact
+                        local={local}
+                        outdated={Boolean(
+                          local && isOutdated(local, { mtime: 0, size: item.size }),
+                        )}
+                        target={{ kind: 'novel', file: item.name }}
+                      />
                     </div>
-                    <ChevronRight size={18} className="muted" />
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -279,20 +329,41 @@ export default function LibraryPage() {
         </div>
       ) : (
         <div className="comic-grid">
-          {visibleComics.map((item) => (
-            <button
-              type="button"
-              key={item.title}
-              className="comic-card"
-              onClick={() => navigate(`/book/${encodeURIComponent(item.title)}?kind=comic`)}
-            >
-              <ComicCover group={item} />
-              <strong>{item.title}</strong>
-              <span>
-                {item.files} 个文件 · {formatSize(item.size)}
-              </span>
-            </button>
-          ))}
+          {visibleComics.map((item) => {
+            const pdfs = item.pdfs || [];
+            const localCount = pdfs.filter(
+              (pdf) => stored[`comic:${item.title}/${pdf}`],
+            ).length;
+            const pending =
+              pdfs.find((pdf) => !stored[`comic:${item.title}/${pdf}`]) || pdfs[0] || '';
+            return (
+              <div className="comic-card" key={item.title}>
+                <button
+                  type="button"
+                  className="comic-card__open"
+                  onClick={() => navigate(`/book/${encodeURIComponent(item.title)}?kind=comic`)}
+                >
+                  <ComicCover group={item} />
+                  <strong>{item.title}</strong>
+                  <span>
+                    {item.files} 个文件 · {formatSize(item.size)}
+                  </span>
+                </button>
+                {pending && (
+                  <div className="comic-card__foot">
+                    {localCount > 0 && (
+                      <span className="comic-card__stored">手机 {localCount}/{pdfs.length}</span>
+                    )}
+                    <DownloadButton
+                      compact
+                      local={stored[`comic:${item.title}/${pending}`]}
+                      target={{ kind: 'comic', file: pending, title: item.title }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

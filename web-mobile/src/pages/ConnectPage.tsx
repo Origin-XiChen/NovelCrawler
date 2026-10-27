@@ -87,7 +87,7 @@ export default function ConnectPage() {
           lastUsed: Date.now(),
         });
         cleanPairQuery();
-        navigate('/library', { replace: true });
+        navigate('/home', { replace: true });
       } catch (cause) {
         setError(errorMessage(cause));
       } finally {
@@ -129,7 +129,7 @@ export default function ConnectPage() {
       }
       setActiveServer(server.id);
       touchServer(server.id);
-      navigate('/library', { replace: true });
+      navigate('/home', { replace: true });
     } finally {
       setBusy('');
     }

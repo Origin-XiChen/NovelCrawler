@@ -11,19 +11,19 @@ import {
   Sun,
   X,
 } from 'lucide-react';
-import { apiGet, mediaUrl } from '../lib/api';
-import { getActiveServer } from '../lib/connection';
+import { apiGet } from '../lib/api';
 import { displayName, errorMessage } from '../lib/format';
-import { loadProgress, saveProgress } from '../lib/progress';
-import type { ComicPageMeta, ComicPdfMeta } from '../lib/types';
+import {
+  localBook,
+  localComicSource,
+  onlineComicSource,
+  type ComicSource,
+} from '../lib/content';
+import type { ComicPdfMeta } from '../lib/types';
 
 const NIGHT_KEY = 'nc_mobile_comic_night_v1';
 const FIT_KEY = 'nc_mobile_comic_fit_v1';
 type FitMode = 'width' | 'height';
-
-function comicKey(title: string, file: string): string {
-  return `comic::${title}::${file}`;
-}
 
 function readFlag(key: string): boolean {
   try {
@@ -43,28 +43,18 @@ function readFit(): FitMode {
 
 export default function ComicReaderPage() {
   const navigate = useNavigate();
-  const { title = '' } = useParams();
+  // /comic/:title 读电脑上的漫画,/local/comic/:id 读手机里的离线包
+  const { title = '', id = '' } = useParams();
   const [params, setParams] = useSearchParams();
-  const initialQueryRef = useRef({
-    file: params.get('file') || '',
-    page: Math.max(0, Number(params.get('page')) || 0),
-  });
-  const [server] = useState(() => getActiveServer());
-  const [file, setFile] = useState(() => initialQueryRef.current.file);
-  const [page, setPage] = useState(() => {
-    const initial = initialQueryRef.current;
-    if (initial.page) return initial.page;
-    const active = getActiveServer();
-    if (initial.file && active) {
-      const saved = loadProgress(active.id, comicKey(title, initial.file));
-      if (saved?.chapter) return Math.max(1, saved.chapter);
-    }
-    return 1;
-  });
+  const [initialPage] = useState(() => Math.max(0, Number(params.get('page')) || 0));
+  const [source, setSource] = useState<ComicSource | null>(null);
+  const [file, setFile] = useState(() => params.get('file') || '');
+  const [page, setPage] = useState(0);
   const [numPages, setNumPages] = useState(0);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [error, setError] = useState('');
-  const [metaReload, setMetaReload] = useState(0);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [pageSrc, setPageSrc] = useState('');
   const [pageLoading, setPageLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
   const [imageReload, setImageReload] = useState(0);
@@ -76,45 +66,85 @@ export default function ComicReaderPage() {
   const touchRef = useRef({ x: 0, y: 0, time: 0 });
   const pageRef = useRef(page);
   const totalRef = useRef(numPages);
+  const sourceRef = useRef<ComicSource | null>(null);
   const fileRef = useRef(file);
   pageRef.current = page;
   totalRef.current = numPages;
+  sourceRef.current = source;
   fileRef.current = file;
 
+  // 先确定内容来源:本地包直接查 IndexedDB,在线要先问电脑有几个 PDF
   useEffect(() => {
-    if (!server) {
-      navigate('/connect', { replace: true });
-      return;
-    }
-    if (file) {
-      setLoadingMeta(true);
-      setError('');
-      apiGet<ComicPageMeta>('/api/comic_page_meta', { title, file })
-        .then((data) => {
-          const total = Math.max(0, Number(data.num_pages) || 0);
-          setNumPages(total);
-          setPage((prev) => Math.min(Math.max(1, prev), Math.max(1, total)));
-        })
-        .catch((cause) => setError(errorMessage(cause)))
-        .finally(() => setLoadingMeta(false));
-      return;
-    }
     let cancelled = false;
     setLoadingMeta(true);
     setError('');
+    if (id) {
+      localBook(id)
+        .then((book) => {
+          if (cancelled) return;
+          if (!book || book.kind !== 'comic') {
+            setError('这本漫画不在手机里,请先在"电脑"页下载到手机');
+            setLoadingMeta(false);
+            return;
+          }
+          setSource(localComicSource(book));
+        })
+        .catch((cause) => {
+          if (!cancelled) {
+            setError(errorMessage(cause));
+            setLoadingMeta(false);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (!title) {
+      navigate('/home', { replace: true });
+      return undefined;
+    }
     apiGet<ComicPdfMeta>('/api/comic_pdf_meta', { title })
       .then((data) => {
         if (cancelled) return;
-        const first = data.pdfs?.[0] || '';
-        if (!first) throw new Error('这部漫画没有可阅读的 PDF');
-        const saved = loadProgress(server.id, comicKey(title, first));
-        const target = Math.max(1, initialQueryRef.current.page || saved?.chapter || 1);
-        setFile(first);
-        setPage(target);
-        navigate(
-          `/comic/${encodeURIComponent(title)}?file=${encodeURIComponent(first)}&page=${target}`,
-          { replace: true },
-        );
+        const pdfs = data.pdfs || [];
+        if (!pdfs.length) throw new Error('这部漫画没有可阅读的 PDF');
+        const online = onlineComicSource(title, pdfs);
+        if (!online) {
+          navigate('/connect', { replace: true });
+          return;
+        }
+        setSource(online);
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setError(errorMessage(cause));
+          setLoadingMeta(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, navigate, reloadToken, title]);
+
+  useEffect(() => {
+    if (!source) return;
+    if (file && source.files.includes(file)) return;
+    setFile(source.files[0] || '');
+  }, [file, source]);
+
+  useEffect(() => {
+    if (!source || !file) return;
+    let cancelled = false;
+    setLoadingMeta(true);
+    setError('');
+    Promise.all([source.loadPageCount(file), source.loadProgress(file)])
+      .then(([count, saved]) => {
+        if (cancelled) return;
+        setNumPages(count);
+        setPage((prev) => {
+          const target = prev || initialPage || saved?.ch || 1;
+          return Math.min(Math.max(1, target), Math.max(1, count));
+        });
       })
       .catch((cause) => {
         if (!cancelled) setError(errorMessage(cause));
@@ -125,18 +155,20 @@ export default function ComicReaderPage() {
     return () => {
       cancelled = true;
     };
-  }, [file, metaReload, navigate, server, title]);
+  }, [file, initialPage, reloadToken, source]);
 
   useEffect(() => {
-    if (!file) return;
+    if (!source || !file || !page) return;
+    const urlPage = Number(params.get('page')) || 0;
     const urlFile = params.get('file') || '';
-    const urlPage = Math.max(1, Number(params.get('page')) || 1);
-    if (urlFile === file && urlPage === page) return;
+    const sameFile = source.mode === 'local' ? !urlFile : urlFile === file;
+    if (urlPage === page && sameFile) return;
     const next = new URLSearchParams(params);
-    next.set('file', file);
+    if (source.mode === 'local') next.delete('file');
+    else next.set('file', file);
     next.set('page', String(page));
     setParams(next, { replace: true });
-  }, [file, page, params, setParams]);
+  }, [file, page, params, setParams, source]);
 
   useEffect(() => {
     try {
@@ -155,48 +187,63 @@ export default function ComicReaderPage() {
   }, [fit]);
 
   useEffect(() => {
-    if (!server || !file || numPages <= 0) return;
-    saveProgress(server.id, comicKey(title, file), {
-      chapter: page,
-      total: numPages,
-      bookTitle: title,
-      chapterTitle: displayName(file),
-      scroll: 0,
-      updated: Date.now(),
-    });
-  }, [file, numPages, page, server, title]);
+    if (!source || !file || !page || numPages <= 0) return;
+    source.saveProgress(file, page, numPages);
+  }, [file, numPages, page, source]);
 
+  // 本地页是 ZIP 里的 JPEG,取出来才能给 img;所以图片地址是异步的
   useEffect(() => {
+    if (!source || !file || !page) return;
+    let cancelled = false;
     setPageLoading(true);
     setImageError(false);
-  }, [page, imageReload]);
+    source
+      .pageUrl(file, page, imageReload)
+      .then((url) => {
+        if (cancelled) return;
+        setPageSrc(url);
+        setPageLoading(false);
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setPageSrc('');
+        setPageLoading(false);
+        setImageError(true);
+        setError(errorMessage(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [file, imageReload, page, source]);
 
   useEffect(() => {
-    if (!file || numPages <= 0) return;
-    const images = [page + 1, page + 2, page - 1]
+    if (!source || !file || numPages <= 0 || !page) return;
+    const images: HTMLImageElement[] = [];
+    [page + 1, page + 2, page - 1]
       .filter((value) => value >= 1 && value <= numPages)
-      .map((value) => {
-        const image = new Image();
-        image.src = mediaUrl(
-          `/api/comic_page_image?title=${encodeURIComponent(title)}&file=${encodeURIComponent(file)}&page=${value}`,
-        );
-        return image;
+      .forEach((value) => {
+        void source
+          .pageUrl(file, value)
+          .then((url) => {
+            const image = new Image();
+            image.src = url;
+            images.push(image);
+          })
+          .catch(() => {
+            // 预热失败不要紧,翻到那一页会再取一次
+          });
       });
     return () => {
       images.forEach((image) => {
         image.src = '';
       });
     };
-  }, [file, numPages, page, title]);
+  }, [file, numPages, page, source]);
 
-  const goPage = useCallback(
-    (next: number) => {
-      const total = totalRef.current;
-      const target = Math.min(Math.max(1, next), Math.max(1, total));
-      setPage(target);
-    },
-    [],
-  );
+  const goPage = useCallback((next: number) => {
+    const total = totalRef.current;
+    setPage(Math.min(Math.max(1, next), Math.max(1, total)));
+  }, []);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -216,22 +263,16 @@ export default function ComicReaderPage() {
 
   useEffect(() => {
     const save = () => {
-      if (!server || !fileRef.current || totalRef.current <= 0) return;
-      saveProgress(server.id, comicKey(title, fileRef.current), {
-        chapter: pageRef.current,
-        total: totalRef.current,
-        bookTitle: title,
-        chapterTitle: displayName(fileRef.current),
-        scroll: 0,
-        updated: Date.now(),
-      });
+      const current = sourceRef.current;
+      if (!current || !fileRef.current || totalRef.current <= 0 || !pageRef.current) return;
+      current.saveProgress(fileRef.current, pageRef.current, totalRef.current);
     };
     document.addEventListener('visibilitychange', save);
     return () => {
       document.removeEventListener('visibilitychange', save);
       save();
     };
-  }, [server, title]);
+  }, []);
 
   const handleTouchStart = (event: React.TouchEvent<HTMLElement>) => {
     const touch = event.touches[0];
@@ -250,23 +291,17 @@ export default function ComicReaderPage() {
   };
 
   const openSheet = () => {
-    setDraftPage(String(page));
+    setDraftPage(String(page || 1));
     setSheetOpen(true);
   };
 
   const jumpToDraft = () => {
-    const value = Number(draftPage) || 1;
-    goPage(value);
+    goPage(Number(draftPage) || 1);
     setSheetOpen(false);
   };
 
-  if (!server) return null;
-
-  const pageUrl = file
-    ? mediaUrl(
-        `/api/comic_page_image?title=${encodeURIComponent(title)}&file=${encodeURIComponent(file)}&page=${page}&r=${imageReload}`,
-      )
-    : '';
+  const active = page || 1;
+  const backHref = source?.detailHref || (id ? '/shelf' : '/library');
 
   return (
     <div className={`comic-reader${night ? ' is-night' : ''}`}>
@@ -275,12 +310,12 @@ export default function ComicReaderPage() {
           type="button"
           className="icon-btn"
           aria-label="返回漫画详情"
-          onClick={() => navigate(`/book/${encodeURIComponent(title)}?kind=comic`)}
+          onClick={() => navigate(backHref)}
         >
           <ArrowLeft size={22} />
         </button>
         <div className="comic-top__title">
-          <strong>{title}</strong>
+          <strong>{source?.title || title || '正在打开…'}</strong>
           <span>
             {displayName(file) || '正在读取…'} · {page} / {numPages || '?'}
           </span>
@@ -318,7 +353,7 @@ export default function ComicReaderPage() {
             <button
               type="button"
               className="btn btn--primary"
-              onClick={() => setMetaReload((value) => value + 1)}
+              onClick={() => setReloadToken((value) => value + 1)}
             >
               重试
             </button>
@@ -331,28 +366,26 @@ export default function ComicReaderPage() {
         ) : numPages === 0 ? (
           <div className="reader-message">
             <p>这部漫画没有可阅读的页面</p>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={() => navigate(`/book/${encodeURIComponent(title)}?kind=comic`)}
-            >
+            <button type="button" className="btn btn--ghost" onClick={() => navigate(backHref)}>
               返回详情
             </button>
           </div>
         ) : (
           <>
-            <img
-              key={`${page}-${imageReload}`}
-              className="comic-page-img"
-              src={pageUrl}
-              alt={`第 ${page} 页`}
-              draggable={false}
-              onLoad={() => setPageLoading(false)}
-              onError={() => {
-                setPageLoading(false);
-                setImageError(true);
-              }}
-            />
+            {pageSrc && (
+              <img
+                key={`${page}-${imageReload}`}
+                className="comic-page-img"
+                src={pageSrc}
+                alt={`第 ${active} 页`}
+                draggable={false}
+                onLoad={() => setPageLoading(false)}
+                onError={() => {
+                  setPageLoading(false);
+                  setImageError(true);
+                }}
+              />
+            )}
             {pageLoading && (
               <div className="comic-page-loading">
                 <Loader2 size={28} className="spin" />
@@ -360,7 +393,7 @@ export default function ComicReaderPage() {
             )}
             {imageError && !pageLoading && (
               <div className="comic-image-error">
-                <p>这一页加载失败，可能是网络中断。</p>
+                <p>这一页加载失败,可能是内容已损坏。</p>
                 <button
                   type="button"
                   className="btn btn--ghost"
@@ -385,7 +418,7 @@ export default function ComicReaderPage() {
           <ChevronLeft size={26} />
         </button>
         <button type="button" className="comic-page-indicator" onClick={openSheet}>
-          <strong>{page}</strong>
+          <strong>{active}</strong>
           <span>/ {numPages || '?'}</span>
         </button>
         <button
@@ -412,7 +445,7 @@ export default function ComicReaderPage() {
               <div>
                 <h2>跳转页面</h2>
                 <p>
-                  第 {page} 页 · 共 {numPages} 页
+                  第 {active} 页 · 共 {numPages} 页
                 </p>
               </div>
               <button type="button" className="icon-btn" aria-label="关闭" onClick={() => setSheetOpen(false)}>
@@ -424,7 +457,7 @@ export default function ComicReaderPage() {
               type="range"
               min={1}
               max={Math.max(1, numPages)}
-              value={page}
+              value={active}
               onChange={(event) => goPage(Number(event.target.value))}
             />
             <div className="comic-jump">

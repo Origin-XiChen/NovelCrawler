@@ -1,8 +1,10 @@
-import { LibraryBig, UserRound } from 'lucide-react';
+import { House, LibraryBig, Server, UserRound } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const items = [
-  { to: '/library', label: '书库', icon: LibraryBig },
+  { to: '/home', label: '首页', icon: House },
+  { to: '/shelf', label: '书架', icon: LibraryBig },
+  { to: '/library', label: '电脑', icon: Server },
   { to: '/settings', label: '我的', icon: UserRound },
 ];
 
@@ -17,7 +19,9 @@ export default function BottomNav() {
             to={item.to}
             className={({ isActive }) => `bottom-nav__item${isActive ? ' is-active' : ''}`}
           >
-            <Icon size={22} strokeWidth={1.9} />
+            <span className="bottom-nav__icon">
+              <Icon size={21} strokeWidth={1.9} />
+            </span>
             <span>{item.label}</span>
           </NavLink>
         );

@@ -12,12 +12,17 @@ export default function NativeBackButton() {
 
     void App.addListener('backButton', () => {
       const path = window.location.hash.replace(/^#/, '').split('?')[0] || '/';
-      if (path.startsWith('/read/') || path.startsWith('/book/') || path.startsWith('/comic/')) {
+      if (
+        path.startsWith('/read/') ||
+        path.startsWith('/book/') ||
+        path.startsWith('/comic/') ||
+        path.startsWith('/local/')
+      ) {
         navigate(-1);
         return;
       }
-      if (path === '/settings') {
-        navigate('/library', { replace: true });
+      if (path === '/settings' || path === '/library') {
+        navigate('/home', { replace: true });
         return;
       }
       void App.minimizeApp();

@@ -1480,6 +1480,47 @@ def white_page_jpeg() -> bytes:
     return out.getvalue()
 
 
+def page_image(page) -> bytes:
+    """取 pypdf 页对象里最大的内嵌图并统一成 JPEG;无图/损坏页返回白页占位。
+
+    JPEG 原样透传零重编码,其他格式(JBIG2/Flate/PNG)用 PIL 兜底转 JPEG。
+    网页逐页请求与手机离线包导出共用,保证两端出图完全一致。"""
+    from PIL import Image
+    data = b""
+    try:
+        best = b""
+        for im in page.images:
+            if len(im.data) > len(best):
+                best = im.data
+        data = best
+    except Exception:  # noqa: BLE001
+        data = b""
+    if data and data[:2] != b"\xff\xd8":
+        try:
+            im = Image.open(io.BytesIO(data))
+            im.seek(0)  # 动图取首帧
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            out = io.BytesIO()
+            im.save(out, "JPEG", quality=85, optimize=True)
+            data = out.getvalue()
+        except Exception:  # noqa: BLE001
+            data = b""
+    return data or white_page_jpeg()
+
+
+def page_jpeg(src: str, page_no: int) -> bytes:
+    """按页码(1-based)抽取单页 JPEG,页码越界同样返回白页。"""
+    from pypdf import PdfReader
+    try:
+        pages = PdfReader(src).pages
+        if 1 <= page_no <= len(pages):
+            return page_image(pages[page_no - 1])
+    except Exception:  # noqa: BLE001
+        pass
+    return white_page_jpeg()
+
+
 def compress_comic_pdf(src: str, dst: str, quality: str = "hq") -> None:
     """压缩存量漫画 PDF:逐页抽取最大内嵌图 → _shrink_image 重编码 → img2pdf 重建。
 
