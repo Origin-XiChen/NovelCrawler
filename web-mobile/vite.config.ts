@@ -39,6 +39,18 @@ export default defineConfig(({ mode }) => {
       outDir: native ? '../static/mobile-app-native' : '../static/mobile-app',
       emptyOutDir: true,
       target: 'chrome100',
+      rollupOptions: {
+        output: {
+          // 单包超过 1MB 时 esbuild 的 transform 会把源码写成 %TEMP% 临时文件再删,
+          // 本机(Win + Defender)上这一步稳定报 "remove ...: Access is denied" 导致
+          // 打包失败。拆成几个小 chunk 后每个都走内存管道,既绕开该问题,
+          // 也让手机首次加载能并行取包。
+          manualChunks: {
+            react: ['react', 'react-dom', 'react-router-dom', 'scheduler'],
+            vendor: ['jszip', 'jsqr', 'lucide-react'],
+          },
+        },
+      },
     },
     server: {
       host: '127.0.0.1',

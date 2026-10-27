@@ -189,6 +189,12 @@ DEFAULT_SETTINGS: dict = {
     "out_dir": "downloads",
     "verify_ssl": True,
     "lan_access": False,   # 允许局域网访问(手机/其他设备),需重启生效
+    "https_enabled": False,  # 自签 HTTPS(手机加密访问),需重启生效
+    "https_only": False,     # 局域网只允许 HTTPS,HTTP 收回本机(需 https_enabled)
+    "sshd_enabled": False,   # 内建 SSH 服务端(App 自己开一个,密码自理)
+    "sshd_port": 2222,       # 内建 sshd 监听端口
+    "sshd_user": "novelist", # 内建 sshd 用户名
+    "sshd_password": "",     # 内建 sshd 密码(首次开启时随机生成,只存本机)
     "clean_rules": [],     # 正文净化规则(正则替换),保存时随 settings 落盘
     # ---- 内网穿透(校园网/外出时手机经公网隧道访问) ----
     "tunnel_cmd": "",          # 隧道客户端可执行文件路径(natapp/cpolar/frpc)

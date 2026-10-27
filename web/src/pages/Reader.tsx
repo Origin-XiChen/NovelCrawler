@@ -1184,7 +1184,13 @@ export function ReaderPage() {
           <div className="reader__book" title={title}>
             {title}
           </div>
-          <div className="reader__chapter-name">{chapter?.title || (loading ? '加载中…' : '')}</div>
+          {/* 章节名与书名相同时不要重复渲染 —— TXT 首章常把「书名」当标题解析出来,
+              顶栏就会出现两行一模一样的文字 */}
+          {(() => {
+            const label = (chapter?.title || '').trim() || (loading ? '加载中…' : '');
+            if (!label || label === title.trim()) return null;
+            return <div className="reader__chapter-name">{label}</div>;
+          })()}
         </div>
         <div className="reader__tools">
           <button

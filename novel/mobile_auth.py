@@ -13,7 +13,7 @@ import re
 import secrets
 import threading
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from .paths import MOBILE_DEVICES_PATH
 
@@ -100,8 +100,19 @@ def _record_fail(ip: str, now: float) -> None:
     _fails[ip] = bucket[-MAX_FAILS:]
 
 
-def start_pair(server_name: str, base_url: str, ttl: int = PAIR_TTL) -> dict:
-    """生成一次性配对码与扫码链接(base_url 例如 http://192.168.1.5:8765)。"""
+def start_pair(server_name: str, base_url: str, ttl: int = PAIR_TTL,
+               candidates: list[str] | None = None, pin: str = "",
+               ssh: str = "", ssh_password: str = "") -> dict:
+    """生成一次性配对码与扫码链接(base_url 例如 http://192.168.1.5:8765)。
+
+    candidates:全部候选地址(含 base_url)。除主地址外的会以 host:port 形式
+    拼进 `alt` 参数 —— 手机端扫码后逐个探测,不通就换下一个。校园网/AP 隔离
+    场景下主地址常常连不通,靠这一层自动落到虚拟组网地址上。
+
+    pin:开启 HTTPS 时带上本机 CA 的短指纹。手机取回 CA 证书的同时用这个值
+    校验 —— 指纹走的是「用户肉眼可见的二维码」这条可信通道,证书被替换会
+    直接对不上,不依赖系统信任库里的一堆第三方 CA。
+    """
     now = time.time()
     ttl = max(60, min(int(ttl or PAIR_TTL), 900))
     with _lock:
@@ -114,6 +125,30 @@ def start_pair(server_name: str, base_url: str, ttl: int = PAIR_TTL) -> dict:
     base = str(base_url or "").rstrip("/")
     name = quote(server_name or "NovelCrawler")
     uri = f"{base}/m?pair={code}&v=1&name={name}"
+    alts: list[str] = []
+    for item in (candidates or [])[:6]:
+        try:
+            parsed = urlparse(str(item or "").strip())
+        except ValueError:
+            continue
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            if parsed.netloc and f"{parsed.scheme}://{parsed.netloc}" != base:
+                alts.append(parsed.netloc)
+    if alts:
+        # 去重保序,最多 4 个备用地址(再多二维码会变密,扫不动)
+        seen: set[str] = set()
+        uniq = [a for a in alts if not (a in seen or seen.add(a))]
+        uri += "&alt=" + quote(",".join(uniq[:4]), safe=",:")
+    pin = str(pin or "").strip()
+    if pin:
+        uri += "&pin=" + quote(pin, safe="")
+    ssh = str(ssh or "").strip()
+    if ssh:
+        uri += "&ssh=" + quote(ssh, safe="@:")
+        if ssh_password:
+            # 内建 sshd 的密码:只在二维码里传一次(屏幕 → 手机这条视觉信道),
+            # 不写日志、不进 URL 之外的任何地方
+            uri += "&sshp=" + quote(str(ssh_password), safe="")
     legacy = f"{base}/mobile?pair={code}&v=1&name={name}"
     return {
         "ok": True,
@@ -123,6 +158,9 @@ def start_pair(server_name: str, base_url: str, ttl: int = PAIR_TTL) -> dict:
         "uri": uri,
         "legacy_uri": legacy,
         "api": API_VERSION,
+        "pin": pin,
+        "ssh": ssh,
+        "ssh_password": ssh_password,
     }
 
 

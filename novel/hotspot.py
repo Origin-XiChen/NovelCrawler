@@ -45,7 +45,18 @@ def _netsh_wlan() -> str:
 
 
 def _local_ips() -> list[str]:
-    """本机所有 IPv4 地址(含热点网段)。UDP 探测拿主 IP + getaddrinfo 补充。"""
+    """本机所有 IPv4 地址,按「手机可达性」排序(热点 > 虚拟组网 > 有线 > 无线)。
+
+    走 novel.netinfo 的网卡枚举:只靠 UDP 探测 8.8.8.8 拿默认路由地址是不够的,
+    校园网下那张网卡恰恰手机连不上,而 ZeroTier/Radmin 这类虚拟组网才可达。
+    """
+    try:
+        from .netinfo import local_ips as _all
+        ips = _all()
+        if ips:
+            return ips
+    except Exception:  # noqa: BLE001
+        pass
     ips: list[str] = []
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -75,6 +86,11 @@ def detect(force: bool = False) -> dict:
         ips = _local_ips()
         hotspot_on = any(ip.startswith(HOTSPOT_NET) for ip in ips)
         hotspot_ips = [ip for ip in ips if ip.startswith(HOTSPOT_NET)]
+        try:
+            from .netinfo import adapters as _adapters
+            adapter_list = _adapters()
+        except Exception:  # noqa: BLE001
+            adapter_list = []
 
         wifi_ssid = ""
         wifi_state = ""
@@ -95,8 +111,9 @@ def detect(force: bool = False) -> dict:
             "hotspot_gw": HOTSPOT_GW,          # 热点网关(手机扫码目标)
             "wifi_ssid": wifi_ssid,            # 当前无线连接 SSID(空=未连 WiFi)
             "wifi_state": wifi_state,          # 无线接口状态(disconnected/connected/...)
-            "ips": ips,                        # 全部本机 IPv4
+            "ips": ips,                        # 全部本机 IPv4(已按手机可达性排序)
             "primary_ip": ips[0] if ips else "",
+            "adapters": adapter_list,          # 网卡明细:ip/kind/label/name/recommended
         }
         _cache["ts"] = now
         _cache["data"] = data
@@ -104,8 +121,18 @@ def detect(force: bool = False) -> dict:
 
 
 def best_lan_ip() -> str:
-    """热点优先的局域网 IP(供二维码/提示使用):热点开启时返回 192.168.137.1。"""
+    """推荐给手机连接的地址:热点开启时用热点网关,否则按网卡优先级选。
+
+    不再默认取「默认路由那张网卡」—— 校园网/公司网那张往往手机连不上。
+    """
     d = detect()
     if d["hotspot_on"] and d["hotspot_ips"]:
         return d["hotspot_ips"][0]
+    try:
+        from .netinfo import best_ip as _best
+        ip = _best()
+        if ip and ip != "127.0.0.1":
+            return ip
+    except Exception:  # noqa: BLE001
+        pass
     return d["primary_ip"] or "127.0.0.1"

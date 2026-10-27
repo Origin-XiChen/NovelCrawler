@@ -68,6 +68,9 @@ web-mobile/android/.idea/
 web-mobile/android/build/
 web-mobile/android/app/build/
 web-mobile/android/local.properties
+
+# ================= 自签证书(含私钥,绝不能进仓库) =================
+tls/
 web-mobile/android/keystore.properties
 web-mobile/android/app/release/
 web-mobile/android/app/src/main/assets/public/

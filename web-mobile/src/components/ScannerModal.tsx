@@ -63,9 +63,21 @@ export default function ScannerModal({ onClose, onResult }: Props) {
 
       try {
         stream = await navigator.mediaDevices.getUserMedia({
+          // 不指定分辨率时安卓 WebView 默认给 480p 甚至 320×240,预览糊成一片、
+          // 高密度配对码根本扫不动。这里要 1080p,拿不到时再逐级降级。
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        }).catch(() => navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
+          audio: false,
+        })).catch(() => navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' } },
           audio: false,
-        });
+        }));
         if (cancelled) {
           stop();
           return;
@@ -78,6 +90,18 @@ export default function ScannerModal({ onClose, onResult }: Props) {
           else video.onloadedmetadata = () => resolve();
         });
         await video.play();
+        // 连续对焦:不少安卓机默认是固定焦距,离二维码二十厘米就糊
+        try {
+          const track = stream.getVideoTracks()[0];
+          const caps = (track.getCapabilities?.() || {}) as { focusMode?: string[] };
+          if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+            await track.applyConstraints({
+              advanced: [{ focusMode: 'continuous' }],
+            } as unknown as MediaTrackConstraints);
+          }
+        } catch {
+          // 设备不支持就算了,不影响扫码
+        }
         if (cancelled) return;
         setStarting(false);
 

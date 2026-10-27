@@ -18,7 +18,7 @@ import {
   Zap,
 } from 'lucide-react';
 import ScannerModal from '../components/ScannerModal';
-import { checkServer, pingServer, pairServer } from '../lib/api';
+import { checkServer, pickReachable, pingServer, pairServer } from '../lib/api';
 import {
   detectDeviceName,
   getDeviceId,
@@ -31,6 +31,8 @@ import {
   touchServer,
 } from '../lib/connection';
 import { errorMessage } from '../lib/format';
+import { ensurePinned, pinnedAvailable, PinError } from '../lib/pinned';
+import { parseSshParam, sshAvailable, sshConnect, sshDisconnect, sshTargetText } from '../lib/ssh';
 import { IS_NATIVE } from '../lib/native';
 import { pairOverWrtc, prepareWrtc, wrtcServerAlive, type WrtcHandshake } from '../lib/wrtc';
 import type { ServerEntry } from '../lib/types';
@@ -49,11 +51,11 @@ const HOTSPOT_PREFIX = '192.168.137.1';
 
 function cleanPairQuery() {
   const url = new URL(window.location.href);
-  for (const key of ['pair', 'code', 'v', 'name']) url.searchParams.delete(key);
+  for (const key of ['pair', 'code', 'v', 'name', 'pin', 'alt']) url.searchParams.delete(key);
   const [hashPath, hashQuery] = url.hash.split('?');
   if (hashQuery) {
     const params = new URLSearchParams(hashQuery);
-    for (const key of ['pair', 'code', 'v', 'name']) params.delete(key);
+    for (const key of ['pair', 'code', 'v', 'name', 'pin', 'alt']) params.delete(key);
     url.hash = params.size ? `${hashPath}?${params.toString()}` : hashPath;
   }
   window.history.replaceState({}, '', url.pathname + (url.search || '') + url.hash);
@@ -92,19 +94,60 @@ export default function ConnectPage() {
   const [wrtcAnswer, setWrtcAnswer] = useState('');
   const wrtcRef = useRef<WrtcHandshake | null>(null);
   const autoRan = useRef(false);
+  // 二维码 alt 参数带来的备用地址(热点/虚拟组网),配对成功后一并存进候选列表
+  const pairCandidatesRef = useRef<string[]>([]);
+  // 二维码携带的 CA 指纹:配对过程中一直带着,配对成功后一并写进服务器条目
+  const pairPinRef = useRef<string>('');
+  const sshTargetRef = useRef<ReturnType<typeof parseSshParam>>(null);
+  const sshTunnelRef = useRef<{ target: string; localPort: number; via: string } | null>(null);
+  const tunnelVia = useRef('ssh');
+  const [sshPassword, setSshPassword] = useState('');
+  const [sshHint, setSshHint] = useState('');
   const doPairRef = useRef<(base: string, pairCode: string) => Promise<void>>(
     async () => undefined,
   );
   const expired = searchParams.get('expired') === '1';
 
   const doPair = useCallback(
-    async (baseInput: string, pairCode: string) => {
+    async (baseInput: string, pairCode: string, pinInput?: string) => {
       setBusy('pair');
       setError('');
       setInfo('');
       try {
-        const base = normalizeBaseUrl(baseInput);
+        let base = normalizeBaseUrl(baseInput);
         if (!/^\d{6}$/.test(pairCode.trim())) throw new Error('请输入 6 位配对码');
+        // ---- 内建 SSH 通道:扫码带了 ssh 账号且用户填了密码时优先走隧道 ----
+        // 隧道打通后,电脑的服务端口被映射到手机本机,后面所有请求都指向 127.0.0.1,
+        // 校园网 AP 隔离 / 公网 NAT 都不再影响连接,且链路是加密的。
+        if (base.trim() && sshTargetRef.current && sshPassword) {
+          const target = sshTargetRef.current;
+          setInfo(`正在建立 SSH 通道 ${sshTargetText(target)}…`);
+          try {
+            const tun = await sshConnect(target, sshPassword, Number(new URL(base).port) || 80);
+            base = `http://127.0.0.1:${tun.localPort}`;
+            sshTunnelRef.current = { target: sshTargetText(target), localPort: tun.localPort, via: tunnelVia.current };
+            setInfo(`SSH 通道已建立，经 127.0.0.1:${tun.localPort} 连接电脑`);
+          } catch (cause) {
+            await sshDisconnect();
+            throw new Error(`SSH 通道建立失败：${errorMessage(cause)}`);
+          }
+        }
+        // 自签 HTTPS:先把电脑那张 CA 固定住再谈配对,否则后面每个请求都得
+        // 依赖系统信任库里的一堆第三方根证书
+        if (/^https:/i.test(base)) {
+          const pin = String(pinInput || pairPinRef.current || '').trim();
+          if (!pinnedAvailable()) {
+            setInfo('当前环境不支持证书固定，请安装 App 版');
+          } else if (!pin) {
+            setInfo('二维码没带证书指纹，本次按「首次信任」处理，建议改用扫码配对');
+            await ensurePinned(base);
+          } else {
+            setInfo('正在校验电脑证书…');
+            await ensurePinned(base, pin);
+            pairPinRef.current = pin;
+          }
+          setInfo('');
+        }
         let ping;
         try {
           ping = await pingServer(base);
@@ -116,20 +159,39 @@ export default function ConnectPage() {
         if (!ping.ok) throw new Error('电脑返回的配对信息异常，请升级桌面端后重试');
         const result = await pairServer(base, pairCode.trim(), getDeviceId(), detectDeviceName());
         if (!result.token || !result.device) throw new Error('电脑返回的配对信息不完整');
+        // 合并三处候选:当前地址 + 二维码 alt + 电脑下发,再探测挑一个真正通的
+        const merged: string[] = [];
+        for (const raw of [base, ...pairCandidatesRef.current, ...(result.server?.candidates || [])]) {
+          const url = String(raw || '').trim().replace(/\/+$/, '');
+          if (url && !merged.includes(url)) merged.push(url);
+        }
+        let chosen = base;
+        if (merged.length > 1) {
+          setInfo('正在选择最快的连接地址…');
+          const hit = await pickReachable(merged);
+          if (hit) chosen = hit;
+          setInfo('');
+        }
         saveServer({
           id: result.device.id,
           name: result.server?.name || ping.name || base,
-          baseUrl: base,
+          baseUrl: chosen,
           token: result.token,
           api: result.server?.api || ping.api || 1,
           version: result.server?.version || ping.version || '',
           lastUsed: Date.now(),
           transport: 'http',
+          candidates: merged,
+          pin: result.server?.pin || pairPinRef.current || undefined,
+          ssh: sshTargetText(sshTargetRef.current) || result.server?.ssh || undefined,
+          sshPassword: sshPassword || undefined,
+          sshTunnel: sshTunnelRef.current || undefined,
         });
+        pairCandidatesRef.current = [];
         cleanPairQuery();
         navigate('/home', { replace: true });
       } catch (cause) {
-        setError(errorMessage(cause));
+        setError(cause instanceof PinError ? cause.message : errorMessage(cause));
       } finally {
         setBusy('');
       }
@@ -149,6 +211,13 @@ export default function ConnectPage() {
       setError('二维码内容无效，请重新生成配对码');
       return;
     }
+    pairCandidatesRef.current = parsed.candidates || [];
+    pairPinRef.current = parsed.pin || '';
+    sshTargetRef.current = parseSshParam(parsed.ssh);
+    if (parsed.sshPassword) setSshPassword(parsed.sshPassword);
+    setSshHint(sshTargetRef.current
+      ? `已从二维码拿到内建 SSH 通道（${sshTargetText(sshTargetRef.current)}）${parsed.sshPassword ? '与密码' : '，请补填密码'}，将自动走加密隧道`
+      : '');
     setAddress(parsed.baseUrl);
     setCode(parsed.code);
     setMode('manual');
@@ -278,6 +347,13 @@ export default function ConnectPage() {
     }
     const parsed = parsePairPayload(text);
     if (parsed) {
+      pairCandidatesRef.current = parsed.candidates || [];
+      pairPinRef.current = parsed.pin || '';
+      sshTargetRef.current = parseSshParam(parsed.ssh);
+      if (parsed.sshPassword) setSshPassword(parsed.sshPassword);
+      setSshHint(sshTargetRef.current
+        ? `已从二维码拿到内建 SSH 通道（${sshTargetText(sshTargetRef.current)}）${parsed.sshPassword ? '与密码' : '，请补填密码'}，将自动走加密隧道`
+        : '');
       setAddress(parsed.baseUrl);
       setCode(parsed.code);
       setMode('manual');
@@ -562,6 +638,19 @@ export default function ConnectPage() {
               onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
             />
           </label>
+          {sshHint && sshAvailable() && (
+            <label className="field">
+              <span>电脑登录密码（选填 · 走 SSH 加密通道）</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                placeholder="填了就走内建 SSH 隧道，留空走局域网直连"
+                value={sshPassword}
+                onChange={(event) => setSshPassword(event.target.value)}
+              />
+              <p className="connect-tip">{sshHint}</p>
+            </label>
+          )}
           <button type="submit" className="btn btn--primary btn--lg" disabled={busy === 'pair'}>
             {busy === 'pair' ? <Loader2 size={18} className="spin" /> : <Check size={18} />}
             {busy === 'pair' ? '正在配对…' : '连接电脑'}
