@@ -675,6 +675,9 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
         </div>
       )}
 
+      <details className="mobile-details mobile-card" open>
+        <summary>安全通道（自签 HTTPS / 内建 SSH）</summary>
+        <div className="mobile-stack" style={{ marginTop: 12 }}>
       <div className="mobile-card">
         <div className="mobile-card__title">
           <Terminal size={16} />
@@ -850,6 +853,8 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
           </div>
         )}
       </div>
+        </div>
+      </details>
 
       <div className="mobile-card">
         <div className="mobile-card__title">

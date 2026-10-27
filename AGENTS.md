@@ -145,6 +145,12 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
 
+### 1.7.1 — 2026-10-27
+- 状态：已发布（CI 构建 Setup + latest.yml；APK 本机构建后上传）
+- 新增：电脑端「局域网扫码」页把自签 HTTPS 与内建 SSH 收进「安全通道」折叠区（页内分区，减少滚动）；App 端支持导入电脑整包离线包（`kind:"snapshot"` 逐本拆包入库）
+- 修复：离线包缺 `manifest.json` 导致导入被拒；离线包命名改 `NovelCrawler-Offline-<时间戳>`；全局去掉旧称呼「小说管家」；阅读进度同步只前进不后退（同一本书已有更靠前进度时不被覆盖）
+- 风险遗留：手机端 `<img>` 封面仍需装 CA；SSH 通道未真机验证
+
 ### 1.7.0 — 2026-10-27
 
 - 状态：已发布。CI success，资产齐全（`latest.yml` + `Setup-1.7.0.exe` + `.blockmap` + `Mobile-1.7.0.apk`），`isLatest=true`
