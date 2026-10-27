@@ -105,9 +105,8 @@ async function importBundleZip(file: File): Promise<LocalBook> {
   } catch {
     throw new Error('manifest.json 内容损坏');
   }
-  if ((manifest.bundle_version || 0) > BUNDLE_VERSION) {
-    throw new Error('离线包版本过新,请先把手机 App 升级到最新版');
-  }
+  // 整包快照走自己的 schema,不受 bundle_version 约束 —— 它只是"一包多本"的容器。
+  // 这一步必须放在版本校验之前,否则 pack 端写了更高版本号就会被误判为"包太新"。
   if (manifest.kind === 'snapshot') {
     // 电脑端整包快照:多本书共用一个 zip,章节在 data/<书名>.json 里。
     // 这里按 App 的 bundle 布局(chapters/NNNNN.json)给每本书重新打包一份,
@@ -115,6 +114,9 @@ async function importBundleZip(file: File): Promise<LocalBook> {
     const imported = await importSnapshotZip(zip, manifest);
     if (!imported.length) throw new Error('离线包里没有可导入的书');
     return imported[0];
+  }
+  if ((manifest.bundle_version || 0) > BUNDLE_VERSION) {
+    throw new Error('离线包版本过新,请先把手机 App 升级到最新版');
   }
   if (!manifest.kind || !manifest.file) throw new Error('manifest.json 缺少必要字段');
 
@@ -588,11 +590,17 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
   const out: LocalBook[] = [];
   for (const item of manifest.books || []) {
     if (!item?.file || !item?.data) continue;
-    const entry = zip.file(item.data);
+    // 新版包里有 data/书名.json;早先的包只有 .js(window.__SNAP_DATA__[..] = {...})。
+    // 后者去掉前缀同样能取到 JSON,保证旧包也能导。
+    const jsonEntry = zip.file(item.data);
+    const jsEntry = jsonEntry ? null : zip.file(item.data.replace(/\.json$/i, '.js'));
+    const entry = jsonEntry || jsEntry;
     if (!entry) continue;
     let chapters: { title?: string; text?: string; html?: string }[] = [];
     try {
-      const payload = JSON.parse(await entry.async('string')) as { chapters?: typeof chapters };
+      const raw = await entry.async('string');
+      const text = jsonEntry ? raw : raw.slice(raw.lastIndexOf('=') + 1).replace(/;\s*$/, '');
+      const payload = JSON.parse(text) as { chapters?: typeof chapters };
       chapters = payload.chapters || [];
     } catch {
       continue;

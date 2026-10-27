@@ -5839,7 +5839,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     import time as _t5
                     _manifest = {
-                        "bundle_version": 2,
+                        "bundle_version": 1,
                         "kind": "snapshot",
                         "id": "snapshot:" + _t5.strftime("%Y%m%d-%H%M%S"),
                         "title": "NovelCrawler 离线包",
