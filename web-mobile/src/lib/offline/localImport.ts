@@ -28,6 +28,15 @@ interface BundleManifest {
   meta?: unknown;
   /** kind==="snapshot":电脑端「整包离线」里装了多本书 */
   books?: SnapshotBook[];
+  /** 同一个包里附带的漫画(按页图打包) */
+  comics?: SnapshotComic[];
+}
+
+interface SnapshotComic {
+  title: string;
+  /** 包内目录,形如 comics/<URL编码标题> */
+  dir: string;
+  pages: number;
 }
 
 interface SnapshotBook {
@@ -616,12 +625,16 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
     }
     if (!chapters.length) continue;
 
+    // 格式必须按真实内容判断:EPUB 的章节只有 html 没有 text,
+    // 若一律标成 txt,阅读器会渲染 text → 整页空白(真实事故)。
+    const isEpub = /\.epub$/i.test(item.file) || chapters.some((c) => !!c.html);
+    const fmt: 'txt' | 'epub' = isEpub ? 'epub' : 'txt';
     const id = `novel:${item.file}`;
     // 重新打包成 App 认的布局:manifest.json + chapters/00001.json
     const bundle = new JSZip();
     bundle.file('manifest.json', JSON.stringify({
       bundle_version: 1,
-      kind: 'txt',
+      kind: fmt,
       id,
       title: item.title || item.file.replace(/\.[^.]+$/, ''),
       file: item.file,
@@ -641,7 +654,7 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
     const book: LocalBook = {
       id,
       kind: 'novel',
-      format: 'txt',
+      format: fmt,
       title: item.title || item.file.replace(/\.[^.]+$/, ''),
       file: item.file,
       total: chapters.length,
@@ -661,6 +674,63 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
     await putBook(book);
     out.push(book);
   }
+  // ---- 漫画:整包里是 comics/<标题>/pages/NNNN.jpg,拆成 comic bundle ----
+  for (const comic of manifest.comics || []) {
+    if (!comic?.title || !comic?.dir) continue;
+    const prefix = `${comic.dir.replace(/\/+$/, '')}/pages/`;
+    const pages = Object.keys(zip.files)
+      .filter((n) => n.startsWith(prefix) && !zip.files[n].dir)
+      .sort();
+    if (!pages.length) continue;
+
+    const id = `comic:${comic.title}`;
+    const bundle = new JSZip();
+    bundle.file('manifest.json', JSON.stringify({
+      bundle_version: 1,
+      kind: 'comic',
+      id,
+      title: comic.title,
+      file: `${comic.title}/`,
+      chapters: [],
+      total: pages.length,
+      num_pages: pages.length,
+      assets: {},
+      cover: 'pages/0001.jpg',
+      src_size: 0,
+      src_mtime: 0,
+      generated: Math.floor(Date.now() / 1000),
+    }));
+    for (let i = 0; i < pages.length; i += 1) {
+      const pageFile = zip.file(pages[i]);
+      if (!pageFile) continue;
+      bundle.file(`pages/${String(i + 1).padStart(4, '0')}.jpg`, await pageFile.async('uint8array'));
+    }
+    const blob = await bundle.generateAsync({ type: 'blob' });
+
+    const book: LocalBook = {
+      id,
+      kind: 'comic',
+      format: 'comic',
+      title: comic.title,
+      file: `${comic.title}/`,
+      total: pages.length,
+      chapters: [],
+      assets: {},
+      coverArc: 'pages/0001.jpg',
+      size: blob.size,
+      srcMtime: 0,
+      srcSize: 0,
+      importedAt: Date.now(),
+      serverId: '',
+      serverName: '本地导入',
+      origin: 'import',
+    };
+    releaseZip(id);
+    await saveChunk(id, blob);
+    await putBook(book);
+    out.push(book);
+  }
+
   // 兜底:manifest 缺 books 或名字全对不上时,直接扫 data/ 目录按文件名恢复。
   // 宁可多一次遍历,也不要让用户看到「没有可导入的书」。
   if (!out.length) {

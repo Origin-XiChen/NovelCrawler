@@ -5815,6 +5815,33 @@ class Handler(BaseHTTPRequestHandler):
                             zf.write(fp, f"files/{c['title']}/{p}")
                             done += os.path.getsize(fp)
                         _report()
+                # 漫画:App 只能按「页图」阅读(pages/NNNN.jpg),所以把每话的
+                # imgXXXX.jpg 按顺序抄进包里,而不是丢 PDF 过去。
+                comic_entries = []
+                for c in comics:
+                    cdir = os.path.join(COMIC_OUT_DIR, c["title"])
+                    page_paths = []
+                    try:
+                        for ch_name in sorted(os.listdir(cdir)):
+                            ch_dir = os.path.join(cdir, ch_name)
+                            if not os.path.isdir(ch_dir):
+                                continue
+                            for img in sorted(os.listdir(ch_dir)):
+                                if img.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                                    page_paths.append(os.path.join(ch_dir, img))
+                    except OSError:
+                        page_paths = []
+                    arc_dir = "comics/" + _quote(c["title"], safe="")
+                    for index, src in enumerate(page_paths, 1):
+                        try:
+                            zf.write(src, f"{arc_dir}/pages/{index:04d}.jpg")
+                            done += os.path.getsize(src)
+                        except OSError:
+                            continue
+                    if page_paths:
+                        comic_entries.append({"title": c["title"], "dir": arc_dir,
+                                              "pages": len(page_paths)})
+                    _report()
                 meta_comics = [{"title": c["title"], "files": c["pdfs"],
                                 "dir": "files/" + _quote(c["title"], safe="")}
                                for c in comics]
@@ -5846,6 +5873,7 @@ class Handler(BaseHTTPRequestHandler):
                         "file": "",
                         "generated": int(_t5.time()),
                         "total": len(meta_books),
+                        "comics": comic_entries,
                         "books": [
                             {"file": b["name"], "title": os.path.splitext(b["name"])[0],
                              "size": b["size"], "chapters": b["chs"], "has_body": b["has_body"],
