@@ -1367,6 +1367,24 @@ function HotspotTab({ lanAccess, port }: { lanAccess: boolean; port: string }) {
             <ShieldCheck size={14} />
             放行防火墙
           </button>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            title="列出监听地址、每张网卡自连结果、防火墙与热点状态"
+            onClick={async () => {
+              try {
+                const res = await apiGet<Record<string, unknown>>('/api/net_probe');
+                const text = JSON.stringify(res, null, 2);
+                await navigator.clipboard.writeText(text);
+                toast('诊断结果已复制到剪贴板，粘贴给开发者即可', 'success');
+              } catch (cause) {
+                toast(cause instanceof Error ? cause.message : String(cause), 'error');
+              }
+            }}
+          >
+            <Activity size={14} />
+            网络诊断
+          </button>
         </div>
       </div>
     </div>

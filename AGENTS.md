@@ -90,8 +90,8 @@ gh release upload vX.Y.Z <apk>#NovelCrawler-Mobile-X.Y.Z.apk --clobber
   凡改动**需要真机验证**（连接链路、配对、离线包导入、SSH、扫码等），一律先发 **Dev 预发布**，
   由用户测过再转正；无需验证的纯修复/文档改动才可以直接发正式版。
   发 Dev 版的完整动作 = 推 tag → 等 CI → 上传 APK → `gh release edit vX.Y.Z --prerelease`。
-  **Dev 期间版本号保持不变**：反复修就 `git tag -f vX.Y.Z && git push -f origin refs/tags/vX.Y.Z`
-  重建同一个 release（资产覆盖），直到用户验收通过才 `--prerelease=false` 转正、并把版本号留给正式版。
+  **Dev 用预发布后缀递增**：`1.7.9-dev.1 → .2 → .3`，正式版号 `1.7.9` 始终留给转正（semver 里 `1.7.9 > 1.7.9-dev.N`，转正后 Dev 用户能正常升上去）。
+  每轮 Dev 只改后缀，五个版本号 + tag 同步，CI 正常构建；转正时把所有版本号改成 `1.7.9` 并 `--prerelease=false`。
 - **Dev 预发布**：CI 默认建正式 release；要发 Dev 版，CI 成功后执行
   `gh release edit vX.Y.Z --prerelease`。此时 `/releases/latest` 与桌面 `allowPrerelease=false`
   都看不到它，只有开了 Dev 通道的客户端能收到。

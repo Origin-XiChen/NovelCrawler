@@ -36,6 +36,17 @@ function versionParts(version: string): number[] {
     .map((part) => Number.parseInt(part, 10) || 0);
 }
 
+/**
+ * 语义化版本比较,支持 `1.7.9-dev.2` 这类预发布后缀:
+ *   1.7.9-dev.1 < 1.7.9-dev.2 < 1.7.9
+ * Dev 版靠这个后缀递增,正式版号(1.7.9)不被占用 —— 转正后所有 Dev 用户都能升上去。
+ */
+function prereleaseParts(version: string): { name: string; num: number } | null {
+  const match = version.replace(/^v/i, '').match(/[-+]([a-z]*)\.?(\d*)$/i);
+  if (!match) return null;
+  return { name: (match[1] || '').toLowerCase(), num: Number.parseInt(match[2] || '0', 10) || 0 };
+}
+
 export function compareVersions(a: string, b: string): number {
   const left = versionParts(a);
   const right = versionParts(b);
@@ -43,7 +54,13 @@ export function compareVersions(a: string, b: string): number {
     const diff = (left[i] || 0) - (right[i] || 0);
     if (diff !== 0) return diff;
   }
-  return 0;
+  const pa = prereleaseParts(a);
+  const pb = prereleaseParts(b);
+  if (!pa && !pb) return 0;
+  if (!pa) return 1;    // 正式版 > 预发布
+  if (!pb) return -1;
+  if (pa.name !== pb.name) return pa.name < pb.name ? -1 : 1;
+  return pa.num - pb.num;
 }
 
 export async function currentAppVersion(): Promise<string> {

@@ -2026,6 +2026,47 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_network(qs)
         if path == "/api/doctor":
             return self._api_doctor()
+        if path == "/api/net_probe":
+            # 一键网络诊断:把"手机连不上"这件事拆成可判定的几项
+            if not self._is_trusted_local():
+                return self._send_json({"ok": False, "error": "仅限电脑本机"}, 403)
+            import socket as _skp
+            from novel import netinfo as _ni
+            from novel.doctor import firewall_rule as _fw
+            from novel.hotspot import detect as _hsd
+            try:
+                host, port = self.server.server_address[0], self.server.server_address[1]
+            except Exception:  # noqa: BLE001
+                host, port = "", 0
+            probes = {}
+            for item in _ni.adapters(force=True):
+                ip = item.get("ip") or ""
+                if not ip:
+                    continue
+                sock = _skp.socket(_skp.AF_INET, _skp.SOCK_STREAM)
+                sock.settimeout(0.8)
+                try:
+                    sock.connect((ip, int(port)))
+                    probes[ip] = "ok"
+                except OSError as exc:
+                    probes[ip] = type(exc).__name__
+                finally:
+                    sock.close()
+            hs = _hsd(force=True) or {}
+            return self._send_json({
+                "ok": True,
+                "version": APP_VERSION,
+                "listen": {"host": host, "port": port,
+                           "wildcard": host in ("0.0.0.0", "::", "")},
+                "lan_access": self._lan_allowed(),
+                "adapters": [{"ip": a.get("ip"), "kind": a.get("kind"), "label": a.get("label")}
+                             for a in _ni.adapters(force=True)],
+                "self_connect": probes,
+                "firewall": _fw(),
+                "hotspot": {"on": hs.get("hotspot_on"), "ips": hs.get("hotspot_ips"),
+                            "gw": hs.get("hotspot_gw"), "ssid": hs.get("wifi_ssid")},
+                "candidates": self._mobile_candidates(),
+            })
         if path == "/api/sshd":
             return self._api_sshd()
         if path == "/api/tls":

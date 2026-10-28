@@ -10,7 +10,14 @@ try {
         def major = parts.size() > 0 ? parts[0].toInteger() : 0
         def minor = parts.size() > 1 ? parts[1].toInteger() : 0
         def patch = parts.size() > 2 ? parts[2].toInteger() : 0
-        appVersionCode = major * 10000 + minor * 100 + patch
+        // Dev 版(1.7.9-dev.N)用 *100+N 的编码,保证每次 Dev 迭代 versionCode 也递增,
+        // 正式版(1.7.9)则回到 major*10000+minor*100+patch 的常规编码。
+        def m = appVersionName =~ /-dev\.(\d+)$/
+        if (m.find()) {
+            appVersionCode = (major * 10000 + minor * 100 + patch) * 100 + m.group(1).toInteger()
+        } else {
+            appVersionCode = major * 10000 + minor * 100 + patch
+        }
     }
 } catch (Exception ignored) {
     logger.warn('无法读取根 package.json 版本号，使用默认 1.0.0')
