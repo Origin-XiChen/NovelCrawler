@@ -110,6 +110,7 @@ export default function ConnectPage() {
 
   const doPair = useCallback(
     async (baseInput: string, pairCode: string, pinInput?: string) => {
+      let probeList: string[] = [];
       setBusy('pair');
       setError('');
       setInfo('');
@@ -132,6 +133,23 @@ export default function ConnectPage() {
             throw new Error(`SSH 通道建立失败：${errorMessage(cause)}`);
           }
         }
+        // ---- 配对前先探一遍候选地址 ----
+        // 二维码的主地址是电脑选的,校园网下常常是 WLAN 网段的 IP;而手机此刻
+        // 连的是电脑热点(192.168.137.x),两边不同网段 → 主地址必然打不通,
+        // 以前会直接报「这个地址没有响应」,根本走不到配对成功后的换址逻辑。
+        probeList = [];
+        for (const raw of [base, ...pairCandidatesRef.current]) {
+          const url = String(raw || '').trim().replace(/\/+$/, '');
+          if (url && !probeList.includes(url)) probeList.push(url);
+        }
+        const viaTunnel = /^http://////127//.0//.0//.1/.test(base);
+        if (!viaTunnel && probeList.length > 1) {
+          setInfo('正在探测可用地址…');
+          const hit = await pickReachable(probeList);
+          if (hit) base = hit;
+          setInfo('');
+        }
+
         // 自签 HTTPS:先把电脑那张 CA 固定住再谈配对,否则后面每个请求都得
         // 依赖系统信任库里的一堆第三方根证书
         if (/^https:/i.test(base)) {
@@ -191,7 +209,12 @@ export default function ConnectPage() {
         cleanPairQuery();
         navigate('/home', { replace: true });
       } catch (cause) {
-        setError(cause instanceof PinError ? cause.message : errorMessage(cause));
+        // 多地址全部不通时,最常见的原因不是地址选错而是防火墙:
+        // 热点网卡常被 Windows 判为「公用网络」,默认阻止入站 8899。
+        const base0 = probeList.length > 1
+          ? `（已尝试 ${probeList.length} 个地址；若都失败，请确认电脑防火墙放行本程序，热点网卡通常被归为「公用网络」）`
+          : '';
+        setError((cause instanceof PinError ? cause.message : errorMessage(cause)) + base0);
       } finally {
         setBusy('');
       }

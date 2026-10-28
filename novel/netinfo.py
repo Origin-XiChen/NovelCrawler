@@ -204,6 +204,11 @@ def classify(item: dict) -> str:
     if ip.startswith(HOTSPOT_NET):
         return KIND_HOTSPOT
     text = f"{item.get('name') or ''} {item.get('desc') or ''}".lower()
+    # 热点网段不一定永远是 192.168.137.x(部分驱动/旧版 ICS 会给 192.168.0.1 等),
+    # 这里再用驱动名兜一层:Windows 移动热点的虚拟网卡通常叫
+    # "Microsoft Wi-Fi Direct Virtual Adapter" / "本地连接* N"。
+    if any(k in text for k in ("wi-fi direct", "wifi direct", "hosted network", "移动热点")):
+        return KIND_HOTSPOT
     if any(k in text for k in _VIRTUAL_KEYS):
         return KIND_VIRTUAL
     if any(k in text for k in _WIFI_KEYS):
