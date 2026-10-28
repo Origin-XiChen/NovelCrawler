@@ -151,7 +151,10 @@ def pack_into_zip(zf, title: str, arc_dir: str, on_bytes=None) -> dict:
             chapters.append(current)
         current["pages"] += 1
         try:
-            zf.writestr(f"{arc_dir}/pages/{total:04d}.jpg", data)
+            # 页图本身是 JPEG,再 DEFLATE 只费 CPU 不省体积
+            import zipfile as _zipf
+            zf.writestr(f"{arc_dir}/pages/{total:04d}.jpg", data,
+                        compress_type=_zipf.ZIP_STORED)
         except Exception:  # noqa: BLE001
             continue
         if on_bytes:

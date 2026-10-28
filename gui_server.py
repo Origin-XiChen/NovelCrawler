@@ -5765,6 +5765,7 @@ class Handler(BaseHTTPRequestHandler):
                 job["progress"] = min(100, int(done * 100 / est))
                 self._sync_touch(sid, task="打包快照", size=est, sent=done,
                                  status="done" if final else "packing")
+            # 文本用 DEFLATE、图片用 STORED(见下方 writestr 的 compress_type)
             with _zfs.ZipFile(job["tmp"], "w", _zfs.ZIP_DEFLATED) as zf:
                 meta_books = []
                 for fname in favs:
@@ -5793,13 +5794,10 @@ class Handler(BaseHTTPRequestHandler):
                           + _js.dumps({"chapters": chapters}, ensure_ascii=False) + ";")
                     js_b = js.encode("utf-8")
                     # ZIP 内用原始文件名;meta.data 用 URL 编码(script src 会被浏览器解码回原名)
+                    # 只写一份 .js:早先为了给 App 直接 JSON.parse 又写了一份 .json,
+                    # 等于把整本正文存两遍(包体直接翻倍)。App 侧已能解析
+                    # `window.__SNAP_DATA__["x"] = {...};` 里的 JSON,不再需要副本。
                     zf.writestr(f"data/{fname}.js", js_b)
-                    # App 端导入读 JSON(不解析 JS),与 .js 并存互不影响
-                    try:
-                        zf.writestr(f"data/{data_name}.json",
-                                    _js.dumps({"chapters": chapters}, ensure_ascii=False).encode("utf-8"))
-                    except Exception:  # noqa: BLE001
-                        pass
                     done += len(js_b)
                     meta_books.append({"name": fname, "size": os.path.getsize(fp),
                                        "chs": len(chapters), "has_body": bool(chapters),
@@ -5813,13 +5811,10 @@ class Handler(BaseHTTPRequestHandler):
                         zf.write(fp, f"files/{fname}")
                         done += os.path.getsize(fp)
                         _report()
-                    for c in comics:
-                        d = os.path.join(COMIC_OUT_DIR, c["title"])
-                        for p in c["pdfs"]:
-                            fp = os.path.join(d, p)
-                            zf.write(fp, f"files/{c['title']}/{p}")
-                            done += os.path.getsize(fp)
-                        _report()
+                    # 漫画原 PDF 不再进包:下面的 comics/<标题>/pages/*.jpg 已经是
+                    # 逐页的完整内容,再放一份 PDF 等于同样内容存两遍。
+                    # (需要 PDF 的场景请直接在电脑上看,离线包面向"手机阅读")
+                    pass
                 # 漫画:App 只认 pages/NNNN.jpg。页图优先取 .raw 缓存,
                 # 缓存被清过就从 PDF 抽页(comic_pack 里做了这层兜底)。
                 from novel import comic_pack as _comic_pack
@@ -5877,7 +5872,7 @@ class Handler(BaseHTTPRequestHandler):
                         "books": [
                             {"file": b["name"], "title": os.path.splitext(b["name"])[0],
                              "size": b["size"], "chapters": b["chs"], "has_body": b["has_body"],
-                             "data": b["data"].replace(".js", ".json")}
+                             "data": b["data"]}
                             for b in meta_books
                         ],
                     }
