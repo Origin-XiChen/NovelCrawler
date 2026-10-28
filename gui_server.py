@@ -2333,7 +2333,11 @@ class Handler(BaseHTTPRequestHandler):
             if not self._is_trusted_local():
                 return self._send_json({"ok": False, "error": "仅限电脑本机"}, 403)
             from novel.doctor import allow_firewall as _af
-            res = _af()
+            try:
+                _p = int(self.server.server_address[1])
+            except Exception:  # noqa: BLE001
+                _p = 0
+            res = _af(_p)
             return self._send_json(res, 200 if res.get("ok") else 500)
         if parsed.path == "/api/sshd":
             return self._api_sshd_toggle()

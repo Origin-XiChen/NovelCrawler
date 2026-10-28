@@ -334,7 +334,7 @@ if __name__ == "__main__":  # 自测:python -m novel.doctor 8899 [https]
     print(json.dumps(diagnose(p, False, "127.0.0.1", sch), ensure_ascii=False, indent=2))
 
 
-def allow_firewall() -> dict:
+def allow_firewall(port: int = 0) -> dict:
     """为当前程序加一条「所有网络配置」的入站放行规则。
 
     热点网卡常被 Windows 归为「公用网络」,只放行"专用"的规则对它无效,
@@ -358,7 +358,19 @@ def allow_firewall() -> dict:
     except (OSError, subprocess.SubprocessError) as exc:
         return {"ok": False, "needs_admin": False, "error": f"执行失败: {exc}"}
     if proc.returncode == 0:
-        return {"ok": True, "needs_admin": False, "detail": "已放行(专用+公用网络)"}
+        # 再加一条「按端口」的规则:程序规则依赖 exe 路径(dev/安装版/更新后路径会变),
+        # 端口规则对所有进程生效,是更可靠的一层保险。
+        if port:
+            try:
+                subprocess.run([
+                    "netsh", "advfirewall", "firewall", "add", "rule",
+                    f"name=NovelCrawler-{port}", "dir=in", "action=allow",
+                    "protocol=TCP", f"localport={port}", "profile=any",
+                ], capture_output=True, text=True, timeout=15, creationflags=0x08000000)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return {"ok": True, "needs_admin": False,
+                "detail": f"已放行(程序 + 端口 {port})" if port else "已放行(专用+公用网络)"}
     out = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode == 5 or "需要提升" in out or "requires elevation" in out.lower():
         return {"ok": False, "needs_admin": True,
