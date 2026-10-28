@@ -1177,10 +1177,81 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
   );
 }
 
+
+/**
+ * 配对面板:任意连接方式页共用的「生成配对码 + 二维码」。
+ *
+ * 之前只有「局域网扫码」页会生成配对码,热点/穿透页只给一个指向 /mobile 的
+ * 普通网址 —— 手机打开后仍要回头找第一页的 6 位码,等于走进死胡同。
+ * 现在每个入口都自带一枚独立有效的配对码。
+ */
+function PairPanel({ baseUrl, hint }: { baseUrl: string; hint?: string }) {
+  const { toast } = useToast();
+  const [pair, setPair] = useState<PairInfo | null>(null);
+  const [qr, setQr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(Math.floor(Date.now() / 1000));
+
+  const generate = useCallback(async () => {
+    setBusy(true);
+    try {
+      const data = await apiPost<PairInfo>('/api/mobile/pair/start', baseUrl ? { base_url: baseUrl } : {});
+      setPair(data);
+      setNow(Math.floor(Date.now() / 1000));
+      setQr(await fetchQr(data.uri));
+      if (!data.lan_access) toast('局域网访问未开启，先到设置里开启', 'info');
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }, [baseUrl, toast]);
+
+  useEffect(() => {
+    void generate();
+  }, [generate]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const remaining = pair ? Math.max(0, pair.expires_at - now) : 0;
+  const alive = Boolean(pair && remaining > 0 && qr);
+
+  return (
+    <div className="pair-panel">
+      <div className="pair-panel__head">
+        <span>配对二维码</span>
+        {pair && (
+          <span className={alive ? 'pair-panel__ttl' : 'pair-panel__ttl is-expired'}>
+            {alive ? `剩余 ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}` : '已过期'}
+          </span>
+        )}
+      </div>
+      {qr && alive ? (
+        <div className="pair-panel__qr">
+          <img src={qr} alt="配对二维码" />
+          <div className="pair-panel__code">{pair?.code}</div>
+          <div className="pair-panel__tip">手机 App 扫码即连；也可手输上面的 6 位码</div>
+        </div>
+      ) : (
+        <div className="pair-panel__empty">{busy ? '正在生成…' : '二维码已过期'}</div>
+      )}
+      <div className="mobile-actions">
+        <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void generate()}>
+          {busy ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+          重新生成
+        </button>
+      </div>
+      {hint && <div className="mobile-hint">{hint}</div>}
+    </div>
+  );
+}
+
 function HotspotTab({ lanAccess, port }: { lanAccess: boolean; port: string }) {
   const { toast } = useToast();
   const [info, setInfo] = useState<HotspotInfo | null>(null);
-  const [qr, setQr] = useState('');
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(
@@ -1189,12 +1260,7 @@ function HotspotTab({ lanAccess, port }: { lanAccess: boolean; port: string }) {
       try {
         const data = await apiGet<HotspotInfo>('/api/hotspot', force ? { force: 1 } : undefined);
         setInfo(data);
-        if (data.hotspot_on) {
-          const ip = (data.hotspot_ips ?? [])[0] || data.hotspot_gw;
-          setQr(await fetchQr(`http://${ip}:${port || location.port || '8899'}/mobile`));
-        } else {
-          setQr('');
-        }
+        // 二维码改由 PairPanel 生成(带配对码),这里只负责检测状态
       } catch (cause) {
         toast(cause instanceof Error ? cause.message : String(cause), 'error');
       } finally {
@@ -1218,7 +1284,7 @@ function HotspotTab({ lanAccess, port }: { lanAccess: boolean; port: string }) {
   };
 
   const hotspotIp = info ? (info.hotspot_ips ?? [])[0] || info.hotspot_gw : '';
-  const url = hotspotIp ? `http://${hotspotIp}:${port || location.port || '8899'}/mobile` : '';
+  const myUrl = hotspotIp ? `http://${hotspotIp}:${port || location.port || '8899'}` : '';
 
   return (
     <div className="mobile-stack">
@@ -1254,12 +1320,10 @@ function HotspotTab({ lanAccess, port }: { lanAccess: boolean; port: string }) {
           {(info?.ips ?? []).join(' / ') || '无'}
         </div>
         {info?.hotspot_on && (
-          <div className="mobile-card__row mobile-card__row--top">
-            <QrBox value={qr} alt="热点二维码" />
-            <div className="mobile-card__main">
-              <div className="mobile-hint">手机连接电脑热点后扫码：</div>
-              <div className="mobile-url">{url}</div>
-            </div>
+          <div className="mobile-stack">
+            <div className="mobile-hint">手机先连上电脑热点，再扫下面的配对码（这一页自己生成，不用去别的页找）：</div>
+            <div className="mobile-url">{myUrl}</div>
+            <PairPanel baseUrl={myUrl} hint="6 位码 5 分钟内有效，扫一次即配对" />
           </div>
         )}
         <div className="mobile-actions">

@@ -4627,3 +4627,15 @@ a {
 .mobile-path-row{display:flex;gap:8px;align-items:center}
 .mobile-path-row .input{flex:1;min-width:0}
 .mobile-path-row .btn{flex-shrink:0;white-space:nowrap}
+
+/* 配对面板:每个连接方式页各有一枚独立二维码 + 6 位码 */
+.pair-panel{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid var(--line);
+  border-radius:12px;background:var(--surface-2, rgba(0,0,0,.02))}
+.pair-panel__head{display:flex;align-items:baseline;justify-content:space-between;font-size:13px;font-weight:600}
+.pair-panel__ttl{font-size:12px;font-weight:500;color:var(--text-2)}
+.pair-panel__ttl.is-expired{color:#c0392b}
+.pair-panel__qr{display:flex;flex-direction:column;align-items:center;gap:8px}
+.pair-panel__qr img{width:180px;height:180px;image-rendering:pixelated;border-radius:10px;background:#fff;padding:6px}
+.pair-panel__code{font:600 22px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:6px}
+.pair-panel__tip{font-size:12px;color:var(--text-2);text-align:center}
+.pair-panel__empty{display:grid;place-items:center;min-height:120px;font-size:13px;color:var(--text-2)}
