@@ -105,6 +105,7 @@ export default function ConnectPage() {
   const sshTunnelRef = useRef<{ target: string; localPort: number; via: string } | null>(null);
   const tunnelVia = useRef('ssh');
   const [sshPassword, setSshPassword] = useState('');
+  const [sshManual, setSshManual] = useState('');
   const [sshHint, setSshHint] = useState('');
   const doPairRef = useRef<(base: string, pairCode: string) => Promise<void>>(
     async () => undefined,
@@ -686,18 +687,39 @@ export default function ConnectPage() {
               onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
             />
           </label>
-          {sshHint && sshAvailable() && (
-            <label className="field">
-              <span>电脑登录密码（选填 · 走 SSH 加密通道）</span>
-              <input
-                type="password"
-                autoComplete="current-password"
-                placeholder="填了就走内建 SSH 隧道，留空走局域网直连"
-                value={sshPassword}
-                onChange={(event) => setSshPassword(event.target.value)}
-              />
-              <p className="connect-tip">{sshHint}</p>
-            </label>
+          {sshAvailable() && (
+            <details className="connect-ssh" open={Boolean(sshHint)}>
+              <summary>{sshHint ? '安全通道（二维码已带账号）' : '安全通道（选填 · 内建 SSH）'}</summary>
+              {sshHint ? (
+                <p className="connect-tip">{sshHint}</p>
+              ) : (
+                <label className="field">
+                  <span>SSH 账号@主机:端口</span>
+                  <input
+                    type="text"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    placeholder="novelist@192.168.137.1:2222"
+                    value={sshManual}
+                    onChange={(event) => {
+                      setSshManual(event.target.value);
+                      sshTargetRef.current = parseSshParam(event.target.value);
+                    }}
+                  />
+                  <p className="connect-tip">手填地址时也能建隧道：在电脑端「手机连接 → 安全通道」里抄账号，端口默认 2222</p>
+                </label>
+              )}
+              <label className="field">
+                <span>密码（留空则不走隧道）</span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="填了就经 SSH 隧道连接"
+                  value={sshPassword}
+                  onChange={(event) => setSshPassword(event.target.value)}
+                />
+              </label>
+            </details>
           )}
           <button type="submit" className="btn btn--primary btn--lg" disabled={busy === 'pair'}>
             {busy === 'pair' ? <Loader2 size={18} className="spin" /> : <Check size={18} />}

@@ -3301,3 +3301,10 @@ img {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* 安全通道折叠区：手填地址时也能配 SSH */
+.connect-ssh{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.connect-ssh>summary{cursor:pointer;font-size:13.5px;font-weight:600;color:var(--text-2);list-style:none}
+.connect-ssh>summary::-webkit-details-marker{display:none}
+.connect-ssh>summary::before{content:'▸ ';color:var(--text-3)}
+.connect-ssh[open]>summary::before{content:'▾ '}

@@ -124,6 +124,10 @@ async function importBundleZip(file: File): Promise<LocalBook> {
     // 之后的阅读/进度逻辑与普通导入完全一致。
     const imported = await importSnapshotZip(zip, manifest);
     if (!imported.length) throw new Error('离线包里没有可导入的书');
+    // 包里可能附带了原文件(EPUB/PDF),App 只读正文与页图,这里只是让用户知道体积花在哪
+    if (Object.keys(zip.files).some((name) => name.startsWith('files/'))) {
+      console.info('[import] 离线包包含原文件目录 files/,已忽略(仅内置 HTML 阅读器使用)');
+    }
     return imported[0];
   }
   if ((manifest.bundle_version || 0) > BUNDLE_VERSION) {

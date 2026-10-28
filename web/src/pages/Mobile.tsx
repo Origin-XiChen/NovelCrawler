@@ -2072,6 +2072,9 @@ function PackTab() {
             <label className="mobile-check">
               <input type="checkbox" checked={withFiles} onChange={(event) => setWithFiles(event.target.checked)} />
               含原文件（EPUB / PDF）
+              <span className="mobile-hint" style={{ display: 'block', marginTop: 4 }}>
+                仅内置 HTML 阅读器会用到；手机 App 导入只读正文与页图，勾了会白占体积
+              </span>
             </label>
           )}
         </div>
