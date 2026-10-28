@@ -147,7 +147,8 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 3. **漏同步 `package-lock.json`**：五处 package.json 改了，锁文件还是旧版本。
 4. **把 `sshd/host_rsa` 提交进公开仓库**：主机私钥泄露，只能 `filter-branch` 重写历史 + 重新生成。
 5. **本机跑 `electron-builder` 打包 NSIS**：稳定报 `Exit code: 2`，产物只有 0.4MB。**这是已知现象，不要在本机排查**，交给 CI。
-6. **在真实数据目录跑冒烟**：污染 `config.json` / 书架。一律 `NOVEL_DATA_DIR` 隔离。
+6. **`/api/mobile/ping` 崩溃会让手机显示"这个地址没有响应"**：TCP 能连上但服务端一个字节不回（`ERR_EMPTY_RESPONSE`）。排查时先看服务端日志有没有 traceback，别一头扎进网络/防火墙。
+7. **在真实数据目录跑冒烟**：污染 `config.json` / 书架。一律 `NOVEL_DATA_DIR` 隔离。
 7. **本机 `electron-builder --win nsis` 必失败**（makensis 成功，随后运行安装包生成卸载器时报
    「Error writing temporary file」）。本机自测改用 `npx electron-builder --win --dir`，
    产出 `release/win-unpacked/NovelCrawler.exe` 直接运行；正式安装包一律交给 CI。

@@ -354,7 +354,11 @@ export default function SettingsPage() {
               const next = !devChannel;
               setDevChannel(next);
               try { localStorage.setItem('nc.dev.channel', next ? '1' : '0'); } catch { /* 隐私模式 */ }
-              setNotice(next ? '已开启 Dev 通道：会收到预发布版本' : '已切回稳定通道');
+              const isDevBuild = /-dev\.\d+$/i.test(appVersion);
+              if (next) setNotice('已开启 Dev 通道：会收到预发布版本');
+              else if (isDevBuild) {
+                setNotice(`已切回稳定通道；当前仍是 Dev 构建 v${appVersion}，正式版发布后会自动更新`);
+              } else setNotice('已切回稳定通道');
             }}
           >
             <span className="settings-item__icon">

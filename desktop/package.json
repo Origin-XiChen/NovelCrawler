@@ -1,6 +1,6 @@
 {
   "name": "@novelcrawler/desktop",
-  "version": "1.7.9-dev.1",
+  "version": "1.7.9-dev.2",
   "private": true,
   "description": "NovelCrawler Electron 桌面壳",
   "main": "main.js",
