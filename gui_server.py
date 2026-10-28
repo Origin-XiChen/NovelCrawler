@@ -1348,13 +1348,28 @@ class Handler(BaseHTTPRequestHandler):
         return ("https", self._https_port()) if enabled else ("http", self._base_port())
 
     def _mobile_candidates(self) -> list[str]:
-        """本机全部候选地址(按手机可达性排序)。手机端据此做自动选路/故障转移。"""
+        """本机全部候选地址(按手机可达性排序)。手机端据此做自动选路/故障转移。
+
+        内网穿透正在跑时,公网地址排在**最前面** —— 穿透模式往往意味着手机
+        不在同一个局域网,局域网候选这时候基本连不上,只能当兜底。
+        """
+        out: list[str] = []
+        try:
+            from novel.tunnel import get_manager as _tm
+            _url = str((_tm().status() or {}).get("url") or "").strip().rstrip("/")
+            if _url.startswith("http"):
+                out.append(_url)
+        except Exception:  # noqa: BLE001
+            pass
         try:
             from novel.netinfo import candidates as _cands
             scheme, port = self._mobile_base_scheme()
-            return [c["url"] for c in _cands(port, scheme=scheme)]
+            for item in _cands(port, scheme=scheme):
+                if item["url"] not in out:
+                    out.append(item["url"])
         except Exception:  # noqa: BLE001
-            return []
+            pass
+        return out
 
     def _tls_pin(self) -> str:
         """开启 HTTPS 时返回本机 CA 的短指纹(写进配对二维码给手机固定)。"""
@@ -1989,6 +2004,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_hotspot(qs)
         if path == "/api/tunnel":
             return self._api_tunnel()
+        if path == "/api/tunnel_presets":
+            # 厂商预设 + 自动找到的客户端:前端据此一键填表,不用用户拼参数
+            if not self._is_trusted_local():
+                return self._send_json({"ok": False, "error": "仅限电脑本机"}, 403)
+            from novel.tunnel import PROVIDERS as _PV, detect_clients as _dc
+            return self._send_json({"ok": True, "providers": _PV, "clients": _dc()})
         if path == "/api/webrtc/offer":
             return self._api_webrtc_offer()
         if path == "/api/webrtc/status":

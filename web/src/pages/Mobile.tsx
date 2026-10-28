@@ -1289,9 +1289,21 @@ function TunnelTab() {
   const [autoUrl, setAutoUrl] = useState('');
   const [cmd, setCmd] = useState('');
   const [args, setArgs] = useState('');
+  const [presets, setPresets] = useState<Record<string, { label: string; args_hint: string }>>({});
+  const [clients, setClients] = useState<{ path: string; name: string; provider: string }[]>([]);
   const [regex, setRegex] = useState('');
   const [busy, setBusy] = useState('');
   const seeded = useRef(false);
+
+  const loadPresets = useCallback(async () => {
+    try {
+      const data = await apiGet<{ providers?: Record<string, { label: string; args_hint: string }>; clients?: { path: string; name: string; provider: string }[] }>('/api/tunnel_presets');
+      setPresets(data.providers || {});
+      setClients(data.clients || []);
+    } catch {
+      // 老后端没有该接口时保持手填
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -1317,9 +1329,10 @@ function TunnelTab() {
 
   useEffect(() => {
     void load();
+    void loadPresets();
     const timer = window.setInterval(() => void load(), 2500);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, loadPresets]);
 
   const start = async () => {
     if (!cmd.trim()) {
@@ -1452,6 +1465,27 @@ function TunnelTab() {
         )}
 
         <div className="form-grid mobile-form">
+          <label className="field mobile-form__full">
+            <span>服务商预设（自动填客户端与参数）</span>
+            <select
+              className="input"
+              defaultValue=""
+              onChange={(event) => {
+                const key = event.target.value;
+                const preset = presets[key];
+                if (!preset) return;
+                setArgs(preset.args_hint.replace(/（.*?）/g, '').trim());
+                const hit = clients.find((item) => item.provider === key);
+                if (hit) setCmd(hit.path);
+                else if (!clients.length) toast('没自动找到客户端，请手动填路径', 'error');
+              }}
+            >
+              <option value="">— 选择穿透服务 —</option>
+              {Object.entries(presets).map(([key, item]) => (
+                <option key={key} value={key}>{item.label}</option>
+              ))}
+            </select>
+          </label>
           <label className="field mobile-form__full">
             <span>隧道客户端路径</span>
             <input

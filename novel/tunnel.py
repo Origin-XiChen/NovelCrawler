@@ -314,3 +314,99 @@ def parse_args(s: str) -> list[str]:
         return shlex.split(s, posix=False)
     except ValueError:
         return s.split()
+
+# ---------------- 厂商预设 ----------------
+# 目的:用户不该被要求"填 exe 路径 + 拼启动参数 + 写 URL 正则"。
+# 这里给出常见穿透服务的参数模板与域名特征,前端据此一键填表。
+PROVIDERS: dict[str, dict] = {
+    "sakura": {
+        "label": "樱花穿透",
+        "exe_hint": ["SakuraFrpLauncher.exe", "frpc.exe"],
+        "args_hint": "-f <访问密钥>:<隧道ID>   （樱花 frpc 客户端）",
+        "url_keys": ("natfrp.com", "natfrp.cloud", "frp.one"),
+    },
+    "cpolar": {
+        "label": "cpolar",
+        "exe_hint": ["cpolar.exe"],
+        "args_hint": "authtoken <令牌>  tcp <端口>",
+        "url_keys": ("cpolar.top", "cpolar.cn", "cpolar.io"),
+    },
+    "natapp": {
+        "label": "natapp",
+        "exe_hint": ["natapp.exe"],
+        "args_hint": "-authtoken=<令牌> -log=stdout",
+        "url_keys": ("natappfree.cc", "natapp.cc"),
+    },
+    "frp": {
+        "label": "frp 自建",
+        "exe_hint": ["frpc.exe"],
+        "args_hint": "-c <配置文件路径>",
+        "url_keys": (),
+    },
+    "custom": {
+        "label": "自定义",
+        "exe_hint": [],
+        "args_hint": "任意命令行参数",
+        "url_keys": (),
+    },
+}
+
+# 常见安装位置,用于"自动找客户端"
+_SEARCH_DIRS = (
+    os.path.expandvars(r"%LOCALAPPDATA%\Programs"),
+    os.path.expandvars(r"%LOCALAPPDATA%"),
+    os.path.expandvars(r"%PROGRAMFILES%"),
+    os.path.expandvars(r"%PROGRAMFILES(X86)%"),
+    os.path.expanduser("~/Downloads"),
+    os.path.expanduser("~/Desktop"),
+)
+
+
+def detect_clients(limit: int = 12) -> list[dict]:
+    """在常见目录里找已知穿透客户端,返回 [{path, name, provider}]。
+
+    只扫一层子目录,避免在大目录里深递归拖慢界面。找不到就返回空列表。
+    """
+    wanted: dict[str, str] = {}
+    for key, info in PROVIDERS.items():
+        for exe in info.get("exe_hint", []):
+            wanted[exe.lower()] = key
+    found: list[dict] = []
+    seen: set[str] = set()
+    for base in _SEARCH_DIRS:
+        if not base or not os.path.isdir(base):
+            continue
+        try:
+            entries = os.listdir(base)
+        except OSError:
+            continue
+        for name in entries:
+            path = os.path.join(base, name)
+            if os.path.isfile(path):
+                key = wanted.get(name.lower())
+                if key and path not in seen:
+                    seen.add(path)
+                    found.append({"path": path, "name": name, "provider": key})
+            elif os.path.isdir(path):
+                for sub in ("", "bin"):
+                    d = os.path.join(path, sub) if sub else path
+                    try:
+                        files = os.listdir(d)
+                    except OSError:
+                        continue
+                    for fn in files:
+                        key = wanted.get(fn.lower())
+                        if not key:
+                            continue
+                        full = os.path.join(d, fn)
+                        if full in seen or not os.path.isfile(full):
+                            continue
+                        seen.add(full)
+                        found.append({"path": full, "name": fn, "provider": key})
+            if len(found) >= limit:
+                return found
+    return found
+
+
+def provider_url_keys(provider: str) -> tuple[str, ...]:
+    return tuple((PROVIDERS.get(provider) or {}).get("url_keys") or ())
