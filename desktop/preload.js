@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('desktop', {
   notify: (message) => ipcRenderer.invoke('app:notify', message),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   updater: {
+    setPrerelease: (flag) => ipcRenderer.invoke('updater:set-prerelease', flag),
+    getPrerelease: () => ipcRenderer.invoke('updater:get-prerelease'),
     check: () => ipcRenderer.invoke('updater:check'),
     download: () => ipcRenderer.invoke('updater:download'),
     install: () => ipcRenderer.invoke('updater:install'),

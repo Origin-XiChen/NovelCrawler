@@ -17,6 +17,9 @@ export interface DesktopBridge {
   openDataDir: () => Promise<void>;
   notify: (message: string) => Promise<void>;
   updater: {
+    /** 切换是否接收预发布(Dev)版本,返回切换后的值 */
+    setPrerelease: (flag: boolean) => Promise<boolean>;
+    getPrerelease: () => Promise<boolean>;
     check: () => Promise<void>;
     download: () => Promise<void>;
     install: () => Promise<void>;

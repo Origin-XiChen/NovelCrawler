@@ -12,12 +12,42 @@ function send(status) {
   }
 }
 
+/** Dev 通道开关:落在 userData/updater.json,重启后仍然生效 */
+function settingsFile() {
+  return require('path').join(app.getPath('userData'), 'updater.json');
+}
+
+function readPrerelease() {
+  try {
+    return Boolean(JSON.parse(require('fs').readFileSync(settingsFile(), 'utf8')).allowPrerelease);
+  } catch {
+    return false;
+  }
+}
+
+function writePrerelease(flag) {
+  try {
+    require('fs').writeFileSync(settingsFile(), JSON.stringify({ allowPrerelease: Boolean(flag) }), 'utf8');
+  } catch (error) {
+    log.warn('[updater] 保存 Dev 通道设置失败', error);
+  }
+}
+
+/** 切换是否接收预发布版本;立即作用于下一次检查 */
+function setPrerelease(flag) {
+  const value = Boolean(flag);
+  autoUpdater.allowPrerelease = value;
+  writePrerelease(value);
+  send({ type: 'channel', prerelease: value });
+  return value;
+}
+
 function init(options) {
   getWindow = options.getWindow;
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowPrerelease = false;
+  autoUpdater.allowPrerelease = readPrerelease();
   autoUpdater.logger = {
     info: (...args) => log.info('[updater]', ...args),
     warn: (...args) => log.warn('[updater]', ...args),
@@ -89,4 +119,4 @@ function scheduleStartupCheck(delayMs = 8000) {
   }, delayMs);
 }
 
-module.exports = { init, scheduleStartupCheck };
+module.exports = { init, scheduleStartupCheck, setPrerelease, readPrerelease };

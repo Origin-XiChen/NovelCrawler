@@ -7,6 +7,7 @@ import {
   CircleCheck,
   Loader2,
   LogOut,
+  FlaskConical,
   RefreshCw,
   RotateCcw,
   Server,
@@ -45,6 +46,10 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [appVersion, setAppVersion] = useState(__APP_VERSION__);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  // Dev 通道:开启后检查更新会包含预发布(prerelease)版本,方便内测
+  const [devChannel, setDevChannel] = useState(() => {
+    try { return localStorage.getItem('nc.dev.channel') === '1'; } catch { return false; }
+  });
 
   useEffect(() => {
     void currentAppVersion().then(setAppVersion);
@@ -83,7 +88,7 @@ export default function SettingsPage() {
     }
   };
 
-  const checkUpdate = async () => {
+  const checkUpdate = async (allowDev = devChannel) => {
     if (!IS_NATIVE) {
       setNotice('网页版会随电脑端自动更新，无需单独检查。');
       return;
@@ -91,7 +96,7 @@ export default function SettingsPage() {
     setCheckingUpdate(true);
     setNotice('');
     try {
-      const update = await fetchLatestApk();
+      const update = await fetchLatestApk(allowDev);
       if (!update) {
         setNotice(`当前已是最新版 v${appVersion}。`);
         return;
@@ -340,6 +345,27 @@ export default function SettingsPage() {
           <span>v{appVersion}</span>
         </div>
         <div className="settings-card">
+          <button
+            type="button"
+            className="settings-item"
+            onClick={() => {
+              const next = !devChannel;
+              setDevChannel(next);
+              try { localStorage.setItem('nc.dev.channel', next ? '1' : '0'); } catch { /* 隐私模式 */ }
+              setNotice(next ? '已开启 Dev 通道：会收到预发布版本' : '已切回稳定通道');
+            }}
+          >
+            <span className="settings-item__icon">
+              <FlaskConical size={19} />
+            </span>
+            <span className="settings-item__main">
+              <b>接收 Dev 版本</b>
+              <em>开启后会检查预发布版本，仅建议测试机使用</em>
+            </span>
+            <span className={devChannel ? 'switch is-on' : 'switch'}>
+              <i />
+            </span>
+          </button>
           <button
             type="button"
             className="settings-item"

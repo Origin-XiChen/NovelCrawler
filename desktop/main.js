@@ -124,6 +124,9 @@ function registerIpc() {
     return result.filePaths[0];
   });
 
+  ipcMain.handle('updater:set-prerelease', (_event, flag) => updater.setPrerelease(flag));
+  ipcMain.handle('updater:get-prerelease', () => updater.readPrerelease());
+
   ipcMain.handle('app:notify', (_event, message) => {
     if (!Notification.isSupported()) return;
     new Notification({ title: 'NovelCrawler', body: String(message) }).show();

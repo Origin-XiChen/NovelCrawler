@@ -5,6 +5,8 @@ import { Capacitor } from '@capacitor/core';
 export const IS_NATIVE = Capacitor.isNativePlatform();
 
 const RELEASE_API = 'https://api.github.com/repos/Origin-XiChen/NovelCrawler/releases/latest';
+/** Dev 通道:列全部 release,允许预发布(prerelease)版本 */
+const RELEASES_API = 'https://api.github.com/repos/Origin-XiChen/NovelCrawler/releases?per_page=20';
 const APK_PATTERN = /\.apk$/i;
 
 export interface ApkUpdate {
@@ -21,6 +23,8 @@ interface ReleaseAsset {
 interface ReleaseInfo {
   tag_name?: string;
   body?: string;
+  prerelease?: boolean;
+  draft?: boolean;
   assets?: ReleaseAsset[];
 }
 
@@ -52,18 +56,31 @@ export async function currentAppVersion(): Promise<string> {
   }
 }
 
-export async function fetchLatestApk(): Promise<ApkUpdate | null> {
+/**
+ * 查最新 APK。
+ * includePrerelease=true 时走 Dev 通道:列出全部 release 并允许预发布版本,
+ * 取第一个「带 Mobile APK」的版本 —— 这样 Dev 版也能推给手机测试。
+ */
+export async function fetchLatestApk(includePrerelease = false): Promise<ApkUpdate | null> {
   if (!IS_NATIVE) return null;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 12000);
   try {
-    const res = await fetch(RELEASE_API, {
+    const url = includePrerelease ? RELEASES_API : RELEASE_API;
+    const res = await fetch(url, {
       headers: { Accept: 'application/vnd.github+json' },
       signal: controller.signal,
       cache: 'no-store',
     });
     if (!res.ok) throw new Error(`更新接口返回 ${res.status}`);
-    const release = (await res.json()) as ReleaseInfo;
+    const payload = (await res.json()) as ReleaseInfo | ReleaseInfo[];
+    const list = (Array.isArray(payload) ? payload : [payload])
+      .filter((item) => item && !item.draft)
+      .filter((item) => includePrerelease || !item.prerelease);
+    const release = list.find((item) =>
+      (item.assets || []).some((asset) => APK_PATTERN.test(asset.name || '') && /mobile/i.test(asset.name || '')),
+    ) || list[0];
+    if (!release) return null;
     const version = String(release.tag_name || '').replace(/^v/i, '');
     if (!version) return null;
     const local = await currentAppVersion();

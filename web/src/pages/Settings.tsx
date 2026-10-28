@@ -120,6 +120,13 @@ function dateStamp() {
 export function SettingsPage() {
   const { mode, setMode } = useTheme();
   const { state, appVersion, bridgeAvailable, check, download, install } = useUpdate();
+  // Dev 通道:与手机端一致,开启后检查预发布版本
+  const [devChannel, setDevChannel] = useState(false);
+  useEffect(() => {
+    window.desktop?.updater?.getPrerelease?.()
+      .then((flag) => setDevChannel(Boolean(flag)))
+      .catch(() => { /* 旧版壳没有该接口 */ });
+  }, []);
   const { toast } = useToast();
 
   const [tab, setTab] = useState<Tab>('general');
@@ -616,6 +623,29 @@ export function SettingsPage() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="settings-row">
+              <div>
+                <div className="settings-row__title">接收 Dev 版本</div>
+                <div className="settings-row__desc">开启后检查更新会包含预发布版本，仅建议测试机使用</div>
+              </div>
+              <button
+                type="button"
+                className={`switch${devChannel ? ' is-on' : ''}`}
+                disabled={!bridgeAvailable}
+                onClick={async () => {
+                  const next = !devChannel;
+                  setDevChannel(next);
+                  try {
+                    await window.desktop?.updater?.setPrerelease?.(next);
+                  } catch {
+                    /* 忽略：下次重启仍以文件中的值为准 */
+                  }
+                }}
+              >
+                <i />
+              </button>
             </div>
 
             <div className="settings-row">
