@@ -1403,6 +1403,13 @@ class Handler(BaseHTTPRequestHandler):
             return ""
 
     def _api_mobile_ping(self):
+        # 这里必须自己取一次 scheme:下面 payload 里的 https 字段要用它。
+        # 少了这行会让整个 ping 抛 NameError → 连接被直接关闭,
+        # 手机侧表现为「ERR_EMPTY_RESPONSE / 这个地址没有响应」(真实事故)
+        try:
+            scheme, _ping_port = self._mobile_base_scheme()
+        except Exception:  # noqa: BLE001
+            scheme = "http"
         token = self._request_token()
         device = None
         if token:
