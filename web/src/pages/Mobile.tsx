@@ -6,6 +6,7 @@ import {
   Download,
   ExternalLink,
   Flame,
+  FolderOpen,
   Globe2,
   KeyRound,
   Link2,
@@ -1488,12 +1489,31 @@ function TunnelTab() {
           </label>
           <label className="field mobile-form__full">
             <span>隧道客户端路径</span>
-            <input
-              className="input"
-              value={cmd}
-              placeholder="C:\tools\natapp.exe / cpolar.exe / frpc.exe"
-              onChange={(event) => setCmd(event.target.value)}
-            />
+            <div className="mobile-path-row">
+              <input
+                className="input"
+                value={cmd}
+                placeholder="C://tools//natapp.exe / cpolar.exe / frpc.exe"
+                onChange={(event) => setCmd(event.target.value)}
+              />
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                title="选择客户端程序"
+                onClick={async () => {
+                  const bridge = window.desktop;
+                  if (!bridge?.pickExe) {
+                    toast('网页版拿不到完整路径，请直接粘贴', 'error');
+                    return;
+                  }
+                  const picked = await bridge.pickExe();
+                  if (picked) setCmd(picked);
+                }}
+              >
+                <FolderOpen size={13} />
+                浏览…
+              </button>
+            </div>
           </label>
           <label className="field mobile-form__full">
             <span>启动参数</span>

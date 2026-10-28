@@ -1,5 +1,6 @@
 import { getActiveServer, getCandidates, updateServerBase } from './connection';
 import { pinnedFetch, shouldPin } from './pinned';
+import { parseSshParam, sshConnect, sshStatus } from './ssh';
 import type { PairResult, PingResult, ServerEntry } from './types';
 import { b64ToBlob, wrtcAlive, wrtcRequest } from './wrtc';
 
@@ -147,10 +148,33 @@ async function swapToReachable(server: ServerEntry | null): Promise<ServerEntry 
   if (others.length === 0) return null;
   if (swapPromise) return swapPromise;
   swapPromise = (async () => {
-    const hit = await pickReachable(others);
-    if (!hit) return null;
-    updateServerBase(server.id, hit);
-    return getActiveServer();
+    // ① 先看 SSH 隧道:它断了的话 127.0.0.1:<port> 一定连不上,
+    //    但隧道本身可以重建 —— 不重建就永远回不去,只能让用户重新扫码。
+    const tunnel = server.sshTunnel;
+    if (tunnel && server.sshPassword) {
+      const st = await sshStatus();
+      if (!st.connected) {
+        try {
+          const target = parseSshParam(server.ssh || '');
+          if (target) {
+            await sshConnect(target, server.sshPassword, Number(tunnel.localPort) || 0,
+                             Number(tunnel.localPort) || 0);
+          }
+        } catch {
+          // 重建失败就继续走普通候选
+        }
+      }
+    }
+    // ② 依次探测候选;失败退避后最多再探两轮(切网瞬间前一两秒常打不通)
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const hit = await pickReachable(others);
+      if (hit) {
+        updateServerBase(server.id, hit);
+        return getActiveServer();
+      }
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+    return null;
   })();
   try {
     return await swapPromise;

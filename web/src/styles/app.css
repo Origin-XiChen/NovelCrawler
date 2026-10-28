@@ -4622,3 +4622,8 @@ a {
     width: 280px;
   }
 }
+
+/* 隧道客户端路径:输入框 + 「浏览…」并排,按钮不抢宽度 */
+.mobile-path-row{display:flex;gap:8px;align-items:center}
+.mobile-path-row .input{flex:1;min-width:0}
+.mobile-path-row .btn{flex-shrink:0;white-space:nowrap}

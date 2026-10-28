@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('desktop', {
     },
   },
   openDir: (name = '') => ipcRenderer.invoke('shell:open-dir', name),
+  /** 选本地可执行文件(隧道客户端);返回绝对路径,取消返回空串 */
+  pickExe: () => ipcRenderer.invoke('dialog:pick-exe'),
   openDataDir: () => ipcRenderer.invoke('shell:open-data-dir'),
   notify: (message) => ipcRenderer.invoke('app:notify', message),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),

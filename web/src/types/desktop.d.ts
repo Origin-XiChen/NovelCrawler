@@ -12,6 +12,8 @@ export interface DesktopBridge {
     onMaximizedChange: (cb: (maximized: boolean) => void) => () => void;
   };
   openDir: (name?: string) => Promise<void>;
+  /** 弹系统文件选择框,返回绝对路径;取消返回空串 */
+  pickExe: () => Promise<string>;
   openDataDir: () => Promise<void>;
   notify: (message: string) => Promise<void>;
   updater: {

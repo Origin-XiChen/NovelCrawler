@@ -109,9 +109,24 @@ function registerIpc() {
     await shell.openPath(dir);
   });
 
+  // 选隧道客户端等本地可执行文件:浏览器拿不到完整路径,必须走主进程
+  ipcMain.handle('dialog:pick-exe', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择客户端程序',
+      properties: ['openFile'],
+      filters: [
+        { name: '可执行文件', extensions: ['exe', 'bat', 'cmd'] },
+        { name: '全部文件', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePaths.length) return '';
+    return result.filePaths[0];
+  });
+
   ipcMain.handle('app:notify', (_event, message) => {
     if (!Notification.isSupported()) return;
-    new Notification({ title: '小说管家', body: String(message) }).show();
+    new Notification({ title: 'NovelCrawler', body: String(message) }).show();
   });
 
   ipcMain.handle('shell:open-external', (_event, url) => {

@@ -9,6 +9,7 @@ import {
   Globe2,
   KeyRound,
   Loader2,
+  RefreshCw,
   ScanLine,
   Server,
   ShieldCheck,
@@ -24,11 +25,13 @@ import {
   getDeviceId,
   getServers,
   normalizeBaseUrl,
+  getCandidates,
   parsePairPayload,
   removeServer,
   saveServer,
   setActiveServer,
   touchServer,
+  updateServerBase,
 } from '../lib/connection';
 import { errorMessage } from '../lib/format';
 import { ensurePinned, pinnedAvailable, PinError } from '../lib/pinned';
@@ -107,6 +110,28 @@ export default function ConnectPage() {
     async () => undefined,
   );
   const expired = searchParams.get('expired') === '1';
+
+  // 手动重新探测:换网/隧道重启后,不用重新扫码也能把地址切到通的那个
+  const reprobe = async (server: ServerEntry) => {
+    const list = [server.baseUrl, ...getCandidates(server)].map((u) => u.replace(/\/+$/, ''));
+    const uniq = Array.from(new Set(list.filter(Boolean)));
+    if (uniq.length < 2) {
+      setError('没有其它候选地址可切换');
+      return;
+    }
+    setBusy(server.id);
+    try {
+      const hit = await pickReachable(uniq);
+      if (!hit) {
+        setError(`探测 ${uniq.length} 个地址都不通，检查电脑是否在运行`);
+        return;
+      }
+      updateServerBase(server.id, hit);
+      setInfo(`已切到 ${hit.replace(/^https?:\/\//, '')}`);
+    } finally {
+      setBusy('');
+    }
+  };
 
   const doPair = useCallback(
     async (baseInput: string, pairCode: string, pinInput?: string) => {
@@ -723,6 +748,18 @@ export default function ConnectPage() {
                 ) : (
                   <ChevronRight size={18} className="muted" />
                 )}
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="重新探测可用地址"
+                  aria-label="重新探测可用地址"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void reprobe(server);
+                  }}
+                >
+                  <RefreshCw size={15} />
+                </button>
                 <button
                   type="button"
                   className="icon-btn server-card__delete"
