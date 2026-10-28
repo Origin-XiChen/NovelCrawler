@@ -86,6 +86,10 @@ gh release upload vX.Y.Z <apk>#NovelCrawler-Mobile-X.Y.Z.apk --clobber
 
 - 产物命名是约定：`NovelCrawler-Setup-X.Y.Z.exe`、`NovelCrawler-Mobile-X.Y.Z.apk`。App 内更新按"文件名含 `Mobile` 且以 `.apk` 结尾"匹配。
 - 上传后核对：`gh release view vX.Y.Z --json assets`，并确认 `gh release list` 里该版本 `isLatest=true`。
+- **发版策略（用户要求，2026-10-28 起默认执行）**：
+  凡改动**需要真机验证**（连接链路、配对、离线包导入、SSH、扫码等），一律先发 **Dev 预发布**，
+  由用户测过再转正；无需验证的纯修复/文档改动才可以直接发正式版。
+  发 Dev 版的完整动作 = 推 tag → 等 CI → 上传 APK → `gh release edit vX.Y.Z --prerelease`。
 - **Dev 预发布**：CI 默认建正式 release；要发 Dev 版，CI 成功后执行
   `gh release edit vX.Y.Z --prerelease`。此时 `/releases/latest` 与桌面 `allowPrerelease=false`
   都看不到它，只有开了 Dev 通道的客户端能收到。
