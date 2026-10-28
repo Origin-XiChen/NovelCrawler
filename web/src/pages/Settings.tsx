@@ -121,6 +121,25 @@ export function SettingsPage() {
   const { mode, setMode } = useTheme();
   const { state, appVersion, bridgeAvailable, check, download, install } = useUpdate();
   // Dev 通道:与手机端一致,开启后检查预发布版本
+  // 同步管理:电脑侧的逐章进度(手机回传 + 本机阅读都记在这里)
+  const [syncRecords, setSyncRecords] = useState<{
+    book: string; title?: string; ch?: number; total?: number; percent?: number; updated?: number;
+  }[]>([]);
+  const [syncLoading, setSyncLoading] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setSyncLoading(true);
+    apiGet<{ records?: Record<string, { title?: string; ch?: number; total?: number; percent?: number; updated?: number }> }>('/api/reading_progress')
+      .then((data) => {
+        if (!alive) return;
+        const list = Object.entries(data.records || {}).map(([book, rec]) => ({ book, ...rec }));
+        list.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+        setSyncRecords(list.slice(0, 20));
+      })
+      .catch(() => { /* 老后端没有该接口时忽略 */ })
+      .finally(() => { if (alive) setSyncLoading(false); });
+    return () => { alive = false; };
+  }, []);
   const [devChannel, setDevChannel] = useState(false);
   useEffect(() => {
     window.desktop?.updater?.getPrerelease?.()
@@ -646,6 +665,37 @@ export function SettingsPage() {
               >
                 <i />
               </button>
+            </div>
+
+            <div className="settings-row">
+              <div style={{ width: '100%' }}>
+                <div className="settings-row__title">同步管理</div>
+                <div className="settings-row__desc">
+                  {syncLoading
+                    ? '读取中…'
+                    : syncRecords.length
+                      ? '电脑侧的逐章进度（含手机回传），按最后阅读时间排序'
+                      : '还没有任何阅读记录'}
+                </div>
+                {syncRecords.length > 0 && (
+                  <div className="sync-mini">
+                    {syncRecords.map((rec) => (
+                      <div key={rec.book} className="sync-mini__row">
+                        <span className="sync-mini__name" title={rec.title || rec.book}>
+                          {rec.title || rec.book}
+                        </span>
+                        <span className="sync-mini__meta">
+                          {rec.ch || 0}/{rec.total || 0} 章
+                        </span>
+                        <span className="sync-mini__bar">
+                          <i style={{ width: `${Math.min(100, rec.percent || 0)}%` }} />
+                        </span>
+                        <span className="sync-mini__pct">{rec.percent || 0}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="settings-row">

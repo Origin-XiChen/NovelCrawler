@@ -1,6 +1,6 @@
 {
   "name": "@novelcrawler/mobile",
-  "version": "1.7.9-dev.2",
+  "version": "1.7.9-dev.3",
   "private": true,
   "type": "module",
   "scripts": {

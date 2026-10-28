@@ -4639,3 +4639,13 @@ a {
 .pair-panel__code{font:600 22px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:6px}
 .pair-panel__tip{font-size:12px;color:var(--text-2);text-align:center}
 .pair-panel__empty{display:grid;place-items:center;min-height:120px;font-size:13px;color:var(--text-2)}
+
+/* 设置页「同步管理」紧凑列表 */
+.sync-mini{margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto}
+.sync-mini__row{display:grid;grid-template-columns:1fr auto 90px 42px;align-items:center;gap:10px;
+  padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px}
+.sync-mini__name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sync-mini__meta{color:var(--text-2);font-variant-numeric:tabular-nums}
+.sync-mini__bar{height:3px;border-radius:2px;background:var(--line);overflow:hidden}
+.sync-mini__bar i{display:block;height:100%;background:var(--accent,#c0663a)}
+.sync-mini__pct{text-align:right;color:var(--text-2);font-variant-numeric:tabular-nums}

@@ -6,6 +6,7 @@ import BottomNav from './components/BottomNav';
 import NativeBackButton from './components/NativeBackButton';
 import BookPage from './pages/BookPage';
 import ComicReaderPage from './pages/ComicReaderPage';
+import SyncPage from './pages/SyncPage';
 import ConnectPage from './pages/ConnectPage';
 import HomePage from './pages/HomePage';
 import LibraryPage from './pages/LibraryPage';
@@ -164,6 +165,7 @@ export default function App() {
         <Route path="/local/book/:id" element={<BookPage />} />
         <Route path="/local/read/:id" element={<NovelReaderPage />} />
         <Route path="/local/comic/:id" element={<ComicReaderPage />} />
+        <Route path="/sync" element={<SyncPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </HashRouter>

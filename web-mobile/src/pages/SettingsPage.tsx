@@ -347,6 +347,16 @@ export default function SettingsPage() {
           </span>
         </div>
         <div className="settings-card">
+          <button type="button" className="settings-item" onClick={() => navigate('/sync')}>
+            <span className="settings-item__icon">
+              <RefreshCw size={19} />
+            </span>
+            <span className="settings-item__main">
+              <b>同步管理</b>
+              <em>查看本机每本书的进度、哪些还没回传电脑</em>
+            </span>
+            <ChevronRight size={18} className="muted" />
+          </button>
           <button
             type="button"
             className="settings-item"
