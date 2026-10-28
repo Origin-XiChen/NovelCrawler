@@ -2039,7 +2039,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:  # noqa: BLE001
                 host, port = "", 0
             probes = {}
-            for item in _ni.adapters(force=True):
+            adapters_snapshot = _ni.adapters(force=True)
+            for item in adapters_snapshot:
                 ip = item.get("ip") or ""
                 if not ip:
                     continue
@@ -2049,7 +2050,10 @@ class Handler(BaseHTTPRequestHandler):
                     sock.connect((ip, int(port)))
                     probes[ip] = "ok"
                 except OSError as exc:
-                    probes[ip] = type(exc).__name__
+                    # 热点网卡(ICS)对"本机连本机的热点 IP"常常不回包,但手机连它是通的
+                    # (实测过:手机能建立连接)。所以这里标成 unknown,别当失败判据。
+                    kind = next((a.get("kind") for a in adapters_snapshot if a.get("ip") == ip), "")
+                    probes[ip] = "unknown(热点自连不通,不代表手机连不上)"                         if kind == "hotspot" and isinstance(exc, (TimeoutError, OSError)) else type(exc).__name__
                 finally:
                     sock.close()
             hs = _hsd(force=True) or {}
