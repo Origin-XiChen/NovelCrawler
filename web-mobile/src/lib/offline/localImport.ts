@@ -37,6 +37,8 @@ interface SnapshotComic {
   /** 包内目录,形如 comics/<URL编码标题> */
   dir: string;
   pages: number;
+  /** 每话起始页(1 基)与页数,供目录/按话跳转 */
+  chapters?: { label: string; from: number; pages: number }[];
 }
 
 interface SnapshotBook {
@@ -691,7 +693,11 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
       id,
       title: comic.title,
       file: `${comic.title}/`,
-      chapters: [],
+      chapters: (comic.chapters || []).map((ch, i) => ({
+        idx: i + 1,
+        title: ch.label,
+        path: `pages/${String(ch.from).padStart(4, '0')}.jpg`,
+      })),
       total: pages.length,
       num_pages: pages.length,
       assets: {},

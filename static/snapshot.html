@@ -1,324 +1,373 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#0b2545">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>NovelCrawler · 离线</title>
+<!--
+  离线包内置阅读器。三条硬约束:
+  1. 全相对路径,file:// 双击即可用,不联网、不引任何外部资源;
+  2. 小说正文来自 data/<书名>.js(window.__SNAP_DATA__),漫画直接读 comics/<标题>/pages/NNNN.jpg;
+  3. 主题/字号/进度只存 localStorage —— 离线包的定位是"带走看",不做同步。
+-->
 <style>
-  :root {
-    --bg:#f5f5f7; --card:#fff; --secondary:#f2f2f6; --border:#d2d2d7;
-    --text:#1d1d1f; --muted:#86868b; --primary:#007AFF; --primary-dark:#0066d6;
-    --primary-50:#e8f1ff; --success:#34C759;
-    --radius:18px;
-    --shadow:0 1px 2px rgba(0,0,0,.03), 0 8px 24px rgba(0,0,0,.05);
+  :root{
+    --bg:#f7f5f1; --card:#fff; --line:#e8e4dc; --text:#1f1f21; --text-2:#6b6b70; --text-3:#9a9aa0;
+    --brand:#b4532a; --brand-weak:#f6ece6; --shadow:0 1px 2px rgba(20,18,16,.04),0 8px 24px rgba(20,18,16,.06);
+    --fs:17px; --reader-w:38rem;
   }
-  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { height:100%; }
-  body { font-family:-apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; background:var(--bg); color:var(--text); }
-  .topbar {
-    position:sticky; top:0; z-index:20; background:linear-gradient(135deg,#0b2545,#174a8a);
-    border-bottom:none; padding:14px 16px; display:flex; align-items:center; gap:10px;
+  [data-theme="dark"]{
+    --bg:#16151a; --card:#1e1d23; --line:#2c2b33; --text:#eceae6; --text-2:#a8a6b0; --text-3:#6f6d78;
+    --brand:#e08b5f; --brand-weak:#2a211c; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px rgba(0,0,0,.35);
   }
-  .topbar .logo { width:32px; height:32px; border-radius:9px; object-fit:cover; box-shadow:0 3px 12px rgba(0,0,0,.4); flex-shrink:0; }
-  .topbar h1 { font-size:17px; font-weight:700; flex:1; letter-spacing:.3px; color:#fff; }
-  .badge { font-size:11.5px; font-weight:600; padding:4px 9px; border-radius:999px; white-space:nowrap; background:rgba(255,255,255,.16); color:#bcd4ff; }
-  .seg { display:flex; background:var(--secondary); border-radius:11px; padding:3px; margin:12px 16px 2px; }
-  .seg span { flex:1; text-align:center; font-size:13.5px; font-weight:600; color:var(--muted); padding:8px 0; border-radius:9px; cursor:pointer; transition:.18s; }
-  .seg span.on { background:var(--card); color:var(--text); box-shadow:0 1px 4px rgba(0,0,0,.08); }
-  #offBanner { margin:12px 16px 0; padding:13px 15px; background:var(--primary-50); color:#0b4fa8; border-radius:14px; font-size:13px; line-height:1.75; border:1px solid rgba(11,79,168,.25); box-shadow:0 2px 10px rgba(11,79,168,.08); }
-  #list { padding:12px 16px 40px; }
-  .sec-hd { display:flex; align-items:center; margin:10px 2px 10px; }
-  .sec-hd .t { font-size:14px; font-weight:700; }
-  .sec-hd .n { font-size:11.5px; color:var(--muted); margin-left:6px; }
-  .sec-hd .sp { flex:1; }
-  .book {
-    background:var(--card); border-radius:16px; padding:13px 14px; margin-bottom:10px;
-    box-shadow:var(--shadow); display:flex; align-items:center; gap:12px;
-  }
-  .book .cov {
-    width:42px; height:56px; border-radius:9px; flex-shrink:0; background:var(--primary-50);
-    color:var(--primary); display:flex; align-items:center; justify-content:center;
-    font-size:18px; font-weight:700; box-shadow:inset 0 0 0 .5px rgba(0,122,255,.18);
-  }
-  .book .info { flex:1; min-width:0; }
-  .book .name { font-size:14.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .book .meta { font-size:12px; color:var(--muted); margin-top:3px; display:flex; gap:8px; flex-wrap:wrap; }
-  .book .meta .ok { color:var(--success); }
-  .rowbtns { display:flex; gap:7px; flex-shrink:0; }
-  .fbtn { border:none; background:var(--primary); color:#fff; border-radius:9px; padding:7px 12px; font-size:12.5px; font-weight:600; cursor:pointer; flex-shrink:0; }
-  .fbtn:active { opacity:.75; }
-  .fbtn.ghost { background:var(--card); color:var(--primary); border:1px solid var(--primary); }
-  .fbtn.gray { background:var(--secondary); color:var(--text); border:1px solid var(--border); }
-  .fbtn.sm { padding:5px 9px; font-size:11.5px; border-radius:8px; }
-  .empty { text-align:center; color:var(--muted); font-size:13px; padding:60px 24px; line-height:1.9; }
-  .chaps { margin:0 16px 12px; background:var(--card); border-radius:14px; box-shadow:var(--shadow); overflow:hidden; }
-  .chaps .ch { display:flex; align-items:center; gap:8px; padding:10px 14px; font-size:13px; border-top:0.5px solid var(--secondary); }
-  .chaps .ch:first-child { border-top:none; }
-  .chaps .ch .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
-  .chaps .ch .st { font-size:11px; color:var(--muted); flex-shrink:0; }
-  .chaps .ch a { font-size:11.5px; color:var(--primary); text-decoration:none; padding:4px 6px; }
-  .chaps .ch a:active { opacity:.6; }
-  #reader { position:fixed; inset:0; background:var(--bg); z-index:50; display:none; flex-direction:column; }
-  #reader.show { display:flex; }
-  .rbar { display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--card); border-bottom:0.5px solid var(--border); }
-  .rbar .back { font-size:16px; cursor:pointer; padding:4px 8px; }
-  .rbar .rt { flex:1; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .rbar .fs { font-size:14px; color:var(--muted); padding:4px 8px; cursor:pointer; user-select:none; }
-  .rbody { flex:1; overflow-y:auto; padding:18px 20px 40px; font-size:17px; line-height:2; font-family:"DengXian","PingFang SC","Microsoft YaHei",sans-serif; }
-  .rbody h2 { font-size:16px; font-weight:600; margin-bottom:14px; }
-  .rbody p { margin:0 0 1em; text-indent:2em; }
-  .rbody img { max-width:100%; height:auto; display:block; margin:10px auto; border-radius:6px; }
-  .rbody table { border-collapse:collapse; width:100%; font-size:14px; margin:10px 0; }
-  .rbody th,.rbody td { border:0.5px solid var(--border); padding:5px 8px; }
-  .rbottom { display:flex; background:var(--card); border-top:0.5px solid var(--border); padding:8px 12px calc(8px + env(safe-area-inset-bottom)); gap:10px; }
-  .rbottom button { flex:1; border:1px solid var(--border); background:var(--card); border-radius:10px; padding:11px 0; font-size:14px; color:var(--text); cursor:pointer; }
-  #tocMask { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:60; display:none; align-items:flex-end; }
-  #tocMask.show { display:flex; }
-  #toc { width:100%; max-height:70vh; background:var(--card); border-radius:16px 16px 0 0; padding:14px 10px 30px; overflow-y:auto; }
-  #toc .th { font-size:13px; font-weight:600; color:var(--muted); padding:6px 10px 10px; }
-  #toc .item { padding:9px 12px; font-size:14px; border-radius:8px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  #toc .item.cur { background:var(--primary-50); color:var(--primary); font-weight:600; }
-  #loadMask { position:fixed; inset:0; background:rgba(11,37,69,.92); z-index:90; display:none; flex-direction:column; align-items:center; justify-content:center; padding:40px; }
-  #loadMask.show { display:flex; }
-  #loadMask .lt { color:#fff; font-size:15px; font-weight:600; text-align:center; margin-bottom:20px; line-height:1.7; }
-  #loadMask .bar { width:70%; max-width:280px; height:6px; border-radius:3px; background:rgba(255,255,255,.18); overflow:hidden; }
-  #loadMask .bar i { display:block; height:100%; width:0; background:#4da3ff; border-radius:3px; transition:width .2s; }
-  #loadMask .lp { color:#9cc3ff; font-size:12px; margin-top:12px; }
-  .toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px); background:rgba(17,24,39,.92); color:#fff; padding:9px 18px; border-radius:10px; font-size:13px; opacity:0; transition:.25s; z-index:99; pointer-events:none; max-width:86vw; text-align:center; }
-  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  *{box-sizing:border-box} html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       -webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 20px 64px}
+  .bar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;padding:12px 20px;
+       background:var(--bg);border-bottom:1px solid var(--line)}
+  .bar h1{margin:0;font-size:16px;font-weight:650;letter-spacing:.2px}
+  .bar .meta{font-size:12px;color:var(--text-3)} .bar .grow{flex:1}
+  .icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--text-2);transition:.15s}
+  .icon:hover{background:var(--brand-weak);color:var(--brand)}
+  .group-head{display:flex;align-items:baseline;gap:10px;margin:26px 0 12px}
+  .group-head h2{margin:0;font-size:14px;font-weight:650;letter-spacing:.4px}
+  .group-head span{font-size:12px;color:var(--text-3)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px}
+  .card{display:flex;flex-direction:column;gap:6px;padding:16px;text-align:left;background:var(--card);
+        border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
+        transition:transform .16s,border-color .16s}
+  .card:hover{transform:translateY(-2px);border-color:var(--brand)}
+  .card .t{font-weight:620;font-size:14.5px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;
+           -webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+  .card .s{font-size:12px;color:var(--text-3)}
+  .tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;
+       font-weight:600;background:var(--brand-weak);color:var(--brand)}
+  .empty{margin:48px 0;text-align:center;color:var(--text-3);font-size:13px;line-height:2}
+  .reader{position:fixed;inset:0;z-index:40;display:none;flex-direction:column;background:var(--bg)}
+  .reader.show{display:flex}
+  .rd-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg)}
+  .rd-bar .title{flex:1;min-width:0;font-size:14px;font-weight:620;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rd-bar .pos{font-size:12px;color:var(--text-3);white-space:nowrap}
+  .rd-body{flex:1;overflow-y:auto;overscroll-behavior:contain}
+  .rd-inner{max-width:var(--reader-w);margin:0 auto;padding:32px 24px 24px}
+  .rd-inner h2{margin:0 0 22px;font-size:19px;font-weight:650;line-height:1.5}
+  .rd-text p{margin:0 0 1.05em;text-indent:2em;text-align:justify;line-height:1.95;
+             font-size:var(--fs);word-break:break-word}
+  .rd-text img{max-width:100%;height:auto;border-radius:8px;text-indent:0;display:block;margin:12px auto}
+  .rd-nav{max-width:var(--reader-w);width:100%;margin:0 auto;padding:0 24px 28px;display:flex;gap:10px}
+  /* hidden 属性会被 display:flex 压掉,漫画模式下必须显式隐藏翻章按钮 */
+  .rd-nav[hidden]{display:none}
+  .btn{flex:1;height:40px;border:1px solid var(--line);border-radius:10px;background:var(--card);
+       font-size:13.5px;font-weight:600;color:var(--text-2);transition:.15s}
+  .btn:hover{border-color:var(--brand);color:var(--brand)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .comic-stage{display:grid;place-items:center;min-height:100%;padding:0;background:#0e0e10}
+  .comic-stage img{max-width:100%;max-height:100%;display:block}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(12px);padding:9px 16px;
+         border-radius:999px;background:rgba(24,24,28,.92);color:#fff;font-size:13px;opacity:0;
+         transition:.25s;pointer-events:none;z-index:60}
+  .toast.show{opacity:1;transform:translateX(-50%)}
+  .toc{position:fixed;top:0;bottom:0;left:0;width:min(320px,82vw);z-index:50;background:var(--card);
+       border-right:1px solid var(--line);transform:translateX(-100%);transition:transform .22s;
+       display:flex;flex-direction:column}
+  .toc.show{transform:none}
+  .toc h3{margin:0;padding:16px;font-size:13px;font-weight:650;color:var(--text-2);border-bottom:1px solid var(--line)}
+  .toc ul{list-style:none;margin:0;padding:6px;overflow-y:auto}
+  .toc li{padding:10px 12px;border-radius:9px;font-size:13.5px;color:var(--text-2);cursor:pointer;
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .toc li:hover,.toc li.on{background:var(--brand-weak);color:var(--brand)}
+  .toc li.on{font-weight:650}
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:45;display:none}
+  .scrim.show{display:block}
+  @media (max-width:560px){.wrap{padding:14px 14px 48px}.grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}}
 </style>
 </head>
 <body>
 
-<div class="topbar">
-  <img class="logo" src="icon/app.png" onerror="this.style.display='none'" alt="">
-  <h1 id="appTitle">NovelCrawler</h1>
-  <span class="badge">● 离线</span>
+<header class="bar">
+  <h1>NovelCrawler</h1>
+  <div class="meta" id="genTime"></div>
+  <div class="grow"></div>
+  <button class="icon" id="themeBtn" title="切换主题">◐</button>
+</header>
+
+<div class="wrap">
+  <div class="group-head"><h2>小说</h2><span id="novelCount"></span></div>
+  <div class="grid" id="novelGrid"></div>
+  <div class="group-head"><h2>漫画</h2><span id="comicCount"></span></div>
+  <div class="grid" id="comicGrid"></div>
+  <div class="empty" id="emptyTip" hidden>这个离线包里没有内容<br />请在电脑端勾选要打包的小说 / 漫画后重新生成</div>
 </div>
 
-<div id="offBanner"></div>
-
-<div class="seg" id="segBar">
-  <span id="tabBook" class="on" onclick="showTab('book')">📖 小说</span>
-  <span id="tabComic" onclick="showTab('comic')">🎨 漫画</span>
-</div>
-
-<div id="list"><div class="empty">加载中…</div></div>
-
-<div id="reader">
-  <div class="rbar">
-    <span class="back" onclick="closeReader()">✕</span>
-    <span class="rt" id="rTitle"></span>
-    <span class="fs" onclick="fontAdj(-1)">A-</span>
-    <span class="fs" onclick="fontAdj(1)">A+</span>
-    <span class="fs" onclick="showToc()" style="font-size:13px">目录</span>
+<div class="reader" id="reader">
+  <div class="rd-bar">
+    <button class="icon" id="tocBtn" title="目录">☰</button>
+    <div class="title" id="rdTitle"></div>
+    <div class="pos" id="rdPos"></div>
+    <button class="icon" id="fsDown" title="字号减小">A−</button>
+    <button class="icon" id="fsUp" title="字号增大">A+</button>
+    <button class="icon" id="rdClose" title="关闭">✕</button>
   </div>
-  <div class="rbody" id="rBody"></div>
-  <div class="rbottom">
-    <button onclick="prevCh()">← 上一章</button>
-    <button onclick="nextCh()">下一章 →</button>
+  <div class="rd-body" id="rdBody"></div>
+  <div class="rd-nav" id="rdNav">
+    <button class="btn" id="prevBtn">← 上一章</button>
+    <button class="btn" id="nextBtn">下一章 →</button>
   </div>
 </div>
 
-<div id="tocMask" onclick="if(event.target===this)hideToc()">
-  <div id="toc"><div class="th">目录</div></div>
-</div>
-
-<div id="loadMask">
-  <div class="lt" id="loadText">正在加载…</div>
-  <div class="bar"><i id="loadBar"></i></div>
-  <div class="lp" id="loadPct">0%</div>
-</div>
-
+<div class="scrim" id="scrim"></div>
+<aside class="toc" id="toc">
+  <h3 id="tocTitle">目录</h3>
+  <ul id="tocList"></ul>
+</aside>
 <div class="toast" id="toast"></div>
 
 <script>
 const SNAP_RAW = null;
 </script>
 <script>
-const SNAP = (typeof SNAP_RAW !== 'undefined' && SNAP_RAW) ? SNAP_RAW : null;
-let files = [], comics = [], curTab = 'book';
-let curBook = null, chs = [], idx = 1, fontSize = 17;
+(function () {
+  'use strict';
+  var SNAP = (typeof SNAP_RAW !== 'undefined' && SNAP_RAW) ? SNAP_RAW : null;
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
 
-function renderAll() {
-  const box = document.getElementById('list');
-  if (curTab === 'comic') { renderComics(); return; }
-  renderBooks();
-}
-function showTab(t) {
-  curTab = t;
-  document.getElementById('tabBook').className = t === 'book' ? 'on' : '';
-  document.getElementById('tabComic').className = t === 'comic' ? 'on' : '';
-  renderAll();
-}
-function renderBooks() {
-  const box = document.getElementById('list');
-  const list = files;
-  if (!list.length) {
-    box.innerHTML = '<div class="empty">本包未包含小说<br><span style="font-size:12px">回到在线页重新打包并勾选小说即可</span></div>';
-    return;
+  var THEME_KEY = 'nc.offline.theme', FS_KEY = 'nc.offline.fs', POS_PREFIX = 'nc.offline.pos.';
+  function applyTheme(t) {
+    document.documentElement.dataset.theme = t;
+    try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* 隐私模式 */ }
   }
-  box.innerHTML = '<div class="sec-hd"><span class="t">📖 小说</span><span class="n">' + list.length + ' 本</span><span class="sp"></span></div>';
-  list.forEach(b => {
-    const row = document.createElement('div');
-    row.className = 'book';
-    let btns = '';
-    if (b.has_body) btns += '<button class="fbtn sm" onclick="openBook(\'' + jss(b.name) + '\')">阅读</button>';
-    if (SNAP.with_files) btns += '<button class="fbtn ghost sm" onclick="dlFile(\'files/' + enc(b.name) + '\',\'' + jss(b.name) + '\')">⬇ 文件</button>';
-    row.innerHTML =
-      '<div class="cov">' + esc(coverChar(b.name)) + '</div>'
-      + '<div class="info"><div class="name">' + esc(b.name) + '</div>'
-      + '<div class="meta"><span>' + fmtSize(b.size) + '</span><span>' + b.chs + ' 章</span><span class="ok">✓ 已打包</span></div></div>'
-      + '<div class="rowbtns">' + btns + '</div>';
-    box.appendChild(row);
-  });
-}
-function renderComics() {
-  const box = document.getElementById('list');
-  if (!comics.length) {
-    box.innerHTML = '<div class="empty">本包未包含漫画<br><span style="font-size:12px">回到在线页重新打包并勾选漫画即可</span></div>';
-    return;
+  var savedTheme = '';
+  try { savedTheme = localStorage.getItem(THEME_KEY) || ''; } catch (e) { /* ignore */ }
+  applyTheme(savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  $('themeBtn').onclick = function () {
+    applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+  };
+
+  var fontSize = 17;
+  try { fontSize = Number(localStorage.getItem(FS_KEY)) || 17; } catch (e) { /* ignore */ }
+  function applyFont() {
+    fontSize = Math.min(26, Math.max(13, fontSize));
+    document.documentElement.style.setProperty('--fs', fontSize + 'px');
+    try { localStorage.setItem(FS_KEY, String(fontSize)); } catch (e) { /* ignore */ }
   }
-  box.innerHTML = '<div class="sec-hd"><span class="t">🎨 包内漫画</span><span class="n">' + comics.length + ' 部</span><span class="sp"></span></div>';
-  comics.forEach(c => {
-    const row = document.createElement('div');
-    row.className = 'book';
-    row.innerHTML =
-      '<div class="cov">' + esc(coverChar(c.title)) + '</div>'
-      + '<div class="info"><div class="name">' + esc(c.title) + '</div>'
-      + '<div class="meta"><span>' + c.files.length + ' 话</span><span class="ok">✓ 已打包</span></div></div>'
-      + (SNAP.with_files ? '<button class="fbtn gray sm" onclick="toggleChaps(\'' + jss(c.title) + '\')">话列表</button>' : '');
-    box.appendChild(row);
-    if (!SNAP.with_files) return;
-    const cmeta = comics.find(x => x.title === c.title);
-    const chaps = document.createElement('div');
-    chaps.className = 'chaps';
-    chaps.style.display = 'none';
-    chaps.id = 'chaps-' + cssid(c.title);
-    chaps.innerHTML = (cmeta.files || []).map(p =>
-      '<div class="ch"><span class="nm">' + esc(p.replace(/\.pdf$/i, '')) + '</span>'
-      + '<a href="' + cmeta.dir + '/' + enc(p) + '" target="_blank">打开</a>'
-      + '<a href="' + cmeta.dir + '/' + enc(p) + '" download="' + enc(p) + '">下载</a></div>'
-    ).join('') || '<div class="ch"><span class="nm">无 PDF</span></div>';
-    box.appendChild(chaps);
+  applyFont();
+  $('fsUp').onclick = function () { fontSize += 1; applyFont(); };
+  $('fsDown').onclick = function () { fontSize -= 1; applyFont(); };
+
+  var toastTimer = null;
+  function toast(msg) {
+    var el = $('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 1800);
+  }
+
+  var books = (SNAP && SNAP.books) || [];
+  var comics = (SNAP && SNAP.comics) || [];
+  $('genTime').textContent = SNAP ? ('生成于 ' + (SNAP.gen_time || '')) : '';
+  $('novelCount').textContent = books.length ? books.length + ' 本' : '';
+  $('comicCount').textContent = comics.length ? comics.length + ' 部' : '';
+  if (!books.length && !comics.length) $('emptyTip').hidden = false;
+
+  books.forEach(function (b) {
+    var el = document.createElement('button');
+    el.className = 'card';
+    el.innerHTML = '<div class="t">' + esc(b.name.replace(/\.[^.]+$/, '')) + '</div>'
+      + '<div class="s">' + (b.chs ? b.chs + ' 章' : '无正文') + '</div>';
+    el.onclick = function () { openNovel(b.name); };
+    $('novelGrid').appendChild(el);
   });
-}
-function toggleChaps(title) {
-  const el = document.getElementById('chaps-' + cssid(title));
-  el.style.display = el.style.display === 'none' ? '' : 'none';
-}
-function dlFile(href, name) {
-  const a = document.createElement('a');
-  a.href = href;
-  a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  toast('已开始保存:' + name + '(若未开始,请长按链接 → 存储到文件)');
-}
-// ---------------- 按需加载:自制进度 UI + 动态注入 data/*.js ----------------
-const loadMask = document.getElementById('loadMask');
-function showLoad(name) {
-  document.getElementById('loadText').textContent = '正在加载《' + name + '》…';
-  document.getElementById('loadBar').style.width = '0%';
-  document.getElementById('loadPct').textContent = '0%';
-  loadMask.classList.add('show');
-  let p = 0;
-  const t = setInterval(() => {  // 加载中的平滑进度(真实完成由 onload 置 100%)
-    p = Math.min(88, p + 6 + Math.random() * 10);
-    document.getElementById('loadBar').style.width = p + '%';
-    document.getElementById('loadPct').textContent = Math.round(p) + '%';
-  }, 160);
-  return t;
-}
-function finishLoad(t) {
-  clearInterval(t);
-  document.getElementById('loadBar').style.width = '100%';
-  document.getElementById('loadPct').textContent = '100%';
-  setTimeout(() => loadMask.classList.remove('show'), 220);
-}
-function loadScript(src) {
-  return new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = () => res();
-    s.onerror = () => rej(new Error('数据加载失败'));
-    document.body.appendChild(s);
+
+  comics.forEach(function (c) {
+    var el = document.createElement('button');
+    el.className = 'card';
+    var size = c.pages ? (c.pages + ' 页') : ((c.files || []).length + ' 个文件');
+    el.innerHTML = '<div class="t">' + esc(c.title) + '</div><div class="s">' + esc(size) + '</div>'
+      + (c.pages ? '' : '<span class="tag">仅 PDF</span>');
+    el.onclick = function () {
+      if (c.pages) openComic(c);
+      else toast('这个包里没有页图，只有 PDF 原文件');
+    };
+    $('comicGrid').appendChild(el);
   });
-}
-// ---------------- 阅读器 ----------------
-async function openBook(name) {
-  curBook = name;
-  const b = (SNAP.books || []).find(x => x.name === name);
-  if (!b || !b.has_body) { toast('这本书没有内嵌正文,可下载原文件用阅读器打开'); return; }
-  let data = (window.__SNAP_DATA__ || {})[name];
-  if (!data) {
-    const t = showLoad(name);
+
+  var cur = null;
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = function () { resolve(); };
+      s.onerror = function () { reject(new Error('数据文件缺失: ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function openNovel(name) {
+    var info = null;
+    for (var i = 0; i < books.length; i += 1) if (books[i].name === name) { info = books[i]; break; }
+    if (!info) return;
+    $('reader').classList.add('show');
+    $('rdTitle').textContent = name.replace(/\.[^.]+$/, '');
+    $('rdPos').textContent = '';
+    $('rdBody').innerHTML = '<div class="rd-inner"><div class="empty">正在解包…</div></div>';
     try {
-      await loadScript(b.data);
-    } catch (e) { finishLoad(t); toast('加载失败:' + e.message); return; }
-    finishLoad(t);
-    data = (window.__SNAP_DATA__ || {})[name];
+      if (!window.__SNAP_DATA__ || !window.__SNAP_DATA__[name]) await loadScript(info.data);
+      var data = (window.__SNAP_DATA__ || {})[name] || {};
+      var chapters = data.chapters || [];
+      if (!chapters.length) { toast('这本书没有可读章节'); closeReader(); return; }
+      var start = 1;
+      try {
+        start = Number(localStorage.getItem(POS_PREFIX + name)) || 1;
+      } catch (e) { start = 1; }
+      start = Math.max(1, Math.min(chapters.length, start));
+      cur = { type: 'novel', name: name, chapters: chapters, idx: start };
+      $('rdNav').hidden = false;
+      renderChapter();
+    } catch (err) {
+      toast(err && err.message ? err.message : '加载失败');
+      closeReader();
+    }
   }
-  if (!data || !(data.chapters || []).length) { toast('书籍内容为空'); return; }
-  chs = data.chapters;
-  idx = 1;
-  document.getElementById('reader').classList.add('show');
-  document.getElementById('rTitle').textContent = name;
-  loadCh(1);
-}
-function loadCh(i) {
-  idx = Math.min(Math.max(1, i), chs.length);
-  const body = document.getElementById('rBody');
-  const ch = chs[idx - 1];
-  if (!ch) { body.innerHTML = '<p style="text-align:center;color:var(--muted);text-indent:0">章节不存在</p>'; return; }
-  body.scrollTop = 0;
-  document.getElementById('rTitle').textContent = ch.title || ('第' + idx + '章');
-  body.innerHTML = '<h2>' + esc(ch.title || '') + '</h2>' + (ch.html || (ch.text || '').split(/\n+/).map(p => '<p>' + esc(p) + '</p>').join(''));
-  saveProgress();
-}
-function prevCh() { loadCh(idx - 1); }
-function nextCh() { loadCh(idx + 1); }
-function fontAdj(d) {
-  fontSize = Math.min(26, Math.max(14, fontSize + d));
-  document.getElementById('rBody').style.fontSize = fontSize + 'px';
-}
-function showToc() {
-  const box = document.getElementById('toc');
-  box.innerHTML = '<div class="th">目录 · ' + chs.length + ' 章</div>' + chs.map((c, i) =>
-    '<div class="item' + (i + 1 === idx ? ' cur' : '') + '" onclick="hideToc();loadCh(' + (i + 1) + ')">' + esc(c.title || ('第' + (i + 1) + '章')) + '</div>').join('');
-  document.getElementById('tocMask').classList.add('show');
-}
-function hideToc() { document.getElementById('tocMask').classList.remove('show'); }
-function closeReader() { document.getElementById('reader').classList.remove('show'); curBook = null; }
-function saveProgress() { try { localStorage.setItem('novelist_snap_pos', JSON.stringify({file: curBook, idx: idx})); } catch (e) {} }
 
-// 工具
-function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function jss(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
-function cssid(s) { return String(s == null ? '' : s).replace(/[^\w\u4e00-\u9fa5]/g, '_'); }
-function enc(s) { return encodeURIComponent(s); }
-function fmtSize(n) { n = n || 0; if (n > 1048576) return (n/1048576).toFixed(1)+'MB'; if (n > 1024) return (n/1024).toFixed(0)+'KB'; return n+'B'; }
-function coverChar(name) { const s = (name || '书').replace(/\.(txt|epub)$/i, ''); return s.slice(-2, -1) || s.slice(0, 1) || '书'; }
-let toastTimer = null;
-function toast(msg) { const el = document.getElementById('toast'); el.innerHTML = msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2600); }
+  function renderChapter() {
+    if (!cur || cur.type !== 'novel') return;
+    var chapters = cur.chapters, idx = cur.idx;
+    var ch = chapters[idx - 1] || {};
+    $('rdTitle').textContent = ch.title || ('第 ' + idx + ' 章');
+    $('rdPos').textContent = idx + ' / ' + chapters.length;
+    var html;
+    if (ch.html) {
+      html = ch.html;
+    } else {
+      html = (ch.text || '').split(/\n+/).map(function (line) { return line.trim(); })
+        .filter(Boolean).map(function (line) { return '<p>' + esc(line) + '</p>'; }).join('');
+    }
+    $('rdBody').innerHTML = '<div class="rd-inner"><h2>' + esc(ch.title || '') + '</h2>'
+      + '<div class="rd-text">' + (html || '<p>（本章为空）</p>') + '</div></div>';
+    $('rdBody').scrollTop = 0;
+    $('prevBtn').disabled = idx <= 1;
+    $('nextBtn').disabled = idx >= chapters.length;
+    buildToc(chapters, idx);
+    try { localStorage.setItem(POS_PREFIX + cur.name, String(idx)); } catch (e) { /* ignore */ }
+  }
 
-document.addEventListener('keydown', e => {
-  if (e.key === 'ArrowLeft') prevCh();
-  if (e.key === 'ArrowRight') nextCh();
-});
+  $('prevBtn').onclick = function () {
+    if (cur && cur.type === 'novel' && cur.idx > 1) { cur.idx -= 1; renderChapter(); }
+  };
+  $('nextBtn').onclick = function () {
+    if (cur && cur.type === 'novel' && cur.idx < cur.chapters.length) { cur.idx += 1; renderChapter(); }
+  };
 
-// 初始化
-if (!SNAP) {
-  document.getElementById('list').innerHTML = '<div class="empty">无效的离线包<br><span style="font-size:12px">请通过在线页「📦 打包快照」重新打包</span></div>';
-} else {
-  files = (SNAP.books || []).map(b => b);
-  comics = SNAP.comics || [];
-  const el = document.getElementById('offBanner');
-  el.innerHTML = '<b>📦 离线包</b> · 生成于 ' + esc(SNAP.gen_time || '')
-    + ' · 内嵌 ' + esc(String(SNAP.books.length)) + ' 本小说、' + esc(String(SNAP.comics.length)) + ' 部漫画<br><span style="opacity:.85">点击「阅读」时按需加载该书内容;漫画与文件在包内 files/ 目录,可直接打开或保存。</span>';
-  document.getElementById('appTitle').textContent = 'NovelCrawler(离线)';
-  renderAll();
-}
+  function openComic(comic) {
+    cur = { type: 'comic', comic: comic, page: 1 };
+    $('reader').classList.add('show');
+    $('rdNav').hidden = true;
+    $('rdTitle').textContent = comic.title;
+    renderComicPage();
+    buildComicToc(comic);
+  }
+
+  function comicSrc(comic, page) {
+    var dir = String(comic.pages_dir || '').replace(/\/+$/, '');
+    return dir + '/pages/' + ('0000' + page).slice(-4) + '.jpg';
+  }
+
+  function renderComicPage() {
+    if (!cur || cur.type !== 'comic') return;
+    var comic = cur.comic, page = cur.page;
+    $('rdPos').textContent = page + ' / ' + comic.pages;
+    $('rdBody').innerHTML = '<div class="comic-stage"><img id="comicImg" src="'
+      + comicSrc(comic, page) + '" alt="第 ' + page + ' 页" /></div>';
+    $('comicImg').onerror = function () { toast('第 ' + page + ' 页缺失'); };
+    if (page < comic.pages) { var pre = new Image(); pre.src = comicSrc(comic, page + 1); }
+  }
+
+  function stepComic(delta) {
+    if (!cur || cur.type !== 'comic') return;
+    var next = cur.page + delta;
+    if (next < 1 || next > cur.comic.pages) return;
+    cur.page = next;
+    renderComicPage();
+  }
+
+  $('rdBody').addEventListener('click', function (ev) {
+    if (!cur || cur.type !== 'comic') return;
+    var half = $('rdBody').clientWidth / 2;
+    if (ev.clientX < half) stepComic(-1); else stepComic(1);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!$('reader').classList.contains('show')) return;
+    if (e.key === 'Escape') { closeReader(); return; }
+    if (cur && cur.type === 'comic') {
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); stepComic(1); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); stepComic(-1); }
+    }
+  });
+
+  function buildToc(chapters, active) {
+    $('tocTitle').textContent = '目录 · ' + chapters.length + ' 章';
+    var list = $('tocList');
+    list.innerHTML = '';
+    chapters.forEach(function (ch, i) {
+      var li = document.createElement('li');
+      li.textContent = ch.title || ('第 ' + (i + 1) + ' 章');
+      if (i + 1 === active) li.className = 'on';
+      li.onclick = function () {
+        if (cur && cur.type === 'novel') { cur.idx = i + 1; renderChapter(); }
+        closeToc();
+      };
+      list.appendChild(li);
+    });
+  }
+
+  function buildComicToc(comic) {
+    var chs = comic.chapters || [];
+    $('tocTitle').textContent = chs.length ? ('分话 · ' + chs.length + ' 话') : '跳转';
+    var list = $('tocList');
+    list.innerHTML = '';
+    if (!chs.length) {
+      var li0 = document.createElement('li');
+      li0.textContent = '共 ' + comic.pages + ' 页（无分话信息）';
+      list.appendChild(li0);
+      return;
+    }
+    chs.forEach(function (ch) {
+      var li = document.createElement('li');
+      li.textContent = ch.label + '（第 ' + ch.from + ' 页）';
+      li.onclick = function () {
+        if (cur && cur.type === 'comic') { cur.page = ch.from; renderComicPage(); }
+        closeToc();
+      };
+      list.appendChild(li);
+    });
+  }
+
+  function openToc() { $('toc').classList.add('show'); $('scrim').classList.add('show'); }
+  function closeToc() { $('toc').classList.remove('show'); $('scrim').classList.remove('show'); }
+  $('tocBtn').onclick = function () {
+    if ($('toc').classList.contains('show')) closeToc(); else openToc();
+  };
+  $('scrim').onclick = closeToc;
+
+  function closeReader() {
+    $('reader').classList.remove('show');
+    $('rdBody').innerHTML = '';
+    closeToc();
+    cur = null;
+  }
+  $('rdClose').onclick = closeReader;
+})();
 </script>
 </body>
 </html>

@@ -1872,8 +1872,13 @@ class Handler(BaseHTTPRequestHandler):
                                    as_attachment=bool(qs.get("dl")),
                                    filename="漫画+小说-远程直连.html")
         if path == "/offline-mobile":
-            # 离线手机页:单文件内嵌书架+阅读内容,保存后电脑关闭也能离线打开
-            return self._build_offline_page(qs)
+            # 单文件离线 HTML 已下线:改为统一走 ZIP(内置 index.html + data/ + 页图)。
+            # 保留这个路由只为给出明确提示,避免老书签静默 404。
+            return self._send_json({
+                "ok": False,
+                "error": "单文件离线 HTML 已不再支持，请用「离线手机包(ZIP)」",
+                "code": "offline_html_removed",
+            }, 410)
         if path == "/api/sources":
             return self._send_json({"sources": load_all_sources()})
         if path == "/api/settings":
@@ -5815,35 +5820,30 @@ class Handler(BaseHTTPRequestHandler):
                             zf.write(fp, f"files/{c['title']}/{p}")
                             done += os.path.getsize(fp)
                         _report()
-                # 漫画:App 只能按「页图」阅读(pages/NNNN.jpg),所以把每话的
-                # imgXXXX.jpg 按顺序抄进包里,而不是丢 PDF 过去。
+                # 漫画:App 只认 pages/NNNN.jpg。页图优先取 .raw 缓存,
+                # 缓存被清过就从 PDF 抽页(comic_pack 里做了这层兜底)。
+                from novel import comic_pack as _comic_pack
                 comic_entries = []
                 for c in comics:
-                    cdir = os.path.join(COMIC_OUT_DIR, c["title"])
-                    page_paths = []
-                    try:
-                        for ch_name in sorted(os.listdir(cdir)):
-                            ch_dir = os.path.join(cdir, ch_name)
-                            if not os.path.isdir(ch_dir):
-                                continue
-                            for img in sorted(os.listdir(ch_dir)):
-                                if img.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
-                                    page_paths.append(os.path.join(ch_dir, img))
-                    except OSError:
-                        page_paths = []
                     arc_dir = "comics/" + _quote(c["title"], safe="")
-                    for index, src in enumerate(page_paths, 1):
-                        try:
-                            zf.write(src, f"{arc_dir}/pages/{index:04d}.jpg")
-                            done += os.path.getsize(src)
-                        except OSError:
-                            continue
-                    if page_paths:
+                    try:
+                        info = _comic_pack.pack_into_zip(
+                            zf, c["title"], arc_dir,
+                            on_bytes=lambda n: None)
+                    except Exception:  # noqa: BLE001
+                        info = {"pages": 0, "chapters": []}
+                    if info.get("pages"):
                         comic_entries.append({"title": c["title"], "dir": arc_dir,
-                                              "pages": len(page_paths)})
+                                              "pages": info["pages"],
+                                              "chapters": info.get("chapters") or []})
                     _report()
+                _by_title = {e["title"]: e for e in comic_entries}
                 meta_comics = [{"title": c["title"], "files": c["pdfs"],
-                                "dir": "files/" + _quote(c["title"], safe="")}
+                                "dir": "files/" + _quote(c["title"], safe=""),
+                                # 页图目录与页数:内置 HTML 直接按页翻,不必再解 PDF
+                                "pages_dir": _by_title.get(c["title"], {}).get("dir", ""),
+                                "pages": _by_title.get(c["title"], {}).get("pages", 0),
+                                "chapters": _by_title.get(c["title"], {}).get("chapters", [])}
                                for c in comics]
                 meta = {"gen_time": _t3.strftime("%Y-%m-%d %H:%M"), "format": "zip",
                         "with_files": with_files, "books": meta_books, "comics": meta_comics}

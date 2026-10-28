@@ -148,6 +148,13 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
 
+### 1.7.5 — 2026-10-28
+- 状态：已发布
+- 新增：漫画离线改走「页图」链路——新增 `novel/comic_pack.py`，优先取 `.raw` 缓存，缓存被清过就从 PDF 用 pypdf 逐页抽内嵌图（img2pdf 生成的 PDF 一页即一图，零重编码）；manifest 带 `comics[].chapters`（每话起始页）
+- 修复：漫画导入始终为空（根因是 `comic.py` 打包后 `rmtree(.raw)`，磁盘只剩 PDF，按 `img*.jpg` 找不到任何页）；内置 HTML 重做（书架/小说/漫画三态、深浅色、字号、目录抽屉、漫画点击翻页）；漫画模式误显示翻章按钮（`display:flex` 压掉 `hidden`）
+- 弃置：**单文件离线 HTML 下线**（`/offline-mobile` 返回 410，前端去掉该选项），统一走离线包 ZIP
+- 风险遗留：旧离线包（1.7.4 及以前）里没有页图，漫画需重打；同 1.7.2
+
 ### 1.7.4 — 2026-10-28
 - 状态：已发布
 - 新增：离线包支持漫画——电脑端把每话 `imgXXXX.jpg` 按顺序打成 `comics/<标题>/pages/NNNN.jpg`，App 拆成 comic bundle 导入（`pages/NNNN.jpg` + `kind:"comic"`）

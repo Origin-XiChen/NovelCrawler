@@ -1829,7 +1829,6 @@ function PackTab() {
   const [comics, setComics] = useState<ComicFileGroup[]>([]);
   const [bookSel, setBookSel] = useState<string[]>([]);
   const [comicSel, setComicSel] = useState<string[]>([]);
-  const [format, setFormat] = useState<'zip' | 'html'>('zip');
   const [withFiles, setWithFiles] = useState(true);
   const [job, setJob] = useState('');
   const [progress, setProgress] = useState(0);
@@ -1913,15 +1912,6 @@ function PackTab() {
       toast('请先勾选要打包的小说或漫画', 'error');
       return;
     }
-    if (format === 'html') {
-      const params = new URLSearchParams();
-      if (bookSel.length) params.set('favs', bookSel.join(','));
-      if (comicSel.length) params.set('comics', comicSel.join(','));
-      params.set('dl', '1');
-      downloadUrl(`/offline-mobile?${params.toString()}`, 'NovelCrawler-离线版.html');
-      toast('已开始打包下载，完成后可发送到手机', 'success');
-      return;
-    }
     try {
       const data = await apiPost<{ job_id?: string; error?: string }>('/api/snapshot_start', {
         favs: bookSel,
@@ -1956,14 +1946,11 @@ function PackTab() {
         </div>
         <div className="mobile-actions">
           <div className="segmented">
-            <button type="button" className={format === 'zip' ? 'is-on' : ''} onClick={() => setFormat('zip')}>
-              ZIP（进度可视）
-            </button>
-            <button type="button" className={format === 'html' ? 'is-on' : ''} onClick={() => setFormat('html')}>
-              HTML 单文件
+            <button type="button" className="is-on" disabled>
+              离线手机包（ZIP）
             </button>
           </div>
-          {format === 'zip' && (
+          {(
             <label className="mobile-check">
               <input type="checkbox" checked={withFiles} onChange={(event) => setWithFiles(event.target.checked)} />
               含原文件（EPUB / PDF）
