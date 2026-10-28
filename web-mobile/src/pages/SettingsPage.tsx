@@ -342,7 +342,9 @@ export default function SettingsPage() {
       <section className="settings-section">
         <div className="settings-section__head">
           <h2>手机 App</h2>
-          <span>v{appVersion}</span>
+          <span className={devChannel ? 'channel-badge is-dev' : 'channel-badge'}>
+            v{appVersion} · {devChannel ? 'Dev' : '稳定'}
+          </span>
         </div>
         <div className="settings-card">
           <button
@@ -359,8 +361,10 @@ export default function SettingsPage() {
               <FlaskConical size={19} />
             </span>
             <span className="settings-item__main">
-              <b>接收 Dev 版本</b>
-              <em>开启后会检查预发布版本，仅建议测试机使用</em>
+              <b>接收 Dev 版本{devChannel ? ' · 已开启' : ''}</b>
+              <em>{devChannel
+                ? '当前在 Dev 通道：检查更新包含预发布版本'
+                : '当前在稳定通道：只收正式版，点此切到 Dev'}</em>
             </span>
             <span className={devChannel ? 'switch is-on' : 'switch'}>
               <i />
@@ -377,7 +381,9 @@ export default function SettingsPage() {
             </span>
             <span className="settings-item__main">
               <b>检查 App 更新</b>
-              <em>{IS_NATIVE ? '从 GitHub 下载新版安装包' : '网页版随电脑端一起更新'}</em>
+              <em>{IS_NATIVE
+                ? `从 GitHub 下载新版安装包 · ${devChannel ? 'Dev 通道' : '稳定通道'}`
+                : '网页版随电脑端一起更新'}</em>
             </span>
             {checkingUpdate ? (
               <Loader2 size={18} className="spin" />

@@ -86,6 +86,10 @@ gh release upload vX.Y.Z <apk>#NovelCrawler-Mobile-X.Y.Z.apk --clobber
 
 - 产物命名是约定：`NovelCrawler-Setup-X.Y.Z.exe`、`NovelCrawler-Mobile-X.Y.Z.apk`。App 内更新按"文件名含 `Mobile` 且以 `.apk` 结尾"匹配。
 - 上传后核对：`gh release view vX.Y.Z --json assets`，并确认 `gh release list` 里该版本 `isLatest=true`。
+- **Dev 预发布**：CI 默认建正式 release；要发 Dev 版，CI 成功后执行
+  `gh release edit vX.Y.Z --prerelease`。此时 `/releases/latest` 与桌面 `allowPrerelease=false`
+  都看不到它，只有开了 Dev 通道的客户端能收到。
+- **转正**：`gh release edit vX.Y.Z --prerelease=false`（必要时 `gh release edit vX.Y.Z --latest`）。
 
 ---
 
@@ -147,6 +151,14 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 ## §9 版本进度
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
+
+### 1.7.9 — 2026-10-28
+- 状态：已发布
+- 新增：`--host` 默认改为 `0.0.0.0`，是否放行局域网改由请求层 `_lan_allowed()` 判定；生成配对码时若「局域网访问」未开启则自动开启并立即生效（不再需要重启）
+- 修复：**热点/校园网下手机永远连不上（4 个候选地址全部无响应）** —— 根因是 `lan_access` 默认 False 时进程只绑 `127.0.0.1`，而该开关原本要重启才生效
+- 其他：`/api/mobile/ping` 响应新增 `lan_access`；`pair/start` 返回 `lan_auto_enabled`
+- 其他：手机设置页「关于」显示 `v1.7.9 · 稳定/Dev` 通道标记，Dev 行文案随状态变化
+- 风险遗留：同 1.7.8（防火墙导致的失败仍需用户放行）
 
 ### 1.7.8 — 2026-10-28
 - 状态：已发布

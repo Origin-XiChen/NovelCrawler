@@ -1235,6 +1235,17 @@ class Handler(BaseHTTPRequestHandler):
             return xff[:64]
         return ip
 
+    def _lan_allowed(self) -> bool:
+        """本机之外的请求是否放行。开关改了立即生效,不需要重启进程。"""
+        ip = self.client_address[0] if self.client_address else ""
+        if ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            return True
+        try:
+            from novel.config import load_settings as _ls5
+            return bool(_ls5().get("lan_access"))
+        except Exception:  # noqa: BLE001
+            return False
+
     def _is_trusted_local(self) -> bool:
         """本机直连才免 token;隧道转发(带 Forwarded 头)一律视为远程。"""
         ip = self.client_address[0] if self.client_address else ""
@@ -1297,8 +1308,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _guard(self) -> bool:
         path = urlparse(self.path).path
+        # 局域网访问关闭时,非本机请求一律挡在最外层 —— 这样进程可以永远绑
+        # 0.0.0.0(否则改开关必须重启,手机就永远连不上),而安全性不打折。
         if path in ("/api/ping", "/api/mobile/ping", "/api/mobile/pair/confirm"):
+            # 白名单仍放行,但 ping 会在响应里带上 lan_access 状态,便于手机端给出准确提示
             return True
+        if not self._lan_allowed():
+            self._send_json({
+                "error": "电脑未开启「局域网访问」,请在电脑端打开后重试",
+                "code": "lan_disabled",
+            }, 403)
+            return False
         if self._is_trusted_local():
             return True
         if not (path.startswith("/api/") or path.startswith("/downloads/")):
@@ -1402,6 +1422,7 @@ class Handler(BaseHTTPRequestHandler):
             "candidates": self._mobile_candidates(),
             "https": scheme == "https",
             "pin": self._tls_pin(),
+            "lan_access": self._lan_allowed(),
             "t": int(time.time()),
         }
         if device:
@@ -1441,6 +1462,16 @@ class Handler(BaseHTTPRequestHandler):
             lan = bool(load_settings().get("lan_access"))
         except Exception:  # noqa: BLE001
             lan = False
+        lan_auto = False
+        if not lan:
+            # 能点「生成配对码」就说明用户要用手机,没道理还让他去别处开开关再重启。
+            # 进程已固定绑 0.0.0.0,这里改配置立即生效。
+            try:
+                save_settings({"lan_access": True})
+                lan = True
+                lan_auto = True
+            except Exception:  # noqa: BLE001
+                pass
         # 内建 SSH 通道账号(user@host:port):密码认证,不传密钥文件
         ssh_target = ""
         ssh_password = ""
@@ -1466,6 +1497,7 @@ class Handler(BaseHTTPRequestHandler):
         result["base_url"] = base
         result["candidates"] = ordered[:5]
         result["lan_access"] = lan
+        result["lan_auto_enabled"] = lan_auto
         result["scheme"] = scheme
         return self._send_json(result)
 
@@ -6104,7 +6136,10 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     ap = argparse.ArgumentParser(description="多源小说爬虫 Web GUI")
     ap.add_argument("--port", type=int, default=8765, help="监听端口(默认8765)")
-    ap.add_argument("--host", default="127.0.0.1", help="监听地址(默认127.0.0.1)")
+    # 默认占全部网卡:绑 127.0.0.1 时手机永远连不上,而"局域网访问"开关又
+    # 需要重启才生效 —— 这正是热点扫码「4 个地址全部无响应」的根因。
+    # 真正的放行判定放在请求层(_lan_allowed),开关立即生效、无需重启。
+    ap.add_argument("--host", default="0.0.0.0", help="监听地址(默认0.0.0.0,放行由局域网开关控制)")
     ap.add_argument("--open", action="store_true", help="启动后自动打开浏览器")
     args = ap.parse_args()
 
@@ -6124,13 +6159,6 @@ def main() -> None:
     # 局域网访问:config 开启 lan_access 时绑定 0.0.0.0
     # 「仅 HTTPS」不再靠「把 HTTP 收回本机」实现(那样用户改开关必须重启),
     # 改为在请求层把非本机的明文请求 301 到加密端口,见 Handler._https_redirect
-    if args.host == "127.0.0.1":
-        try:
-            from novel.config import load_settings as _ls2
-            if _ls2().get("lan_access"):
-                args.host = "0.0.0.0"
-        except Exception:  # noqa: BLE001
-            pass
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     srv._base_port = args.port

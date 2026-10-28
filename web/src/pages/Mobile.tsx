@@ -43,6 +43,7 @@ interface LanAdapter {
 
 interface NetworkInfo {
   lan_access: boolean;
+  lan_auto_enabled?: boolean;
   ips: string[];
   port: string;
   primary_ip?: string;
@@ -174,6 +175,8 @@ interface PairInfo {
   legacy_uri: string;
   base_url: string;
   lan_access: boolean;
+  /** 后端自动开启了局域网访问(无需重启) */
+  lan_auto_enabled?: boolean;
   candidates?: string[];
   scheme?: string;
   pin?: string;
@@ -514,7 +517,8 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
       setPair(data);
       setNowSec(Math.floor(Date.now() / 1000));
       setPairQr(await fetchQr(data.uri));
-      if (!data.lan_access) toast('局域网访问未开启，请先开启并重启应用', 'info');
+      if (data.lan_auto_enabled) toast('已自动开启「局域网访问」', 'success');
+      else if (!data.lan_access) toast('局域网访问未开启，请先开启并重启应用', 'info');
     } catch (cause) {
       toast(cause instanceof Error ? cause.message : String(cause), 'error');
     } finally {
@@ -1199,7 +1203,8 @@ function PairPanel({ baseUrl, hint }: { baseUrl: string; hint?: string }) {
       setPair(data);
       setNow(Math.floor(Date.now() / 1000));
       setQr(await fetchQr(data.uri));
-      if (!data.lan_access) toast('局域网访问未开启，先到设置里开启', 'info');
+      if (data.lan_auto_enabled) toast('已自动开启「局域网访问」', 'success');
+      else if (!data.lan_access) toast('局域网访问未开启，先到设置里开启', 'info');
     } catch (cause) {
       toast(cause instanceof Error ? cause.message : String(cause), 'error');
     } finally {
