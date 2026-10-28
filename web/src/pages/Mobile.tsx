@@ -1220,33 +1220,38 @@ function PairPanel({ baseUrl, hint }: { baseUrl: string; hint?: string }) {
   const alive = Boolean(pair && remaining > 0 && qr);
 
   return (
-    <div className="pair-panel">
-      <div className="pair-panel__head">
-        <span>配对二维码</span>
-        {pair && (
-          <span className={alive ? 'pair-panel__ttl' : 'pair-panel__ttl is-expired'}>
-            {alive ? `剩余 ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}` : '已过期'}
-          </span>
-        )}
-      </div>
-      {qr && alive ? (
-        <div className="pair-panel__qr">
-          <img src={qr} alt="配对二维码" />
-          <div className="pair-panel__code">{pair?.code}</div>
-          <div className="pair-panel__tip">手机 App 扫码即连；也可手输上面的 6 位码</div>
-        </div>
+    <div className="mobile-card__row mobile-card__row--top">
+      {alive ? (
+        <QrBox value={qr} size={168} alt="手机配对二维码" />
       ) : (
-        <div className="pair-panel__empty">{busy ? '正在生成…' : '二维码已过期'}</div>
+        <div className="mobile-pair-empty">
+          <QrCode size={36} />
+          <span>{pair ? '配对码已过期' : '等待生成配对码'}</span>
+        </div>
       )}
-      <div className="mobile-actions">
-        <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void generate()}>
-          {busy ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
-          重新生成
-        </button>
+      <div className="mobile-card__main">
+        <div className="mobile-pair-url">{baseUrl || '未检测到可用地址'}</div>
+        {alive ? (
+          <>
+            <div className="mobile-pair-code">
+              {String(pair?.code || '').replace(/(\d{3})(\d{3})/, '$1 $2')}
+            </div>
+            <div className="mobile-hint">剩余 {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')} 后过期 · 配对码仅可使用一次</div>
+          </>
+        ) : (
+          <div className="mobile-hint">{busy ? '正在生成配对码…' : '点下方按钮重新生成'}</div>
+        )}
+        <div className="mobile-actions">
+          <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void generate()}>
+            {busy ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
+            {alive ? '刷新二维码' : '生成配对码'}
+          </button>
+        </div>
+        {hint && <div className="mobile-hint">{hint}</div>}
       </div>
-      {hint && <div className="mobile-hint">{hint}</div>}
     </div>
   );
+
 }
 
 function HotspotTab({ lanAccess, port }: { lanAccess: boolean; port: string }) {
@@ -1349,7 +1354,6 @@ function HotspotTab({ lanAccess, port }: { lanAccess: boolean; port: string }) {
 function TunnelTab() {
   const { toast } = useToast();
   const [status, setStatus] = useState<TunnelInfo | null>(null);
-  const [qr, setQr] = useState('');
   const [autoQr, setAutoQr] = useState('');
   const [autoUrl, setAutoUrl] = useState('');
   const [cmd, setCmd] = useState('');
@@ -1380,10 +1384,8 @@ function TunnelTab() {
         setArgs(data.config?.args?.join(' ') ?? (data.args ?? []).join(' '));
         setRegex(data.config?.url_regex ?? '');
       }
-      if (data.running && data.url) {
-        setQr(await fetchQr(`${data.url.replace(/\/$/, '')}/mobile`));
-      } else {
-        setQr('');
+      if (!(data.running && data.url)) {
+        // 隧道没起来:清掉旧的临时连接页二维码
         setAutoQr('');
         setAutoUrl('');
       }
@@ -1457,7 +1459,7 @@ function TunnelTab() {
     }
   };
 
-  const mobileUrl = status?.running && status.url ? `${status.url.replace(/\/$/, '')}/mobile` : '';
+  const tunnelBase = status?.running && status.url ? status.url.replace(/\/$/, '') : '';
 
   return (
     <div className="mobile-stack">
@@ -1516,13 +1518,11 @@ function TunnelTab() {
             隧道未运行
           </div>
         )}
-        {status?.running && mobileUrl && (
-          <div className="mobile-card__row mobile-card__row--top">
-            <QrBox value={qr} alt="公网隧道二维码" />
-            <div className="mobile-card__main">
-              <div className="mobile-hint">手机任意网络扫码 / 访问：</div>
-              <div className="mobile-url">{mobileUrl}</div>
-            </div>
+        {status?.running && status.url && (
+          <div className="mobile-stack">
+            <div className="mobile-hint">手机在任意网络下扫这一页的配对码即可，隧道地址变了就点「重新生成」：</div>
+            <div className="mobile-url">{tunnelBase}</div>
+            <PairPanel baseUrl={tunnelBase} hint="公网地址每次重启可能变化，以本页二维码为准" />
           </div>
         )}
         {status?.running && !status.url && (
