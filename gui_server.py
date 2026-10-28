@@ -2284,6 +2284,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_subscriptions_refresh()
         if parsed.path == "/api/open_dir":
             return self._api_open_dir()
+        if parsed.path == "/api/firewall_allow":
+            if not self._is_trusted_local():
+                return self._send_json({"ok": False, "error": "仅限电脑本机"}, 403)
+            from novel.doctor import allow_firewall as _af
+            res = _af()
+            return self._send_json(res, 200 if res.get("ok") else 500)
         if parsed.path == "/api/sshd":
             return self._api_sshd_toggle()
         if parsed.path == "/api/tls":

@@ -332,3 +332,35 @@ if __name__ == "__main__":  # 自测:python -m novel.doctor 8899 [https]
     p = int(sys.argv[1]) if len(sys.argv) > 1 else 8899
     sch = sys.argv[2] if len(sys.argv) > 2 else "http"
     print(json.dumps(diagnose(p, False, "127.0.0.1", sch), ensure_ascii=False, indent=2))
+
+
+def allow_firewall() -> dict:
+    """为当前程序加一条「所有网络配置」的入站放行规则。
+
+    热点网卡常被 Windows 归为「公用网络」,只放行"专用"的规则对它无效,
+    所以这里显式 profile=any。需要管理员权限:netsh 会返回 5(拒绝访问),
+    此时给出 needs_admin=True,由前端提示"以管理员身份重试"。
+    """
+    import subprocess
+    if os.name != "nt":
+        return {"ok": False, "needs_admin": False, "error": "仅支持 Windows"}
+    exe = sys.executable or ""
+    if not exe:
+        return {"ok": False, "needs_admin": False, "error": "取不到程序路径"}
+    cmd = [
+        "netsh", "advfirewall", "firewall", "add", "rule",
+        "name=NovelCrawler", "dir=in", "action=allow",
+        f"program={exe}", "enable=yes", "profile=any",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=15, creationflags=0x08000000)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "needs_admin": False, "error": f"执行失败: {exc}"}
+    if proc.returncode == 0:
+        return {"ok": True, "needs_admin": False, "detail": "已放行(专用+公用网络)"}
+    out = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode == 5 or "需要提升" in out or "requires elevation" in out.lower():
+        return {"ok": False, "needs_admin": True,
+                "error": "需要管理员权限:请以管理员身份重启本程序后再点一次"}
+    return {"ok": False, "needs_admin": False, "error": out.strip()[:200] or "未知错误"}

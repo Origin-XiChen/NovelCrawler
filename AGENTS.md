@@ -90,6 +90,8 @@ gh release upload vX.Y.Z <apk>#NovelCrawler-Mobile-X.Y.Z.apk --clobber
   凡改动**需要真机验证**（连接链路、配对、离线包导入、SSH、扫码等），一律先发 **Dev 预发布**，
   由用户测过再转正；无需验证的纯修复/文档改动才可以直接发正式版。
   发 Dev 版的完整动作 = 推 tag → 等 CI → 上传 APK → `gh release edit vX.Y.Z --prerelease`。
+  **Dev 期间版本号保持不变**：反复修就 `git tag -f vX.Y.Z && git push -f origin refs/tags/vX.Y.Z`
+  重建同一个 release（资产覆盖），直到用户验收通过才 `--prerelease=false` 转正、并把版本号留给正式版。
 - **Dev 预发布**：CI 默认建正式 release；要发 Dev 版，CI 成功后执行
   `gh release edit vX.Y.Z --prerelease`。此时 `/releases/latest` 与桌面 `allowPrerelease=false`
   都看不到它，只有开了 Dev 通道的客户端能收到。
@@ -162,7 +164,8 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 - 修复：**热点/校园网下手机永远连不上（4 个候选地址全部无响应）** —— 根因是 `lan_access` 默认 False 时进程只绑 `127.0.0.1`，而该开关原本要重启才生效
 - 其他：`/api/mobile/ping` 响应新增 `lan_access`；`pair/start` 返回 `lan_auto_enabled`
 - 其他：手机设置页「关于」显示 `v1.7.9 · 稳定/Dev` 通道标记，Dev 行文案随状态变化
-- 风险遗留：同 1.7.8（防火墙导致的失败仍需用户放行）
+- 新增：电脑端「热点接力」页加「放行防火墙」按钮（`/api/firewall_allow`，用 `profile=any` 一次覆盖专用+公用网络）
+- 风险遗留：热点仍连不上时，先确认桌面端已升到本版本（旧版只绑 127.0.0.1），再用该按钮放行防火墙
 
 ### 1.7.8 — 2026-10-28
 - 状态：已发布

@@ -1350,6 +1350,23 @@ function HotspotTab({ lanAccess, port }: { lanAccess: boolean; port: string }) {
             <RefreshCw size={14} className={loading ? 'spin' : undefined} />
             重新检测
           </button>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            title="热点网卡常被归为「公用网络」，只放行专用网络的规则对它无效"
+            onClick={async () => {
+              try {
+                const res = await apiPost<{ ok: boolean; detail?: string; error?: string; needs_admin?: boolean }>('/api/firewall_allow', {});
+                if (res.ok) toast(res.detail || '已放行防火墙', 'success');
+                else toast(res.needs_admin ? '需要管理员权限：请以管理员身份重启后再点' : (res.error || '放行失败'), 'error');
+              } catch (cause) {
+                toast(cause instanceof Error ? cause.message : String(cause), 'error');
+              }
+            }}
+          >
+            <ShieldCheck size={14} />
+            放行防火墙
+          </button>
         </div>
       </div>
     </div>
