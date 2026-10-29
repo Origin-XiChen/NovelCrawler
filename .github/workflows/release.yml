@@ -19,6 +19,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Release 的创建者由令牌决定：默认 GITHUB_TOKEN 会把作者显示为
+      # github-actions[bot]。正式版强制使用 Origin-XiChen 的 PAT（RELEASE_TOKEN），
+      # Dev 版允许回退到 GITHUB_TOKEN，但会在日志里警告。
+      - name: Require release token for stable releases
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+        shell: bash
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::正式版 Release 必须配置 RELEASE_TOKEN（Origin-XiChen 的 PAT），否则会以 github-actions[bot] 发布"
+            exit 1
+          fi
+
+      - name: Warn when dev release uses the bot identity
+        if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-')
+        shell: bash
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::warning::未配置 RELEASE_TOKEN，本次 Dev Release 由 github-actions[bot] 创建（正文仍会带署名）"
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -56,8 +80,27 @@ jobs:
       - name: Build and publish
         run: npm run dist:publish
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Sign release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          SIGN="发布：Origin-XiChen"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            BODY="$(gh release view "$TAG" --json body --jq .body)"
+            if [[ "$BODY" != *"$SIGN"* ]]; then
+              {
+                printf '%s\n' "$BODY"
+                printf '\n---\n%s\n' "$SIGN"
+              } > release-notes.md
+              gh release edit "$TAG" --notes-file release-notes.md
+            fi
+          fi
 
   android:
     needs: windows
@@ -136,7 +179,7 @@ jobs:
       - name: Upload APK to GitHub Release
         if: steps.signing.outputs.enabled == 'true' && startsWith(github.ref, 'refs/tags/v')
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           gh release upload "$GITHUB_REF_NAME" \
