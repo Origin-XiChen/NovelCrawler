@@ -170,97 +170,15 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
 
-### 1.7.10-dev.13 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 修复：**启动即崩「Attempted to register a second handler for 'updater:set-prerelease'」**——dev.11 把 updater 的四个 IPC 全部收进 `updater.init()`，但 `main.js` 里还留着 `set/get-prerelease` 两行，Electron 对同一通道重复 `handle` 直接抛错 → `bootstrap` 失败 → 弹「启动失败」。现删除重复注册，并在 `updater.init()` 里用 `removeHandler` + `handle` 做幂等注册兜底
-- 修复：后端子进程读线程 `UnicodeDecodeError: 'gbk' codec can't decode byte 0x87`——`doctor.py` / `gui_server.py` 的 `subprocess.run(text=True)` 按系统代码页解码，遇到非本地编码输出就抛；统一补 `errors="replace"`（`_run` 固定 utf-8）
-- 其他：启动失败对话框标题改英文 `NovelCrawler 启动失败`
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.12 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 修复：**GitHub Releases 列表顺序不可信**——实测 `v1.7.10-dev.11` 在 `/releases` 返回里排第 9 位（前面是 dev.9…dev.2），发布页同样如此；手机端 `fetchLatestApk` 原来按"列表里第一条带 APK 的"取，会一直停在 dev.9。改为按版本号降序排序后再取最高版本，`per_page` 提到 100
-- 说明：桌面端 `updates.pickLatest` 一直是全量比版本，天然不受顺序影响；`releases.atom` 的顺序反而是对的（dev.11 在首位）
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.11 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 新增：**自建应用内更新下载器**（`desktop/updates.js`）——GitHub Releases API 自己查最新版（支持 Dev 预发布），HTTPS 直下 + `Range` 断点续传，进度按"已落盘字节"计算**只增不减**；下载完按 GitHub `digest`(sha256) 校验，再调系统 NSIS 安装向导并退出应用让文件解锁
-- 修复：进度归零/装不上的根因（electron-updater 续传重报 + `quitAndInstall` 静默失败）不再适用——桌面端已完全不依赖 `autoUpdater` 的下载/安装链路
-- 其他：侧栏 `UpdateCard` 与设置页共用同一状态机（available → downloading → downloaded），显示已下载/总大小与实时速度；下载中 200ms 节流 + 每 1MB 补报
-- 验证：本地 HTTP 桩测试 8MB 包在 2.5MB 处断流 → 自动续传、进度 0 次倒退、sha256 通过；重复下载直接复用；digest 不符时报错并删除 `.part`
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.10 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 修复：**电脑端更新进度条与实际不符**——应用内下载（electron-updater `downloadUpdate` + `quitAndInstall`）在真机上表现为「下满 100% 又归零」「重启还是旧版本」。原因是分段续传遇到重试会把 `download-progress` 从 0 重报，安装器被取消/文件占用时 `quitAndInstall` 静默失败。现**统一改为手动更新**：只检查是否有新版，点「打开发布页」去浏览器下载安装包
-- 修复：**两套更新入口不一致**——dev.8 只改了设置页（去下载），侧栏 `UpdateCard` 仍保留「下载更新 / 进度条 / 重启安装」，用户看到的仍是旧流程。现侧栏、设置页、`updater.js` 三处统一：`IN_APP_UPDATE=false`，`updater:download` / `updater:install` 置为空操作
-- 其他：`installAttempted`（上次安装未生效拦截）仅在应用内安装模式下生效，避免历史残留值把「发现新版本」永久变成报错
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.9 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 修复：**手机提示「离线包版本过新」无法导入**——dev.1 为让封面生效把后端 `BUNDLE_VERSION` 提到 2，但手机端 `SUPPORTED_BUNDLE_VERSION` 仍是 1，包被判"太新"。现两端统一为 2（`transfer.ts` 与 `localImport.ts`）
-- 修复：后端离线包**缓存键没带协议版本**，改 `BUNDLE_VERSION` 不会失效旧缓存（封面改了也拿不到）——缓存键现在包含 `v{BUNDLE_VERSION}`
-- 其他：版本不匹配的报错改为带具体版本（「包 v2，App 支持 v1」），并明确指出该升哪一端
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.8 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 新增：**同步中心**（手机 `/sync` 改版）——资源区列出「未下载 / 可更新 / 封面过期」，支持单项与「全部更新」；进度区保留回传入口；顶部显示电脑在线状态与上次同步时间。后端 `/api/mobile/catalog` 增加 `cover_mtime`/`has_cover`，封面变化据此判定
-- 新增：**电脑离线检测**——`lib/serverStatus.ts` 全局心跳（15s + 可见性变化立即探测，失败重试 2 次），书架头部显示「电脑在线 / 正在连接 / 电脑离线」，同步中心的按钮在离线时禁用
-- 修复：**更新改为纯手动**——移除手机端自动更新横幅、桌面端启动自动检查（`AUTO_CHECK=false`），桌面「下载更新/重启安装」改为「去下载」打开 Releases 页，规避"下载到 100% 又归零 / 重启仍是旧样式"
-- 风险遗留：漫画「同步后看不了」仍待复现；桌面自动安装链路已停用，不再排查
-
-### 1.7.10-dev.7 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 新增：**漫画整本下载**——`/api/mobile/bundle?kind=comic&title=X&all=1` 一次把该书全部话按序打进同一个包（`pages/` 连续编号 + `chapters[{label,from,pages}]`），电脑书库漫画卡片改为「整本 (N 话)」一键下载
-- 新增：**书架按「书」聚合 + 批量删除**——同一漫画的多话合并为一行（显示 `N 话 · M 页`，整本包优先作为打开入口，旧数据标「逐话导入」）；顶部「选择」进入多选，底部工具条支持全选/删除所选，删一本会清掉它名下所有离线包
-- 修复：小说离线封面——`novel_bundle` 走 `covers.ensure_cover`（缓存→EPUB 内嵌→来源→**本地生成**），纯 TXT 也有封面；`BUNDLE_VERSION` 1→2 让旧缓存失效、重新打包
-- 风险遗留：漫画「同步后看不了」仍待复现（整本下载可绕开逐话包）
-
-### 1.7.10-dev.6 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 修复：**安装向导关不掉 / 装完仍是旧版**——`updater:install` 调 `quitAndInstall(false, true)`，第一个参数是 `isSilent`；本项目 `nsis.oneClick=false`，非静默调用会弹出「欢迎→选目录→安装→完成」整套向导，用户一取消就前功尽弃，下次启动又提示同一版本。改为 `quitAndInstall(true, true)`（安装器收到 `/S` 静默安装，装完 `--force-run` 自动拉起）
-- 修复：`compareVersion` 把「无预发布标记」当成 `-1`，导致正式版 `1.7.10` 被判定**小于** `1.7.10-dev.5`，Dev 通道用户永远升不到对应正式版；改为 `null` 表示「比任何 dev 号都大」，与手机端 `compareVersions` 规则对齐
-- 新增：安装结果校验——`updater:install` 前把待装版本写入 `userData/updater.json` 的 `installAttempted`；重启后若当前版本仍低于该值，`update-available` 改为报「上次安装未生效」并提示手动下载，不再无声循环。启动时若版本已追上则自动清除标记
-- 其他：`updater.json` 改为合并写入（`readSettings`/`writeSettings`），避免写 `installAttempted` 时把 `allowPrerelease` 冲掉
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.5 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 修复：**更新死循环**——桌面端 `update-available` 未校验版本，feed 给的版本等于/低于当前版本时仍提示更新（装完还提示）；现改为 `compareVersion` 比较，非更新直接回 `not-available`
-- 修复：手机端 release 的 tag 与 APK 实际版本不一致时（例如 tag 升了但挂的是旧 APK）会无限提示；现校验资产文件名里的版本，不一致就跳过并不提示
-- 其他：手机更新横幅「稍后再说」记到 `localStorage`，同一版本不再反复弹
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.4 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 修复：**后端加全局异常兜底**（`Handler._safe_dispatch`）——此前任何处理函数抛异常都冒泡到 `socketserver`，连接被直接关闭、一个字节不回，客户端报「这个地址没有响应 / ERR_EMPTY_RESPONSE」，把一堆真实 bug 伪装成网络问题。现在统一打 traceback + 回 500 JSON（`send_response` 覆写置 `_responded`，响应已开始就不再补错误体）
-- 修复：`POST /api/comic_subscriptions/pending` 把 `parsed.query`(str) 当 dict 传，**必然 AttributeError**；`_body()` 改为强制返回 dict（新增 `allow_empty`），非对象 JSON 一律 400，并收归 8 处自行 `json.loads(rfile.read())` 的接口；`?ch=abc` 类参数（3 处）改走 `_qs_int`
-- 修复：**SSRF/开放代理**——`/api/cover`、`/api/comic_img`、`_epub_online_fetch` 只校验 `startswith("http")` 就把远端响应原样回给调用方，已实测可借它读到本机 `/api/settings`、内网与 `169.254.169.254`；新增 `_is_public_host()` + `_remote_url_error()` 要求解析结果全部 `is_global`
-- 修复：`add_custom_source` 零校验（`POST /api/sources {}` 会落盘无 name 的源，导致书源列表/测试书源/候选源三接口全 `KeyError`）；`load_all_sources` 过滤残缺条目；WebRTC 回环桥接改用 `ProxyHandler({})`（Windows 下 `proxy_bypass('127.0.0.1')` 恒为 False，配了远程代理后手机直连通道整条失效）
-- 其他：`comic_bundle` 的 title 兜底改为 `basename(dirname(src))`，让 manifest id 由构造保证等于 `comic:<目录名>/<文件名>`；实测五处口径（catalog / bundle / 手机两条导入路径 / 桌面 `Comics.tsx`）完全一致，双向进度回传闭环通过
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.3 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 修复：同步管理页元素贴边——该页用了根本不存在的 `.page/.page-head` 类，等于没有内边距；改为 `.sync-page`（与 library/settings 同套 `max-width + 16px 内边距 + 安全区`）
-- 其他：手机端名称全部英文化——`strings.xml` 的 `app_name`/`title_activity_main` 与 `manifest.webmanifest` 的 `name`/`short_name` 由「小说管家」改为 `NovelCrawler`（`capacitor.config.ts` 早已是英文）
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.2 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 修复：设置页版本号与通道混显示（切换 Dev 开关会让"版本"看起来变了）——版本号原样显示，另用独立 `开发版` 标签；「接收 Dev 版本」改为「更新通道」，右侧加 `稳定/Dev` 胶囊；装了 dev 构建但通道为稳定时给出说明
-- 修复：同步管理页排布——摘要改两列+电脑独占一行；行内百分比移到标题右侧、`待回传` 移到次行标签、进度条通栏、章节名单行省略
-- 风险遗留：漫画「同步后看不了」仍待复现
-
-### 1.7.10-dev.1 — 2026-10-29
-- 状态：已发布（Dev 预发布）
-- 新增：封面闭环——`covers.ensure_cover` 新增"本地生成"兜底（标题+渐变 300x420 PNG），同步包与离线包都带 `cover`，手机书架直接显示；手机「同步管理」显示上次同步时间；阅读后 4 秒防抖自动回传（失败 8 秒后补一次）
-- 修复：设置页 `.switch` 类**根本没有样式**（Dev 开关是不可见的空 span）；漫画阅读器禁用长按保存/系统菜单
-- 其他：统一动效层（页面 6px 淡入、列表错峰入场、按压 0.985 反馈、进度条宽度缓动），全部包在 `prefers-reduced-motion` 内
-- 风险遗留：漫画「同步后看不了」仍待复现
+### 1.7.10 — 2026-10-29
+- 状态：已发布（正式版）。经 dev.1…dev.13 十三轮真机验证后转正
+- **更新链路重写**：桌面端不再用 electron-updater 下载/安装。新增 `desktop/updates.js`——GitHub Releases API 查版本（支持 Dev 预发布）、HTTPS + `Range` 断点续传、进度按"已落盘字节"计算**只增不减**、GitHub `digest` sha256 校验、下载完调系统 NSIS 向导并退出应用。侧栏 `UpdateCard` 与设置页共用 available→downloading→downloaded 状态机，显示已下载/总大小 + 实时速度
+- **版本选择规则**：桌面 `pickLatest` / 手机 `fetchLatestApk` 都改为**按版本号排序取最高**。GitHub `/releases` 返回顺序并不可信（实测 dev.11 排第 9 位），"取第一条"会永远停在旧版本
+- **打包与同步**：漫画整本下载（`kind=comic&all=1`，页连续编号 + `chapters`）；书架按「书」聚合 + 多选批量删除；封面闭环（`ensure_cover` 本地生成兜底，同步包/离线包都带 `cover`，catalog 带 `cover_mtime`）；手机同步中心（未下载/可更新/封面过期 + 全部更新）；电脑离线检测（15s 心跳，离线禁用同步按钮）；`BUNDLE_VERSION` 1→2 且进入后端缓存键
+- **手机 UI/UX**：`.switch` 补样式（此前是不可见空 span）；出版本/通道路径分离（版本号原样 + `开发版` 标签 + `稳定/Dev` 胶囊）；同步页重排与边距修复；统一动效层（6px 淡入/错峰/按压 0.985，包在 `prefers-reduced-motion` 内）；漫画禁长按保存；端上名称全部英文化（`app_name`/manifest）
+- **后端健壮性**：`_safe_dispatch` 全局异常兜底（未捕获异常会让连接被直接关闭，客户端误报"地址没有响应"）；`_body()` 强制 dict + `_qs_int`；SSRF 防护（`_is_public_host`，要求解析结果全部 `is_global`）；`add_custom_source` 校验；WebRTC 回环桥接改用空 `ProxyHandler`
+- 修复事故：**dev.11/dev.12 启动即崩**（`main.js` 与 `updater.init()` 重复注册 `updater:set-prerelease`，Electron 重复 `handle` 直接抛错）→ 删除重复注册 + `removeHandler` 幂等 + `init` 外层 try/catch（更新模块故障不再阻断启动）；后端子进程 `text=True` 按 gbk 解码抛 `UnicodeDecodeError` → 统一补 `errors="replace"`
+- 风险遗留：漫画「同步后看不了」未复现（整本下载可绕开逐话包）
 
 ### 1.7.9 — 2026-10-29
 - 状态：已发布（正式版）。经 dev.1/dev.2/dev.3 三轮真机验证后转正
