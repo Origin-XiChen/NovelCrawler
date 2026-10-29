@@ -410,6 +410,7 @@ export default function ComicReaderPage() {
                 src={pageSrc}
                 alt={`第 ${active} 页`}
                 draggable={false}
+                onContextMenu={(event) => event.preventDefault()}
                 onLoad={() => setPageLoading(false)}
                 onError={() => {
                   setPageLoading(false);

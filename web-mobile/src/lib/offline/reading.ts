@@ -3,6 +3,7 @@
  * 全程不联网;EPUB 的图片/字体地址换成 blob,和电脑端渲染结果一致。
  */
 import { getBook, getProgress, putProgress, releaseZip, zipOf, type LocalBook, type LocalProgress } from './db';
+import { scheduleSync } from './sync';
 
 /** 与 novel/mobile_bundle.py 的 _ASSET_RE 同一条规则 */
 const ASSET_RE = /\/api\/epub_asset\?[^"'()\s]*?[&?]path=([^"'()\s)]+)/g;
@@ -163,6 +164,7 @@ export async function writeLocalProgress(book: LocalBook, input: LocalProgressIn
     if (ratio >= 0.98) chapters[key] = 1;
     else if (ratio > 0) chapters[key] = Math.max(chapters[key] || 0, ratio);
   }
+  scheduleSync();
   await putProgress({
     bookId: book.id,
     kind: book.kind,

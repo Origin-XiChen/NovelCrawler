@@ -48,6 +48,8 @@ interface SnapshotBook {
   chapters?: number;
   has_data?: boolean;
   data: string;
+  /** 包内封面路径(covers/xxx),没有则由 App 用首字渐变兜底 */
+  cover?: string;
 }
 
 export interface LocalImportProgress {
@@ -636,6 +638,16 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
     const isEpub = /\.epub$/i.test(item.file) || chapters.some((c) => !!c.html);
     const fmt: 'txt' | 'epub' = isEpub ? 'epub' : 'txt';
     const id = `novel:${item.file}`;
+    // 封面:整包里自带 covers/xxx,先读出来,后面写内层 manifest 时要引用它
+    let coverBytes: Uint8Array | null = null;
+    let coverArc = '';
+    if (item.cover) {
+      const coverFile = zip.file(item.cover) || zip.file(decodeURIComponent(item.cover));
+      if (coverFile) {
+        coverBytes = await coverFile.async('uint8array');
+        coverArc = 'cover.jpg';
+      }
+    }
     // 重新打包成 App 认的布局:manifest.json + chapters/00001.json
     const bundle = new JSZip();
     bundle.file('manifest.json', JSON.stringify({
@@ -647,11 +659,12 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
       chapters: chapters.map((c, i) => ({ idx: i + 1, title: c.title || `第${i + 1}章` })),
       total: chapters.length,
       assets: {},
-      cover: '',
+      cover: coverArc,
       src_size: item.size || 0,
       src_mtime: 0,
       generated: Math.floor(Date.now() / 1000),
     }));
+    if (coverBytes) bundle.file('cover.jpg', coverBytes);
     chapters.forEach((c, i) => {
       bundle.file(`chapters/${String(i + 1).padStart(5, '0')}.json`, JSON.stringify(c));
     });
@@ -666,7 +679,7 @@ async function importSnapshotZip(zip: JSZip, manifest: BundleManifest): Promise<
       total: chapters.length,
       chapters: chapters.map((c, i) => ({ idx: i + 1, title: c.title || `第${i + 1}章` })),
       assets: {},
-      coverArc: '',
+      coverArc,
       size: item.size || blob.size,
       srcMtime: 0,
       srcSize: item.size || 0,

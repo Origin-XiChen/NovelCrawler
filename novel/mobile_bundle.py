@@ -93,8 +93,10 @@ def _epub_cover(src: str) -> str:
 def _add_sidecar_cover(zf: zipfile.ZipFile, fname: str, assets: dict[str, str]) -> str:
     """把下载时缓存的封面放进离线包(EPUB 没内嵌封面时的兜底 / TXT 唯一来源)。"""
     try:
-        from .covers import find_cover
-        path = find_cover(fname)
+        # ensure_cover 会依次尝试「缓存 → EPUB 内嵌 → 来源地址 → 现场生成」,
+        # 所以纯 TXT 也能在这里拿到一张像样的封面(手机书架不再只有首字)。
+        from .covers import ensure_cover
+        path = ensure_cover(fname)
         if not path:
             return ""
         with open(path, "rb") as f:

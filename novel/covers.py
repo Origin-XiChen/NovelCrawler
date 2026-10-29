@@ -213,6 +213,67 @@ def has_cover(src: str) -> bool:
     return ok
 
 
+def _generate_cover(title: str, key: str) -> str:
+    """本地生成一张封面(标题 + 渐变),体积 <50KB。
+
+    纯 TXT 书在任何来源都没有封面图,不生成的话手机书架只能显示首字方块。
+    配色由书名散列决定,同一本书每次生成结果一致。
+    """
+    base = _cache_dir()
+    if not base:
+        return ""
+    path = os.path.join(base, key + ".png")
+    try:
+        from PIL import Image, ImageDraw, ImageFont  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return ""
+    width, height = 300, 420
+    seed = sum(ord(ch) for ch in title) if title else 0
+    palettes = [
+        ((246, 240, 231), (176, 96, 62)),
+        ((238, 243, 246), (58, 96, 130)),
+        ((243, 240, 246), (96, 74, 130)),
+        ((240, 246, 240), (62, 118, 88)),
+        ((250, 243, 233), (168, 122, 58)),
+    ]
+    bg, accent = palettes[seed % len(palettes)]
+    img = Image.new("RGB", (width, height), bg)
+    draw = ImageDraw.Draw(img)
+    for y in range(height):  # 竖向渐变
+        ratio = y / height
+        draw.line([(0, y), (width, y)],
+                  fill=tuple(int(bg[i] + (accent[i] - bg[i]) * ratio * 0.35) for i in range(3)))
+    draw.rectangle([0, 0, width, 6], fill=accent)
+
+    def _font(size: int):
+        for name in ("msyh.ttc", "msyhbd.ttc", "simhei.ttf", "arial.ttf"):
+            try:
+                return ImageFont.truetype(name, size)
+            except Exception:  # noqa: BLE001
+                continue
+        return ImageFont.load_default()
+
+    text = (title or "未命名")[:40]
+    per_line = 6 if len(text) <= 18 else 7
+    lines = [text[i:i + per_line] for i in range(0, min(len(text), per_line * 4), per_line)]
+    font = _font(30 if len(lines) <= 3 else 26)
+    size = getattr(font, "size", 26)
+    y = (height - sum(size + 10 for _ in lines)) // 2
+    for line in lines:
+        try:
+            box = draw.textbbox((0, 0), line, font=font)
+            width_text = box[2] - box[0]
+        except Exception:  # noqa: BLE001
+            width_text = len(line) * size
+        draw.text(((width - width_text) / 2, y), line, font=font, fill=(38, 34, 32))
+        y += size + 10
+    try:
+        img.save(path, "PNG", optimize=True)
+    except OSError:
+        return ""
+    return path
+
+
 def ensure_cover(src: str, cover_url: str = "") -> str:
     """确保缓存存在：缓存 → EPUB 内嵌 → 来源地址 → 书架地址。"""
     name = os.path.basename(src)
@@ -231,7 +292,8 @@ def ensure_cover(src: str, cover_url: str = "") -> str:
             data, ctype = fetch_cover(url)
             if data:
                 return save_cover(name, data, ctype)
-    return ""
+    # 最后兜底:自己画一张,保证手机书架/离线包一定有封面
+    return _generate_cover(_title_of(name), _key(name))
 
 
 def cover_bytes_for(file_name: str, cover_url: str = "") -> bytes:

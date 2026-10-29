@@ -24,6 +24,16 @@ function chaptersOf(record: LocalProgress | SharedProgressRecord): Record<string
 }
 
 /** 一次尽力而为的同步:先取电脑上的进度(本机缺的或更旧的),再回传本地记录。 */
+export const LAST_SYNC_KEY = 'nc.sync.last';
+
+export function lastSyncAt(): number {
+  try {
+    return Number(localStorage.getItem(LAST_SYNC_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function syncProgress(): Promise<SyncResult> {
   const result: SyncResult = { pushed: 0, pulled: 0, failed: 0 };
   if (!getActiveServer()) return result;
@@ -83,9 +93,40 @@ export async function syncProgress(): Promise<SyncResult> {
       result.failed += 1;
     }
   }
+  try {
+    localStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
+  } catch {
+    // 隐私模式忽略
+  }
   return result;
 }
 
 export function dirtyCount(records: LocalProgress[]): number {
   return records.filter((item) => item.dirty).length;
+}
+
+let syncTimer: number | null = null;
+let syncRunning = false;
+
+/**
+ * 延迟自动回传:阅读时每翻一章都会写一次本地进度,立刻上传会把请求打爆,
+ * 所以这里做 4 秒防抖 + 单飞(同一时刻只跑一个),失败安静重试一次。
+ * 用户在「同步管理」里手动点同步时走 syncProgress() 本体,不受影响。
+ */
+export function scheduleSync(delay = 4000): void {
+  if (!getActiveServer()) return;
+  if (syncTimer !== null) window.clearTimeout(syncTimer);
+  syncTimer = window.setTimeout(async () => {
+    syncTimer = null;
+    if (syncRunning) return;
+    syncRunning = true;
+    try {
+      await syncProgress();
+    } catch {
+      // 网络抖动:再等 8 秒补一次,仍失败就留给下次阅读或手动同步
+      window.setTimeout(() => { void syncProgress().catch(() => {}); }, 8000);
+    } finally {
+      syncRunning = false;
+    }
+  }, delay);
 }

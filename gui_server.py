@@ -5914,9 +5914,23 @@ class Handler(BaseHTTPRequestHandler):
                     # `window.__SNAP_DATA__["x"] = {...};` 里的 JSON,不再需要副本。
                     zf.writestr(f"data/{fname}.js", js_b)
                     done += len(js_b)
+                    # 封面随包带走:手机导入后书架直接显示,不用回头找电脑
+                    cover_arc = ""
+                    try:
+                        from novel.covers import ensure_cover as _ec
+                        _cov = _ec(fname)
+                        if _cov:
+                            with open(_cov, "rb") as _cf:
+                                _cb = _cf.read()
+                            if _cb:
+                                cover_arc = f"covers/{data_name}"
+                                zf.writestr(cover_arc, _cb, compress_type=_zfs.ZIP_STORED)
+                                done += len(_cb)
+                    except Exception:  # noqa: BLE001
+                        cover_arc = ""
                     meta_books.append({"name": fname, "size": os.path.getsize(fp),
                                        "chs": len(chapters), "has_body": bool(chapters),
-                                       "data": f"data/{data_name}.js"})
+                                       "data": f"data/{data_name}.js", "cover": cover_arc})
                     _report()
                 if with_files:
                     for fname in favs:
@@ -5987,7 +6001,7 @@ class Handler(BaseHTTPRequestHandler):
                         "books": [
                             {"file": b["name"], "title": os.path.splitext(b["name"])[0],
                              "size": b["size"], "chapters": b["chs"], "has_body": b["has_body"],
-                             "data": b["data"]}
+                             "data": b["data"], "cover": b.get("cover", "")}
                             for b in meta_books
                         ],
                     }

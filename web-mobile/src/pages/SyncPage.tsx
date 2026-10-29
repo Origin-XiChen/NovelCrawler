@@ -7,7 +7,7 @@ import {
   type LocalBook,
   type LocalProgress,
 } from '../lib/offline/db';
-import { syncProgress } from '../lib/offline/sync';
+import { lastSyncAt, syncProgress } from '../lib/offline/sync';
 import { continuousPercent } from '../lib/reading-progress';
 import { getActiveServer } from '../lib/connection';
 
@@ -23,6 +23,7 @@ export default function SyncPage() {
   const [records, setRecords] = useState<LocalProgress[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [lastAt, setLastAt] = useState(() => lastSyncAt());
 
   const load = useCallback(async () => {
     const [b, p] = await Promise.all([allBooks(), allProgress()]);
@@ -65,6 +66,7 @@ export default function SyncPage() {
     setNotice('');
     try {
       const result = await syncProgress();
+      setLastAt(lastSyncAt());
       await load();
       setNotice(
         `已回传 ${result.pushed} 条，拉取 ${result.pulled} 条` +
@@ -104,6 +106,9 @@ export default function SyncPage() {
         </div>
       </div>
 
+      <div className="sync-last">
+        {lastAt ? `上次同步：${new Date(lastAt).toLocaleString()}` : '还没有同步过'}
+      </div>
       <div className="sync-actions">
         <button type="button" className="btn btn--sm" disabled={busy || !server} onClick={() => void push()}>
           <CloudUpload size={14} />

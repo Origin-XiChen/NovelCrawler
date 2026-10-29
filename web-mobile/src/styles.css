@@ -2238,6 +2238,9 @@ img {
 }
 
 .comic-page-img {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   display: block;
   flex: 0 0 auto;
   user-select: none;
@@ -3343,3 +3346,71 @@ img {
 .sync-row__bar i{display:block;height:100%;background:var(--accent,#c0663a)}
 .sync-row__pct{font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums}
 .empty-hint{margin:24px 0;text-align:center;font-size:13px;color:var(--text-2)}
+
+/* ==================== 交互基础件：开关 / 进度 ==================== */
+
+/* 开关：之前设置页用了 .switch 但样式根本不存在（等于不可见的空 span） */
+.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 0.22s ease;
+}
+.switch i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+  transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.switch.is-on { background: var(--accent, #c0663a); }
+.switch.is-on i { transform: translateX(18px); }
+.switch:active i { width: 24px; }
+
+/* 进度条统一：宽度变化走缓动，不再瞬移 */
+.sync-row__bar i,
+.sync-mini__bar i,
+.novel-row__progress i,
+.shelf-row__progress i {
+  transition: width 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ==================== 动效：轻、短、可关闭 ==================== */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes page-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes row-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+  /* 页面进入：只动 6px，别做花哨的整屏位移 */
+  .page { animation: page-in 0.22s ease-out both; }
+  /* 列表项依次入场（最多前 8 项，避免长列表延迟） */
+  .shelf-row, .sync-row, .novel-row, .library-row {
+    animation: row-in 0.24s ease-out both;
+  }
+  .shelf-row:nth-child(2), .sync-row:nth-child(2) { animation-delay: 0.02s; }
+  .shelf-row:nth-child(3), .sync-row:nth-child(3) { animation-delay: 0.04s; }
+  .shelf-row:nth-child(4), .sync-row:nth-child(4) { animation-delay: 0.06s; }
+  .shelf-row:nth-child(5), .sync-row:nth-child(5) { animation-delay: 0.08s; }
+}
+
+/* 按压反馈：所有可点卡片/按钮统一，给手感 */
+.btn, .settings-item, .shelf-row__main, .sync-row, .card, .icon-btn {
+  transition: transform 0.12s ease, opacity 0.12s ease, background 0.16s ease;
+}
+.btn:active, .settings-item:active, .shelf-row__main:active,
+.sync-row:active, .card:active, .icon-btn:active {
+  transform: scale(0.985);
+  opacity: 0.92;
+}
+.sync-last{margin:2px 0 10px;font-size:12px;color:var(--text-2)}
