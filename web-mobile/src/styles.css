@@ -3321,11 +3321,6 @@ img {
 .connect-ssh>summary::before{content:'▸ ';color:var(--text-3)}
 .connect-ssh[open]>summary::before{content:'▾ '}
 
-/* 版本通道标记：一眼看出当前装的是稳定版还是 Dev 通道 */
-.channel-badge{padding:2px 8px;border-radius:999px;border:1px solid var(--line);
-  font-size:11.5px;font-weight:600;color:var(--text-2)}
-.channel-badge.is-dev{background:#fdf0e6;border-color:#f0c9a8;color:#a8531f}
-@media (prefers-color-scheme: dark){.channel-badge.is-dev{background:#3a2a1e;border-color:#5b3f2a;color:#f0b98a}}
 
 /* 同步管理 */
 .sync-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
@@ -3414,3 +3409,31 @@ img {
   opacity: 0.92;
 }
 .sync-last{margin:2px 0 10px;font-size:12px;color:var(--text-2)}
+
+/* ===== 设置页：版本号 + 通道标签（两者互不影响） ===== */
+.settings-version{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);
+  font-variant-numeric:tabular-nums}
+.tag-dev{padding:1px 6px;border-radius:5px;font-style:normal;font-size:10.5px;font-weight:600;
+  background:#fdf0e6;color:#a8531f;border:1px solid #f0c9a8}
+.channel-pill{padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;
+  color:var(--text-2);background:var(--line)}
+.channel-pill.is-dev{background:#c0663a;color:#fff}
+.settings-note{margin:8px 12px 0;padding:8px 10px;border-radius:10px;background:var(--line);
+  font-size:12px;line-height:1.5;color:var(--text-2)}
+@media (prefers-color-scheme: dark){
+  .tag-dev{background:#3a2a1e;border-color:#5b3f2a;color:#f0b98a}
+}
+
+/* ===== 同步管理：重排（标题行放百分比，标签挪到次行，进度条通栏） ===== */
+.sync-summary{grid-template-columns:repeat(2,1fr)}
+.sync-summary>div:last-child{grid-column:1 / -1}
+.sync-row{align-items:flex-start}
+.sync-row__title{justify-content:space-between;gap:8px}
+.sync-row__title strong{flex:1;min-width:0}
+.sync-row__pct{font-size:13px;font-weight:600;color:var(--text)}
+.sync-row__meta{display:flex;flex-wrap:wrap;gap:4px 8px;white-space:normal;line-height:1.5}
+.sync-row__bar{margin-top:8px}
+.sync-row>.sync-row__pct{display:none}
+.sync-row__tag{padding:1px 6px;border-radius:5px;font-size:10.5px;font-weight:600;
+  background:#fdf0e6;color:#a8531f}
+.sync-row__chapter{margin-top:2px;font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

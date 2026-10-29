@@ -126,21 +126,21 @@ export default function SyncPage() {
           <div key={book.id} className="sync-row">
             <div className="sync-row__main">
               <div className="sync-row__title">
-                <strong>{book.title}</strong>
-                {dirty && <em>待回传</em>}
+                <strong title={book.title}>{book.title}</strong>
+                <span className="sync-row__pct">{record ? `${percent}%` : '—'}</span>
               </div>
               <div className="sync-row__meta">
-                {book.kind === 'comic' ? `${book.total} 页` : `${book.total} 章`}
-                {record ? ` · 读到 ${record.ch}/${record.total || book.total}` : ' · 未开始'}
-                {record?.chapter ? ` · ${record.chapter}` : ''}
+                <span>{book.kind === 'comic' ? `${book.total} 页` : `${book.total} 章`}</span>
+                <span>{record ? `读到 ${record.ch}/${record.total || book.total}` : '未开始'}</span>
+                {dirty && <span className="sync-row__tag">待回传</span>}
               </div>
+              {record?.chapter && <div className="sync-row__chapter">{record.chapter}</div>}
               {record && (
                 <div className="sync-row__bar">
                   <i style={{ width: `${Math.min(100, percent)}%` }} />
                 </div>
               )}
             </div>
-            <span className="sync-row__pct">{record ? `${percent}%` : '—'}</span>
           </div>
         ))}
       </div>

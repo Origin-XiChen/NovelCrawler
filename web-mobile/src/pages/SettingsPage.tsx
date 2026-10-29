@@ -342,8 +342,10 @@ export default function SettingsPage() {
       <section className="settings-section">
         <div className="settings-section__head">
           <h2>手机 App</h2>
-          <span className={devChannel ? 'channel-badge is-dev' : 'channel-badge'}>
-            v{appVersion} · {devChannel ? 'Dev' : '稳定'}
+          {/* 版本号原样显示,不要和通道混在一起 —— 否则切开关会让"版本"看起来变了 */}
+          <span className="settings-version">
+            v{appVersion}
+            {/-dev\./i.test(appVersion) && <em className="tag-dev">开发版</em>}
           </span>
         </div>
         <div className="settings-card">
@@ -364,10 +366,10 @@ export default function SettingsPage() {
               const next = !devChannel;
               setDevChannel(next);
               try { localStorage.setItem('nc.dev.channel', next ? '1' : '0'); } catch { /* 隐私模式 */ }
-              const isDevBuild = /-dev\.\d+$/i.test(appVersion);
+              const isDevBuild = /-dev\./i.test(appVersion);
               if (next) setNotice('已开启 Dev 通道：会收到预发布版本');
               else if (isDevBuild) {
-                setNotice(`已切回稳定通道；当前仍是 Dev 构建 v${appVersion}，正式版发布后会自动更新`);
+                setNotice(`已切回稳定通道；当前安装仍是开发版 v${appVersion}，正式版发布后会自动替换`);
               } else setNotice('已切回稳定通道');
             }}
           >
@@ -375,15 +377,25 @@ export default function SettingsPage() {
               <FlaskConical size={19} />
             </span>
             <span className="settings-item__main">
-              <b>接收 Dev 版本{devChannel ? ' · 已开启' : ''}</b>
-              <em>{devChannel
-                ? '当前在 Dev 通道：检查更新包含预发布版本'
-                : '当前在稳定通道：只收正式版，点此切到 Dev'}</em>
+              <b>更新通道</b>
+              <em>
+                {devChannel
+                  ? 'Dev：包含预发布版本，可能不稳定'
+                  : '稳定：只接收正式版'}
+              </em>
+            </span>
+            <span className={devChannel ? 'channel-pill is-dev' : 'channel-pill'}>
+              {devChannel ? 'Dev' : '稳定'}
             </span>
             <span className={devChannel ? 'switch is-on' : 'switch'}>
               <i />
             </span>
           </button>
+          {/-dev\./i.test(appVersion) && !devChannel && (
+            <div className="settings-note">
+              当前安装的是开发版构建，稳定通道不会推送新版本；正式版发布后会自动替换。
+            </div>
+          )}
           <button
             type="button"
             className="settings-item"
