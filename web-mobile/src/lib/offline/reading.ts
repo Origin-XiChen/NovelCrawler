@@ -10,7 +10,9 @@ const ASSET_RE = /\/api\/epub_asset\?[^"'()\s]*?[&?]path=([^"'()\s)]+)/g;
 
 const assetUrls = new Map<string, string>();
 const pageUrls = new Map<string, string>();
-const PAGE_CACHE_SIZE = 8;
+// 连续滚动一次会同时显示当前页前后若干页,窗口取 9;缓存留一倍余量,
+// 避免刚滚过的页被淘汰后 blob URL 失效
+const PAGE_CACHE_SIZE = 18;
 
 function arcKey(bookId: string, arc: string): string {
   return `${bookId}::${arc}`;

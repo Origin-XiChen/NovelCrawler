@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   BookOpen,
   Check,
-  ChevronRight,
   Flame,
   Globe2,
   KeyRound,
@@ -51,6 +50,7 @@ const METHODS: { key: Method; label: string; icon: typeof Wifi }[] = [
 ];
 
 const HOTSPOT_PREFIX = '192.168.137.1';
+const HOTSPOT_SAMPLE = '192.168.137.1:8899';
 
 function cleanPairQuery() {
   const url = new URL(window.location.href);
@@ -105,19 +105,21 @@ export default function ConnectPage() {
   const sshTunnelRef = useRef<{ target: string; localPort: number; via: string } | null>(null);
   const tunnelVia = useRef('ssh');
   const [sshPassword, setSshPassword] = useState('');
+  const sshPasswordRef = useRef('');
   const [sshManual, setSshManual] = useState('');
   const [sshHint, setSshHint] = useState('');
-  const doPairRef = useRef<(base: string, pairCode: string) => Promise<void>>(
-    async () => undefined,
-  );
+  const doPairRef = useRef<
+    (base: string, pairCode: string, pin?: string, password?: string) => Promise<void>
+  >(async () => undefined);
   const expired = searchParams.get('expired') === '1';
 
   // 手动重新探测:换网/隧道重启后,不用重新扫码也能把地址切到通的那个
   const reprobe = async (server: ServerEntry) => {
-    const list = [server.baseUrl, ...getCandidates(server)].map((u) => u.replace(/\/+$/, ''));
+    const current = server.baseUrl.replace(/\/+$/, '');
+    const list = [current, ...getCandidates(server)].map((u) => u.replace(/\/+$/, ''));
     const uniq = Array.from(new Set(list.filter(Boolean)));
-    if (uniq.length < 2) {
-      setError('没有其它候选地址可切换');
+    if (!uniq.length) {
+      setError('这台电脑没有可探测的地址');
       return;
     }
     setBusy(server.id);
@@ -128,15 +130,18 @@ export default function ConnectPage() {
         return;
       }
       updateServerBase(server.id, hit);
-      setInfo(`已切到 ${hit.replace(/^https?:\/\//, '')}`);
+      const shown = hit.replace(/^https?:\/\//, '');
+      setInfo(hit === current ? `地址可用：${shown}` : `已切到 ${shown}`);
     } finally {
       setBusy('');
     }
   };
 
   const doPair = useCallback(
-    async (baseInput: string, pairCode: string, pinInput?: string) => {
+    async (baseInput: string, pairCode: string, pinInput?: string, passwordInput?: string) => {
       let probeList: string[] = [];
+      // 密码用 ref 取当前值:doPair 是稳定回调,直接读 state 会永远停在初始的空密码
+      const sshPass = passwordInput ?? sshPasswordRef.current;
       setBusy('pair');
       setError('');
       setInfo('');
@@ -146,11 +151,11 @@ export default function ConnectPage() {
         // ---- 内建 SSH 通道:扫码带了 ssh 账号且用户填了密码时优先走隧道 ----
         // 隧道打通后,电脑的服务端口被映射到手机本机,后面所有请求都指向 127.0.0.1,
         // 校园网 AP 隔离 / 公网 NAT 都不再影响连接,且链路是加密的。
-        if (base.trim() && sshTargetRef.current && sshPassword) {
+        if (base.trim() && sshTargetRef.current && sshPass) {
           const target = sshTargetRef.current;
           setInfo(`正在建立 SSH 通道 ${sshTargetText(target)}…`);
           try {
-            const tun = await sshConnect(target, sshPassword, Number(new URL(base).port) || 80);
+            const tun = await sshConnect(target, sshPass, Number(new URL(base).port) || 80);
             base = `http://127.0.0.1:${tun.localPort}`;
             sshTunnelRef.current = { target: sshTargetText(target), localPort: tun.localPort, via: tunnelVia.current };
             setInfo(`SSH 通道已建立，经 127.0.0.1:${tun.localPort} 连接电脑`);
@@ -168,11 +173,18 @@ export default function ConnectPage() {
           const url = String(raw || '').trim().replace(/\/+$/, '');
           if (url && !probeList.includes(url)) probeList.push(url);
         }
-        const viaTunnel = /^http://////127//.0//.0//.1/.test(base);
+        let viaTunnel = false;
+        try {
+          const host = new URL(base).hostname;
+          viaTunnel = host === '127.0.0.1' || host === 'localhost';
+        } catch {
+          viaTunnel = false;
+        }
         if (!viaTunnel && probeList.length > 1) {
           setInfo('正在探测可用地址…');
           const hit = await pickReachable(probeList);
-          if (hit) base = hit;
+          if (!hit) throw new Error('所有候选地址都不通');
+          base = hit;
           setInfo('');
         }
 
@@ -228,7 +240,7 @@ export default function ConnectPage() {
           candidates: merged,
           pin: result.server?.pin || pairPinRef.current || undefined,
           ssh: sshTargetText(sshTargetRef.current) || result.server?.ssh || undefined,
-          sshPassword: sshPassword || undefined,
+          sshPassword: sshPass || undefined,
           sshTunnel: sshTunnelRef.current || undefined,
         });
         pairCandidatesRef.current = [];
@@ -263,15 +275,21 @@ export default function ConnectPage() {
     pairCandidatesRef.current = parsed.candidates || [];
     pairPinRef.current = parsed.pin || '';
     sshTargetRef.current = parseSshParam(parsed.ssh);
-    if (parsed.sshPassword) setSshPassword(parsed.sshPassword);
+    setSshPassword(parsed.sshPassword || '');
+    sshPasswordRef.current = parsed.sshPassword || '';
+    const sshNeedsPassword = Boolean(sshTargetRef.current) && !parsed.sshPassword;
     setSshHint(sshTargetRef.current
-      ? `已从二维码拿到内建 SSH 通道（${sshTargetText(sshTargetRef.current)}）${parsed.sshPassword ? '与密码' : '，请补填密码'}，将自动走加密隧道`
+      ? `已从二维码拿到内建 SSH 通道（${sshTargetText(sshTargetRef.current)}）${parsed.sshPassword ? '与密码，配对时自动走隧道' : '，密码需要你补填'}`
       : '');
     setAddress(parsed.baseUrl);
     setCode(parsed.code);
     setMode('manual');
+    if (sshNeedsPassword) {
+      setInfo('二维码带了内建 SSH 通道：填密码后点「连接电脑」走加密隧道；留空则明文直连。');
+      return;
+    }
     setInfo('已识别配对二维码，正在连接电脑…');
-    void doPairRef.current(parsed.baseUrl, parsed.code);
+    void doPairRef.current(parsed.baseUrl, parsed.code, undefined, parsed.sshPassword || undefined);
   }, []);
 
   const finishWrtc = async (handshake: WrtcHandshake) => {
@@ -399,15 +417,21 @@ export default function ConnectPage() {
       pairCandidatesRef.current = parsed.candidates || [];
       pairPinRef.current = parsed.pin || '';
       sshTargetRef.current = parseSshParam(parsed.ssh);
-      if (parsed.sshPassword) setSshPassword(parsed.sshPassword);
+      setSshPassword(parsed.sshPassword || '');
+      sshPasswordRef.current = parsed.sshPassword || '';
+      const sshNeedsPassword = Boolean(sshTargetRef.current) && !parsed.sshPassword;
       setSshHint(sshTargetRef.current
-        ? `已从二维码拿到内建 SSH 通道（${sshTargetText(sshTargetRef.current)}）${parsed.sshPassword ? '与密码' : '，请补填密码'}，将自动走加密隧道`
+        ? `已从二维码拿到内建 SSH 通道（${sshTargetText(sshTargetRef.current)}）${parsed.sshPassword ? '与密码，配对时自动走隧道' : '，密码需要你补填'}`
         : '');
       setAddress(parsed.baseUrl);
       setCode(parsed.code);
       setMode('manual');
+      if (sshNeedsPassword) {
+        setInfo('二维码带了内建 SSH 通道：填密码后点「连接电脑」走加密隧道；留空则明文直连。');
+        return;
+      }
       setInfo('已识别配对二维码，正在连接电脑…');
-      void doPairRef.current(parsed.baseUrl, parsed.code);
+      void doPairRef.current(parsed.baseUrl, parsed.code, undefined, parsed.sshPassword || undefined);
       return;
     }
     const base = parseServerAddress(text);
@@ -475,13 +499,21 @@ export default function ConnectPage() {
         <p>电脑负责下载和整理，手机负责阅读。四种连接方式，按你手头的网络挑一种。</p>
       </section>
 
-      {expired && (
-        <div className="banner banner--warn">
-          配对令牌已失效，请重新扫码，或在下面选择电脑重新配对。
+      {(expired || error || info) && (
+        <div className="connect-alerts">
+          {expired && (
+            <div className="banner banner--warn">
+              配对令牌已失效，请重新扫码，或在下面选择电脑重新配对。
+            </div>
+          )}
+          {error && (
+            <div className="banner banner--error" role="alert">
+              {error}
+            </div>
+          )}
+          {info && <div className="banner banner--info">{info}</div>}
         </div>
       )}
-      {error && <div className="banner banner--error">{error}</div>}
-      {info && <div className="banner banner--info">{info}</div>}
 
       <section className="connect-methods">
         <div className="segmented segmented--small connect-method-tabs" role="tablist" aria-label="连接方式">
@@ -550,8 +582,8 @@ export default function ConnectPage() {
                 type="button"
                 className="btn btn--ghost btn--sm"
                 onClick={() => {
-                  setAddress(HOTSPOT_PREFIX);
-                  setInfo('补上电脑端口后点「连接电脑」（电脑端热点卡片上有完整地址，如 192.168.137.1:8899）。');
+                  setAddress(HOTSPOT_SAMPLE);
+                  setInfo('默认端口 8899；如果电脑改过端口，按热点卡片上的完整地址修改。');
                 }}
               >
                 <KeyRound size={15} />
@@ -668,7 +700,7 @@ export default function ConnectPage() {
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              placeholder={method === 'hotspot' ? '192.168.137.1:8899' : method === 'tunnel' ? 'https://xxxx.cpolar.top' : '192.168.1.5:8899'}
+              placeholder={method === 'hotspot' ? HOTSPOT_SAMPLE : method === 'tunnel' ? 'https://xxxx.cpolar.top' : '192.168.1.5:8899'}
               value={address}
               onChange={(event) => setAddress(event.target.value)}
             />
@@ -716,7 +748,10 @@ export default function ConnectPage() {
                   autoComplete="current-password"
                   placeholder="填了就经 SSH 隧道连接"
                   value={sshPassword}
-                  onChange={(event) => setSshPassword(event.target.value)}
+                  onChange={(event) => {
+                    setSshPassword(event.target.value);
+                    sshPasswordRef.current = event.target.value;
+                  }}
                 />
               </label>
             </details>
@@ -765,34 +800,32 @@ export default function ConnectPage() {
                       : server.baseUrl.replace(/^https?:\/\//, '')}
                   </div>
                 </div>
-                {busy === server.id ? (
-                  <Loader2 size={18} className="spin" />
-                ) : (
-                  <ChevronRight size={18} className="muted" />
-                )}
-                <button
-                  type="button"
-                  className="icon-btn"
-                  title="重新探测可用地址"
-                  aria-label="重新探测可用地址"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void reprobe(server);
-                  }}
-                >
-                  <RefreshCw size={15} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn server-card__delete"
-                  aria-label={`删除 ${server.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    deleteServer(server);
-                  }}
-                >
-                  <Trash2 size={16} />
-                </button>
+                {busy === server.id && <Loader2 size={18} className="spin" />}
+                <div className="server-card__actions">
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title="重新探测可用地址"
+                    aria-label="重新探测可用地址"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void reprobe(server);
+                    }}
+                  >
+                    <RefreshCw size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn server-card__delete"
+                    aria-label={`删除 ${server.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteServer(server);
+                    }}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

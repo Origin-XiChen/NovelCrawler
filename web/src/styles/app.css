@@ -3297,10 +3297,18 @@ a {
 }
 
 /* ---------- 手机连接 ---------- */
+.mobile-tabs-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  padding: 10px 0;
+  background: var(--bg);
+}
+
 .mobile-tabs {
   display: flex;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .mobile-tabs button {
@@ -3314,6 +3322,11 @@ a {
   flex-direction: column;
   gap: 14px;
   max-width: 860px;
+}
+
+/* 高级设置沉到页面后部:首屏先给扫码配对和已配对设备 */
+.mobile-stack > .mobile-panel--advanced {
+  order: 8;
 }
 
 .mobile-card {

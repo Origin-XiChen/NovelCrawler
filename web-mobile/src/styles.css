@@ -521,6 +521,22 @@ img {
   background: var(--surface-2);
 }
 
+/* 错误/进度提示贴着页面顶边:表单在下方,滚下去操作时也要能看见结果 */
+.connect-alerts {
+  position: sticky;
+  top: calc(6px + var(--safe-top));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.connect-alerts .banner {
+  margin: 0;
+  box-shadow: 0 8px 24px rgba(20, 22, 24, 0.12);
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -791,9 +807,19 @@ img {
   white-space: nowrap;
 }
 
+.server-card__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.server-card__actions .icon-btn {
+  width: 38px;
+  height: 38px;
+}
+
 .server-card__delete {
-  width: 34px;
-  height: 34px;
   color: var(--muted);
 }
 
@@ -2182,13 +2208,21 @@ img {
   color: var(--reader-text);
 }
 
-/* 漫画阅读器顶栏:之前完全没有定位规则,absolute + top:auto 会落在静态位置、
-   也不避让状态栏 —— 看起来就像"两个顶栏叠在一起"。这里与 .reader-top 对齐。 */
+/* 漫画阅读器的顶栏/底栏都要显式定位:.reader-bar 是 absolute,缺 top/bottom 时
+   会落到 flex 容器的静态位置(左上角) —— 底栏会盖在顶栏上,看起来像"两个顶栏"。 */
 .comic-top {
   top: 0;
   padding: calc(8px + var(--safe-top)) 10px 8px;
   border-bottom: 1px solid var(--reader-line, var(--line));
   transform: translateY(-8px);
+}
+
+.comic-bottom {
+  bottom: 0;
+  justify-content: space-between;
+  padding: 7px 8px calc(7px + var(--safe-bottom));
+  border-top: 1px solid var(--reader-line, var(--line));
+  transform: translateY(8px);
 }
 
 .comic-top__title {
@@ -2259,7 +2293,78 @@ img {
   height: 100dvh;
 }
 
-.comic-reader.is-night .comic-page-img {
+/* 连续滚动:所有页先按估算比例占位,只有当前页附近才真正取图,
+   这样既能整本往下滚,又不会把几百张 JPEG 同时解进内存。 */
+.comic-stage--scroll {
+  display: block;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.comic-stage--scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.comic-scroll {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.comic-scroll__page {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 920px;
+  overflow: hidden;
+  background: #101214;
+}
+
+.comic-scroll__page img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.comic-scroll__pending {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #5f6261;
+}
+
+.comic-scroll__retry {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  border: 0;
+  background: #141618;
+  color: #9a9c9a;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.comic-scroll__retry strong {
+  color: #d8d8d2;
+  font-size: 13px;
+}
+
+.comic-reader.is-night .comic-page-img,
+.comic-reader.is-night .comic-scroll__page img {
   filter: invert(0.9) hue-rotate(180deg) brightness(0.92);
 }
 

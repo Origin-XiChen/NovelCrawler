@@ -680,7 +680,7 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
         </div>
       )}
 
-      <details className="mobile-details mobile-card" open>
+      <details className="mobile-details mobile-card mobile-panel--advanced">
         <summary>安全通道（自签 HTTPS / 内建 SSH）</summary>
         <div className="mobile-stack" style={{ marginTop: 12 }}>
       <div className="mobile-card">
@@ -1135,7 +1135,7 @@ function LanTab({ lanAccess, onLanChange }: { lanAccess: boolean; onLanChange: (
         )}
       </div>
 
-      <details className="mobile-details mobile-card">
+      <details className="mobile-details mobile-card mobile-panel--advanced">
         <summary>
           <Terminal size={16} />
           加密通道（SSH 转发）
@@ -2220,6 +2220,7 @@ export function MobilePage() {
   const [tab, setTab] = useState<Tab>('lan');
   const [lanAccess, setLanAccess] = useState(false);
   const [port, setPort] = useState('');
+  const pageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void apiGet<NetworkInfo>('/api/network')
@@ -2229,6 +2230,12 @@ export function MobilePage() {
       })
       .catch(() => undefined);
   }, []);
+
+  // 切页签时回到顶部:长页切到短页不会停在半空
+  useEffect(() => {
+    const scroller = pageRef.current?.closest('.content');
+    if (scroller instanceof HTMLElement) scroller.scrollTo({ top: 0 });
+  }, [tab]);
 
   const content =
     tab === 'lan' ? (
@@ -2244,7 +2251,7 @@ export function MobilePage() {
     );
 
   return (
-    <div className="page">
+    <div className="page" ref={pageRef}>
       <div className="page-head">
         <div>
           <h1 className="page-title">手机连接</h1>
@@ -2252,20 +2259,22 @@ export function MobilePage() {
         </div>
       </div>
 
-      <div className="segmented mobile-tabs" role="tablist">
-        {TABS.map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.value}
-            className={tab === item.value ? 'is-on' : ''}
-            onClick={() => setTab(item.value)}
-          >
-            <item.icon size={14} />
-            {item.label}
-          </button>
-        ))}
+      <div className="mobile-tabs-wrap">
+        <div className="segmented mobile-tabs" role="tablist">
+          {TABS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.value}
+              className={tab === item.value ? 'is-on' : ''}
+              onClick={() => setTab(item.value)}
+            >
+              <item.icon size={14} />
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {content}

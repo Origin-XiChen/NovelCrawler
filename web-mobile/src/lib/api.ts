@@ -106,6 +106,13 @@ function isAbort(cause: unknown): boolean {
 
 const PROBE_TIMEOUT = 2200;
 
+/** 给必须尽快出结果的请求套一层超时:默认 fetch 要等系统 TCP 超时,手机上一挂就是十几秒。 */
+function makeTimeout(ms: number): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
 async function probeBase(base: string, timeoutMs = PROBE_TIMEOUT): Promise<boolean> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -305,11 +312,22 @@ export async function apiUpload<T>(path: string, blob: Blob, query?: Query): Pro
 
 export async function pingServer(baseUrl: string): Promise<PingResult> {
   const base = baseUrl.replace(/\/+$/, '');
+  const timeout = makeTimeout(6000);
   let res: Response;
   try {
-    res = await netFetch(`${base}/api/mobile/ping`, { headers: { Accept: 'application/json' } });
-  } catch {
-    throw new ApiError('这个地址没有响应', 0, 'network');
+    res = await netFetch(`${base}/api/mobile/ping`, {
+      headers: { Accept: 'application/json' },
+      signal: timeout.signal,
+      cache: 'no-store',
+    });
+  } catch (cause) {
+    throw new ApiError(
+      isAbort(cause) ? '连接超时，电脑没有响应' : '这个地址没有响应',
+      0,
+      'network',
+    );
+  } finally {
+    timeout.clear();
   }
   if (!res.ok) throw new ApiError(`电脑无响应 (${res.status})`, res.status);
   return (await res.json()) as PingResult;
@@ -322,11 +340,24 @@ export async function pairServer(
   deviceName: string,
 ): Promise<PairResult> {
   const base = baseUrl.replace(/\/+$/, '');
-  const res = await netFetch(`${base}/api/mobile/pair/confirm`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ code, device_id: deviceId, device_name: deviceName }),
-  });
+  const timeout = makeTimeout(12000);
+  let res: Response;
+  try {
+    res = await netFetch(`${base}/api/mobile/pair/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ code, device_id: deviceId, device_name: deviceName }),
+      signal: timeout.signal,
+    });
+  } catch (cause) {
+    throw new ApiError(
+      isAbort(cause) ? '配对超时，确认电脑在线后重试' : '这个地址没有响应',
+      0,
+      'network',
+    );
+  } finally {
+    timeout.clear();
+  }
   const data = (await res.json()) as PairResult;
   if (!res.ok || !data.ok) {
     throw new ApiError(data.error || `配对失败 (${res.status})`, res.status, data.code);
@@ -336,13 +367,18 @@ export async function pairServer(
 
 export async function checkServer(server: ServerEntry): Promise<boolean> {
   if (server.transport === 'wrtc') return wrtcAlive();
+  const timeout = makeTimeout(10000);
   try {
     const res = await netFetch(resolveUrl('/api/files', server), {
       headers: { Accept: 'application/json', Authorization: `Bearer ${server.token}` },
+      signal: timeout.signal,
+      cache: 'no-store',
     });
     return res.ok;
   } catch {
     return false;
+  } finally {
+    timeout.clear();
   }
 }
 
