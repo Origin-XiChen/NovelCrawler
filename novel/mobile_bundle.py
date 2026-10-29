@@ -207,9 +207,19 @@ def novel_bundle(src: str, out_path: str, clean_rules: list | None = None,
 
 def comic_bundle(src: str, out_path: str, meta: dict | None = None,
                  title: str = "", on_stage=None) -> dict:
-    """导出一本漫画 PDF 为逐页 JPEG 包(与 /api/comic_page_image 同源出图)。"""
+    """导出一本漫画 PDF 为逐页 JPEG 包(与 /api/comic_page_image 同源出图)。
+
+    manifest.id 必须与三处口径完全一致,否则手机回传的阅读进度会存到另一个键,
+    电脑端读不到(表现为"手机上看了、电脑上没记录"):
+      * 电脑书目 /api/mobile/catalog   comic:<目录名>/<文件名>
+      * 电脑阅读器 web/src/pages/Comics.tsx comicProgressKey
+      * 手机 transfer.ts / localImport.ts
+    漫画 PDF 落在 COMIC_OUT_DIR/<书名>/<文件名>,目录名就是书名,所以 title 为空
+    时用目录名兜底 —— 不能退化成 comic:<文件名>,那会让 id 少一段而错位。
+    """
     from .comic import page_image
     fname = os.path.basename(src)
+    book_title = (title or "").strip() or os.path.basename(os.path.dirname(src))
     size, mtime = _stat(src)
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
         from pypdf import PdfReader
@@ -223,8 +233,8 @@ def comic_bundle(src: str, out_path: str, meta: dict | None = None,
         manifest = {
             "bundle_version": BUNDLE_VERSION,
             "kind": "comic",
-            "id": f"comic:{title}/{fname}" if title else f"comic:{fname}",
-            "title": title or os.path.splitext(fname)[0],
+            "id": f"comic:{book_title}/{fname}",
+            "title": book_title,
             "file": fname,
             "chapters": [],
             "total": total,

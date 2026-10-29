@@ -590,7 +590,9 @@ def load_candidates() -> list[dict]:
 
 def candidates_status() -> list[dict]:
     """候选列表 + 是否已在库(供 GUI 展示)。"""
-    existing = {s["name"]: s["base"] for s in load_all_sources()}
+    # 用 .get 兜底:配置里可能残留没有 base 的旧条目,不能因为一条脏数据
+    # 让整个候选源面板报错(KeyError 会冒泡成连接被掐断)
+    existing = {s.get("name", ""): s.get("base", "") for s in load_all_sources()}
     out = []
     for c in load_candidates():
         status = "已存在" if c["base"] in existing.values() else "新"

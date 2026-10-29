@@ -283,6 +283,15 @@ def load_all_sources() -> list[dict]:
             sources.append(s)
 
         for s in cfg.get("sources", []):  # 自定义源
+            # 跳过残缺条目:历史上 add_custom_source 不校验,{}(或导入失败留下的
+            # 半截记录)会以 {"custom": True, "enabled": True} 落盘。这种条目没有
+            # name,下游 load_all_sources 的消费者普遍直接取 s["name"],会 KeyError
+            # 把「书源列表/测试书源/候选源」等接口整片打挂。这里做一次兜底过滤。
+            if not isinstance(s, dict):
+                continue
+            name = s.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
             s = dict(s)
             s.setdefault("custom", True)
             sources.append(s)
@@ -307,15 +316,32 @@ def set_source_state(name: str, enabled: bool) -> None:
 
 
 def add_custom_source(source: dict) -> dict:
-    """添加自定义源;名称重复抛 ValueError。"""
+    """添加自定义源;字段非法或名称重复抛 ValueError。
+
+    必须校验:此前对入参零检查,POST /api/sources 传 {} 就会把
+    {"custom": true, "enabled": true} 写进 config.json —— 一条没有 name 的
+    源,之后所有遍历书源的地方取 s["name"] 全部 KeyError。
+    """
+    if not isinstance(source, dict):
+        raise ValueError("书源必须是 JSON 对象")
     source = {k: v for k, v in source.items() if v not in (None, "")}
+    name = source.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("缺少书源名称(name)")
+    base = source.get("base")
+    if not isinstance(base, str) or not base.strip():
+        raise ValueError("缺少书源地址(base)")
+    if not base.strip().startswith(("http://", "https://")):
+        raise ValueError("书源地址(base)必须是 http(s) 开头")
+    source["name"] = name.strip()
+    source["base"] = base.strip()
     source["custom"] = True
     source.setdefault("enabled", True)
     with _cfg_lock:
         cfg = _read_cfg()
         custom = cfg.get("sources", [])
         for s in custom:
-            if s.get("name") == source.get("name"):
+            if isinstance(s, dict) and s.get("name") == source["name"]:
                 raise ValueError(f"书源名称已存在: {source['name']}")
         custom.append(source)
         cfg["sources"] = custom

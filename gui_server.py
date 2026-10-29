@@ -30,6 +30,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1028,6 +1029,49 @@ def _run_comic_download(task_id: str, title: str, chapters: list[dict],
         log_task("漫画下载", title, "fail", brief)
 
 
+# ---------------- 代理类接口的目标地址校验(防 SSRF / 开放代理) ----------------
+def _is_public_host(hostname: str) -> bool:
+    """主机名解析出的所有地址是否都是公网地址。
+
+    `/api/cover`、`/api/comic_img` 这类接口会把远端响应原样回给调用方,
+    只校验 `startswith("http")` 等于把电脑变成开放代理:已配对的手机可以借它
+    访问 127.0.0.1 上的其它服务(如 MCP 代理端口)、路由器管理页、云元数据
+    地址 169.254.169.254 等。这里要求解析结果全部是全局可路由地址。
+    """
+    import ipaddress
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except (OSError, UnicodeError):
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        addr = str(info[4][0]).split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            return False
+        if not ip.is_global:
+            return False
+    return True
+
+
+def _remote_url_error(url: str, label: str = "地址") -> str | None:
+    """校验代理/抓取接口的目标 URL,合法返回 None,否则返回给用户的错误文案。"""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return f"{label}格式非法"
+    if parsed.scheme not in ("http", "https"):
+        return f"{label}只支持 http/https"
+    host = parsed.hostname or ""
+    if not host:
+        return f"{label}缺少主机名"
+    if not _is_public_host(host):
+        return f"{label}指向本机或内网,已拒绝(代理接口仅允许公网地址)"
+    return None
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "NovelGUI/1.0"
 
@@ -1204,6 +1248,11 @@ class Handler(BaseHTTPRequestHandler):
         if origin in self._CORS_EXACT or self._CORS_ORIGIN_RE.fullmatch(origin):
             return origin
         return ""
+
+    def send_response(self, code, message=None):
+        # 标记「响应已开始」:_safe_dispatch 据此判断还能不能补 500 错误体
+        self._responded = True
+        super().send_response(code, message)
 
     def end_headers(self) -> None:
         origin = self._cors_origin()
@@ -1900,7 +1949,38 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_json({"ok": ok, "error": None if ok else "未找到该文件"})
 
     # ---------------- 路由 ----------------
+    def _safe_dispatch(self, handler) -> None:
+        """统一兜底:任何未捕获异常都转成 500 JSON,绝不让连接被静默掐断。
+
+        ThreadingHTTPServer 默认让异常冒泡到 socketserver,结果是一个字节都不
+        回、客户端报「这个地址没有响应 / ERR_EMPTY_RESPONSE」——排查时很容易
+        被误判成网络/防火墙问题(见 AGENTS.md 事故清单)。这里把 traceback
+        打全,并尽量回一个可读的错误体。
+        """
+        try:
+            handler()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return  # 客户端提前断开,属于正常情况
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+            if getattr(self, "_responded", False):
+                return  # 响应头已发出,补不了错误体
+            try:
+                self._send_json({
+                    "ok": False,
+                    "error": "服务端处理请求时出错,详情见电脑端日志",
+                    "code": "internal_error",
+                }, 500)
+            except Exception:  # noqa: BLE001
+                pass
+
     def do_GET(self):
+        self._safe_dispatch(self._do_get)
+
+    def do_POST(self):
+        self._safe_dispatch(self._do_post)
+
+    def _do_get(self):
         if self._https_redirect():
             return
         if not self._guard():
@@ -2233,7 +2313,7 @@ class Handler(BaseHTTPRequestHandler):
                                        filename=os.path.basename(fp))
         self._send_json({"error": "not found"}, 404)
 
-    def do_POST(self):
+    def _do_post(self):
         if self._https_redirect():
             return
         if not self._guard():
@@ -2262,10 +2342,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/download":
             return self._api_download()
         if parsed.path == "/api/snapshot_start":
-            length = int(self.headers.get("Content-Length", 0))
             try:
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            except Exception:  # noqa: BLE001
+                payload = self._body()
+            except ValueError:
                 return self._send_json({"error": "请求体非法"}, 400)
             return self._api_snapshot_start(payload)
         if parsed.path == "/api/opds_download":
@@ -2289,7 +2368,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/comic_subscriptions":
             return self._api_comic_subscriptions_add()
         if parsed.path == "/api/comic_subscriptions/pending":
-            return self._api_comic_subscriptions_pending(parsed.query)
+            # 处理器要的是 parse_qs 的 dict;直接传 parsed.query(str) 会 AttributeError,
+            # 连接被掐断、手机端只看到"没有响应"
+            return self._api_comic_subscriptions_pending(parse_qs(parsed.query))
         if parsed.path == "/api/comic_base_apply":
             return self._api_comic_base_apply()
         if parsed.path == "/api/comic_subscriptions/refresh":
@@ -2511,9 +2592,32 @@ class Handler(BaseHTTPRequestHandler):
             "default_out": _DEFAULT_OUT,
         })
 
-    def _body(self) -> dict:
-        length = int(self.headers.get("Content-Length", 0))
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+    def _body(self, allow_empty: bool = False) -> dict:
+        """读取并解析 JSON 请求体,强制返回 dict。
+
+        所有接口的约定都是「JSON 对象」;此前直接把 json.loads 的结果返回,
+        客户端一旦传 `[]` / `"x"` / `null` 之类,后面 data.get(...) 就会
+        AttributeError 抛出到 socketserver,连接被直接关闭、客户端收不到
+        任何字节(表现为"这个地址没有响应")。这里统一在入口拒绝。
+
+        allow_empty=True 时把空请求体当作 {},供「所有字段都可选」的接口使用。
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Content-Length 非法") from None
+        if length <= 0:
+            if allow_empty:
+                return {}
+            raise ValueError("缺少请求体")
+        raw = self.rfile.read(length)
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"请求体不是合法 JSON: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("请求体必须是 JSON 对象")
+        return data
 
     def _api_add_source(self):
         try:
@@ -2978,10 +3082,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": str(exc)}, 500)
 
     def _api_download(self):
-        length = int(self.headers.get("Content-Length", 0))
         try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-        except Exception:  # noqa: BLE001
+            payload = self._body()
+        except ValueError:
             return self._send_json({"error": "请求体非法"}, 400)
 
         url = (payload.get("url") or "").strip()
@@ -3091,6 +3194,18 @@ class Handler(BaseHTTPRequestHandler):
                 return fp
         return None
 
+    @staticmethod
+    def _qs_int(qs: dict, key: str, default: int = 1) -> int:
+        """查询参数转整数,非法值回退默认值。
+
+        直接 int(qs.get(...)) 遇到 ?ch=abc 会抛 ValueError,冒泡到 socketserver
+        后连接被静默掐断,前端只看到"没有响应"。
+        """
+        try:
+            return int((qs.get(key) or [""])[0] or default)
+        except (TypeError, ValueError):
+            return default
+
     def _api_read_meta(self, qs: dict):
         fname = (qs.get("file") or [""])[0].strip()
         fp = self._resolve_book_file(fname)
@@ -3103,7 +3218,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api_read(self, qs: dict):
         fname = (qs.get("file") or [""])[0].strip()
-        idx = int((qs.get("ch") or ["1"])[0] or 1)
+        idx = self._qs_int(qs, "ch")
         fp = self._resolve_book_file(fname)
         if fp is None:
             return self._send_json({"error": "文件不存在"}, 404)
@@ -4322,9 +4437,8 @@ class Handler(BaseHTTPRequestHandler):
         原文件保留;已是压缩版(_压缩.pdf)自动跳过。quality 为 original
         时拒绝(无压缩意义),提示先到设置选择档位。"""
         from novel.comic import compress_comic_pdf
-        length = int(self.headers.get("Content-Length", 0))
         try:
-            body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            body = self._body(allow_empty=True)
         except Exception:  # noqa: BLE001
             return self._send_json({"error": "请求体非法"}, 400)
         title = (body.get("title") or "").strip()
@@ -4362,9 +4476,8 @@ class Handler(BaseHTTPRequestHandler):
         pypdf 原样复制页面流不重编码不损画质,原文件与原 meta.json 均保留;
         目标文件已存在则跳过,绝不覆盖。"""
         from novel.comic import split_comic_pdf, split_comic_pdf_chapters, build_split_meta
-        length = int(self.headers.get("Content-Length", 0))
         try:
-            body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            body = self._body(allow_empty=True)
         except Exception:  # noqa: BLE001
             return self._send_json({"error": "请求体非法"}, 400)
         title = (body.get("title") or "").strip()
@@ -4466,6 +4579,9 @@ class Handler(BaseHTTPRequestHandler):
         url = (qs.get("url") or [""])[0].strip()
         if not url.startswith("http"):
             return self._send_json({"error": "非法图片地址"}, 400)
+        denied = _remote_url_error(url, "图片地址")
+        if denied:
+            return self._send_json({"error": denied}, 400)
         src = (qs.get("source") or ["mangadex"])[0].strip()
         from novel import comic as _comic
         referer = _comic.img_referer(src)
@@ -4896,8 +5012,7 @@ class Handler(BaseHTTPRequestHandler):
         首个成功拿到公网地址的胜出 —— 方法一,手机任意网络扫码即可完成首次准备。
         """
         try:
-            length = int(self.headers.get("Content-Length", 0))
-            payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            payload = self._body(allow_empty=True)
         except Exception:  # noqa: BLE001
             return self._send_json({"error": "请求体非法"}, 400)
         from novel.config import load_settings as _ls5, save_settings as _ss5
@@ -5045,8 +5160,7 @@ class Handler(BaseHTTPRequestHandler):
     def _api_webrtc_answer(self):
         """POST /api/webrtc/answer {session, answer_b64} → 提交手机端 answer。"""
         try:
-            length = int(self.headers.get("Content-Length", 0))
-            payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            payload = self._body(allow_empty=True)
         except Exception:  # noqa: BLE001
             return self._send_json({"error": "请求体非法"}, 400)
         session = payload.get("session") or ""
@@ -5058,8 +5172,7 @@ class Handler(BaseHTTPRequestHandler):
     def _api_webrtc_stop(self):
         """POST /api/webrtc/stop {session} → 主动断开指定会话。"""
         try:
-            length = int(self.headers.get("Content-Length", 0))
-            payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            payload = self._body(allow_empty=True)
         except Exception:  # noqa: BLE001
             return self._send_json({"error": "请求体非法"}, 400)
         session = payload.get("session") or ""
@@ -5086,8 +5199,7 @@ class Handler(BaseHTTPRequestHandler):
         最近一个等待 answer 的 WebRTC 会话。
         """
         try:
-            length = int(self.headers.get("Content-Length", 0))
-            payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            payload = self._body(allow_empty=True)
         except Exception:  # noqa: BLE001
             return self._send_json({"error": "请求体非法"}, 400)
         action = payload.get("action", "")
@@ -5176,7 +5288,7 @@ class Handler(BaseHTTPRequestHandler):
     def _api_epub_read(self, qs):
         from novel.epub import read_chapter
         fname = (qs.get("file") or [""])[0].strip()
-        ch = int((qs.get("ch") or ["1"])[0] or 1)
+        ch = self._qs_int(qs, "ch")
         if not fname:
             return self._send_json({"error": "缺少 file"}, 400)
         if ".." in fname or "/" in fname or "\\" in fname:
@@ -5229,6 +5341,9 @@ class Handler(BaseHTTPRequestHandler):
     def _epub_online_fetch(self, url: str) -> tuple[str | None, str]:
         """下载远程 EPUB 到临时缓存(去重并发),返回 (路径, 错误信息)。"""
         import hashlib as _hl
+        denied = _remote_url_error(url, "EPUB 地址")
+        if denied:
+            return None, denied
         now = time.time()
         with self._epub_online_lock:
             hit = self._epub_online_cache.get(url)
@@ -5328,7 +5443,7 @@ class Handler(BaseHTTPRequestHandler):
         wol.moe epub 直链(wenku8 回退模式)→ 从缓存的 wenku8 目录抓章节文本。"""
         from urllib.parse import quote as _quote
         url = (qs.get("url") or [""])[0].strip()
-        ch = int((qs.get("ch") or ["1"])[0] or 1)
+        ch = self._qs_int(qs, "ch")
         if not url.startswith("http"):
             return self._send_json({"error": "非法 EPUB 地址"}, 400)
         # wenku8 回退模式:缓存目录,逐章直抓主站文本
@@ -5459,6 +5574,9 @@ class Handler(BaseHTTPRequestHandler):
         url = (qs.get("url") or [""])[0].strip()
         if not url.startswith("http"):
             return self._send_json({"error": "非法封面地址"}, 400)
+        denied = _remote_url_error(url, "封面地址")
+        if denied:
+            return self._send_json({"error": denied}, 400)
         import requests as _rq
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",

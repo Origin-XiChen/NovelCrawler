@@ -28,6 +28,13 @@ import zlib
 from concurrent.futures import ThreadPoolExecutor
 
 _events: "collections.deque[str]" = collections.deque(maxlen=200)
+
+# 本机回环桥接必须绕过系统代理:urllib 默认会读 HTTP_PROXY/HTTPS_PROXY,
+# 而 proxy_bypass('127.0.0.1') 在 Windows 上恒为 False —— 用户一旦配了
+# 公司/远程代理,手机走 WebRTC 直连通道的每个请求都会被送去代理再失败。
+# 本机代理能转发回环时才"看起来正常",换个环境就整条通道不可用。
+_LOOPBACK_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 # HTTP 桥接线程池:forward() 是同步阻塞调用(urllib),必须丢到线程池执行。
 # 否则会卡死会话的 asyncio 事件循环 —— ICE/DTLS/SCTP 心跳全部停摆,
 # 大文件下载或打包时连接会被对端判定死亡而断开。
@@ -442,7 +449,7 @@ class WrtcManager:
             headers["Content-Type"] = str(req.get("content_type", "application/json"))
         r = urllib.request.Request(url, data=data, headers=headers, method=method)
         timeout = 120 if ("download" in path or "pack" in path or "img" in path) else 30
-        with urllib.request.urlopen(r, timeout=timeout) as resp:
+        with _LOOPBACK_OPENER.open(r, timeout=timeout) as resp:
             raw = resp.read()
             ct = resp.headers.get("Content-Type", "")
             out: dict = {"id": req.get("id"), "status": resp.status}

@@ -19,6 +19,7 @@ dist/
 # ================= 本地工具目录(AI 会话/调试/缓存) =================
 .qoder/
 .workbuddy/
+.workbuddy-ai/
 .recovery/
 .webview2-cache/
 .trae-html-share-packages/
@@ -94,6 +95,9 @@ design/tools/_work/
 # 临时产物(截图/探针脚本/构建临时目录)
 _diag/
 .tmpbuild/
+.tmp_lint/
+.tmp_smoke/
+.tmp_verify/
 nc-http-*/
 
 # 运行时机密 / 用户数据(禁止入库)

@@ -159,6 +159,15 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
 
+### 1.7.10-dev.4 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 修复：**后端加全局异常兜底**（`Handler._safe_dispatch`）——此前任何处理函数抛异常都冒泡到 `socketserver`，连接被直接关闭、一个字节不回，客户端报「这个地址没有响应 / ERR_EMPTY_RESPONSE」，把一堆真实 bug 伪装成网络问题。现在统一打 traceback + 回 500 JSON（`send_response` 覆写置 `_responded`，响应已开始就不再补错误体）
+- 修复：`POST /api/comic_subscriptions/pending` 把 `parsed.query`(str) 当 dict 传，**必然 AttributeError**；`_body()` 改为强制返回 dict（新增 `allow_empty`），非对象 JSON 一律 400，并收归 8 处自行 `json.loads(rfile.read())` 的接口；`?ch=abc` 类参数（3 处）改走 `_qs_int`
+- 修复：**SSRF/开放代理**——`/api/cover`、`/api/comic_img`、`_epub_online_fetch` 只校验 `startswith("http")` 就把远端响应原样回给调用方，已实测可借它读到本机 `/api/settings`、内网与 `169.254.169.254`；新增 `_is_public_host()` + `_remote_url_error()` 要求解析结果全部 `is_global`
+- 修复：`add_custom_source` 零校验（`POST /api/sources {}` 会落盘无 name 的源，导致书源列表/测试书源/候选源三接口全 `KeyError`）；`load_all_sources` 过滤残缺条目；WebRTC 回环桥接改用 `ProxyHandler({})`（Windows 下 `proxy_bypass('127.0.0.1')` 恒为 False，配了远程代理后手机直连通道整条失效）
+- 其他：`comic_bundle` 的 title 兜底改为 `basename(dirname(src))`，让 manifest id 由构造保证等于 `comic:<目录名>/<文件名>`；实测五处口径（catalog / bundle / 手机两条导入路径 / 桌面 `Comics.tsx`）完全一致，双向进度回传闭环通过
+- 风险遗留：漫画「同步后看不了」仍待复现
+
 ### 1.7.10-dev.3 — 2026-10-29
 - 状态：已发布（Dev 预发布）
 - 修复：同步管理页元素贴边——该页用了根本不存在的 `.page/.page-head` 类，等于没有内边距；改为 `.sync-page`（与 library/settings 同套 `max-width + 16px 内边距 + 安全区`）
