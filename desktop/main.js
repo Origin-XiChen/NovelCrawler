@@ -124,9 +124,6 @@ function registerIpc() {
     return result.filePaths[0];
   });
 
-  ipcMain.handle('updater:set-prerelease', (_event, flag) => updater.setPrerelease(flag));
-  ipcMain.handle('updater:get-prerelease', () => updater.readPrerelease());
-
   ipcMain.handle('app:notify', (_event, message) => {
     if (!Notification.isSupported()) return;
     new Notification({ title: 'NovelCrawler', body: String(message) }).show();
@@ -229,7 +226,12 @@ async function bootstrap() {
   app.setAppUserModelId('com.originxichen.novelcrawler');
   Menu.setApplicationMenu(null);
   registerIpc();
-  updater.init({ getWindow: () => mainWindow });
+  // 更新模块出问题不能拖垮启动：它只是锦上添花，崩了也要能进主界面。
+  try {
+    updater.init({ getWindow: () => mainWindow });
+  } catch (error) {
+    log.error('[启动] 更新模块初始化失败（不影响使用）', error);
+  }
 
   if (app.isPackaged) {
     splashWindow = createSplash();
@@ -271,7 +273,7 @@ function fatal(error) {
   }
   const tail = readLogTail(app.getPath('userData'));
   dialog.showErrorBox(
-    '小说管家启动失败',
+    'NovelCrawler 启动失败',
     `${error?.message || String(error)}\n\n日志：${log.getLogFile()}\n\n${tail}`,
   );
   app.quit();

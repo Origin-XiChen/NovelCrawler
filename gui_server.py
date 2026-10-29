@@ -2624,7 +2624,7 @@ class Handler(BaseHTTPRequestHandler):
                 # 沙箱/回收站不可用环境回退系统删除命令
                 import subprocess
                 r = subprocess.run(["cmd", "/c", "del", "/f", "/q", os.path.normpath(fp)],
-                                   capture_output=True, text=True)
+                                   capture_output=True, text=True, errors="replace")
                 if r.returncode != 0:
                     return self._send_json({"ok": False, "error": r.stderr or "删除失败"})
             return self._send_json({"ok": True})

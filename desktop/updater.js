@@ -175,11 +175,18 @@ function init(options) {
   if (started) return;
   started = true;
 
-  ipcMain.handle('updater:set-prerelease', (_event, flag) => setPrerelease(flag));
-  ipcMain.handle('updater:get-prerelease', () => readPrerelease());
-  ipcMain.handle('updater:check', () => check());
-  ipcMain.handle('updater:download', () => download());
-  ipcMain.handle('updater:install', () => install());
+  // 用 removeHandler 兜底：Electron 对同一通道重复 handle 会直接抛
+  // "Attempted to register a second handler"，导致整个应用启动失败（真实事故）。
+  // 这样即使别处再注册一次，也只是覆盖而不是崩掉。
+  const register = (channel, handler) => {
+    ipcMain.removeHandler(channel);
+    ipcMain.handle(channel, handler);
+  };
+  register('updater:set-prerelease', (_event, flag) => setPrerelease(flag));
+  register('updater:get-prerelease', () => readPrerelease());
+  register('updater:check', () => check());
+  register('updater:download', () => download());
+  register('updater:install', () => install());
 }
 
 /** 保留调用点：启动自动检查已关闭（用户要求手动更新） */

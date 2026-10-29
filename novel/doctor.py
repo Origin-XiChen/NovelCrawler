@@ -76,6 +76,9 @@ def _tls_self_connect(host: str, port: int, timeout: float = 1.5) -> str:
 
 def _run(args: list[str], timeout: float = 3.0) -> tuple[int, str]:
     try:
+        # 固定 utf-8 + replace：Windows 命令行工具的输出编码并不统一（netsh 是
+        # OEM 代码页、部分工具是 UTF-8），按系统代码页解码会在读线程抛
+        # UnicodeDecodeError，日志里就是那串 threading/subprocess 堆栈。
         proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout,
                               creationflags=CREATE_NO_WINDOW,
                               encoding="utf-8", errors="replace")
@@ -353,7 +356,7 @@ def allow_firewall(port: int = 0) -> dict:
         f"program={exe}", "enable=yes", "profile=any",
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True,
+        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
                               timeout=15, creationflags=0x08000000)
     except (OSError, subprocess.SubprocessError) as exc:
         return {"ok": False, "needs_admin": False, "error": f"执行失败: {exc}"}
@@ -366,7 +369,7 @@ def allow_firewall(port: int = 0) -> dict:
                     "netsh", "advfirewall", "firewall", "add", "rule",
                     f"name=NovelCrawler-{port}", "dir=in", "action=allow",
                     "protocol=TCP", f"localport={port}", "profile=any",
-                ], capture_output=True, text=True, timeout=15, creationflags=0x08000000)
+                ], capture_output=True, text=True, errors="replace", timeout=15, creationflags=0x08000000)
             except (OSError, subprocess.SubprocessError):
                 pass
         return {"ok": True, "needs_admin": False,

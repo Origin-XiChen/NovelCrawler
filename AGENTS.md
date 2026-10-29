@@ -98,6 +98,9 @@ gh release upload vX.Y.Z <apk>#NovelCrawler-Mobile-X.Y.Z.apk --clobber
 - **`BUNDLE_VERSION` 是协议版本，两端必须同步**：改后端就得同步 `web-mobile/src/lib/offline/transfer.ts` 的
   `SUPPORTED_BUNDLE_VERSION` 与 `localImport.ts` 的 `BUNDLE_VERSION`，否则手机会报"离线包版本过新"拒绝导入；
   同时它已进后端缓存键，改它才会真正重打缓存。
+- **IPC 通道只能注册一次**：`ipcMain.handle` 对同一 channel 重复调用会抛
+  `Attempted to register a second handler`，直接让 `bootstrap` 失败、应用起不来。新增 updater 类 IPC 时
+  只改 `updater.init()` 一处，别在 `main.js` 再挂一遍。
 - **不要依赖 GitHub release 列表顺序**：`/releases` 的返回顺序实测会出现新版本排在旧版本之后（dev.11 排第 9）。
   任何"取第一条"的写法都会卡在旧版本上，必须按版本号排序或全量比大小。`releases.atom` 的顺序是正常的。
 - **APK 版本必须等于 tag**：上传前核对文件名里的版本（手机端会校验，不一致直接不提示更新）。
@@ -166,6 +169,13 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 ## §9 版本进度
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
+
+### 1.7.10-dev.13 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 修复：**启动即崩「Attempted to register a second handler for 'updater:set-prerelease'」**——dev.11 把 updater 的四个 IPC 全部收进 `updater.init()`，但 `main.js` 里还留着 `set/get-prerelease` 两行，Electron 对同一通道重复 `handle` 直接抛错 → `bootstrap` 失败 → 弹「启动失败」。现删除重复注册，并在 `updater.init()` 里用 `removeHandler` + `handle` 做幂等注册兜底
+- 修复：后端子进程读线程 `UnicodeDecodeError: 'gbk' codec can't decode byte 0x87`——`doctor.py` / `gui_server.py` 的 `subprocess.run(text=True)` 按系统代码页解码，遇到非本地编码输出就抛；统一补 `errors="replace"`（`_run` 固定 utf-8）
+- 其他：启动失败对话框标题改英文 `NovelCrawler 启动失败`
+- 风险遗留：漫画「同步后看不了」仍待复现
 
 ### 1.7.10-dev.12 — 2026-10-29
 - 状态：已发布（Dev 预发布）
