@@ -251,7 +251,12 @@ export default function SyncPage() {
   return (
     <div className="sync-page">
       <header className="sync-page__head">
-        <button type="button" className="icon-btn" aria-label="返回" onClick={() => navigate(-1)}>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="返回"
+          onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/shelf'))}
+        >
           <ArrowLeft size={20} />
         </button>
         <h1>同步中心</h1>
@@ -267,6 +272,12 @@ export default function SyncPage() {
           <RefreshCw size={18} />
         </button>
       </header>
+
+      {notice && (
+        <div className="sync-notice" role="status">
+          {notice}
+        </div>
+      )}
 
       <div className={online ? 'sync-link is-online' : 'sync-link'}>
         {online ? (
@@ -340,6 +351,11 @@ export default function SyncPage() {
                 </div>
               ))}
             </div>
+            {pending.length > 30 && (
+              <div className="sync-note">
+                还有 {pending.length - 30} 项未显示，先更新上面这些后再刷新
+              </div>
+            )}
           </>
         )}
       </section>
@@ -382,9 +398,11 @@ export default function SyncPage() {
             </div>
           ))}
         </div>
+        {rows.length > 30 && (
+          <div className="sync-note">还有 {rows.length - 30} 本未显示</div>
+        )}
       </section>
 
-      {notice && <div className="sync-notice">{notice}</div>}
       {!online && server && (
         <div className="sync-note">
           <WifiOff size={14} /> 电脑离线时仍可阅读已下载的内容，进度会在联网后自动回传。

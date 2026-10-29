@@ -8,6 +8,7 @@ import {
   Loader2,
   LogOut,
   FlaskConical,
+  Plus,
   RefreshCw,
   RotateCcw,
   Server,
@@ -196,7 +197,7 @@ export default function SettingsPage() {
       </header>
 
       {notice && (
-        <div className="banner banner--info">
+        <div className="banner banner--info settings-notice">
           <span>{notice}</span>
           <button type="button" className="text-btn" onClick={() => setNotice('')}>
             知道了
@@ -456,6 +457,14 @@ export default function SettingsPage() {
               )}
             </div>
           ))}
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm settings-add-server"
+            onClick={() => navigate('/connect')}
+          >
+            <Plus size={15} />
+            添加电脑
+          </button>
         </div>
       </section>
 

@@ -150,6 +150,9 @@ export default function ComicReaderPage() {
   const [chapterMap, setChapterMap] = useState<Record<string, number>>({});
   const [images, setImages] = useState<ScrollImages>(EMPTY_IMAGES);
   const [ratios, setRatios] = useState<Record<string, number>>({});
+  const ratiosRef = useRef(ratios);
+  const scrollAnchorRef = useRef<{ page: number; offset: number } | null>(null);
+  ratiosRef.current = ratios;
   const touchRef = useRef({ x: 0, y: 0, time: 0 });
   const pageRef = useRef(page);
   const totalRef = useRef(numPages);
@@ -383,6 +386,7 @@ export default function ComicReaderPage() {
   useEffect(() => {
     setRatios({});
     reloadsRef.current = {};
+    scrollAnchorRef.current = null;
   }, [file, id, title]);
 
   const windowRange = useMemo(() => {
@@ -508,21 +512,24 @@ export default function ComicReaderPage() {
     }
   }, [file, loadScrollPage, mode, numPages, source, windowRange]);
 
-  const handleScrollImageLoad = useCallback(
-    (target: number, image: HTMLImageElement) => {
-      const width = image.naturalWidth;
-      const height = image.naturalHeight;
-      if (!width || !height) return;
-      const ratio = width / height;
-      setRatios((prev) => {
-        const key = String(target);
-        if (Math.abs((prev[key] || 0) - ratio) < 0.0001) return prev;
-        return { ...prev, [key]: ratio };
-      });
-      scheduleRecalc();
-    },
-    [scheduleRecalc],
-  );
+  const handleScrollImageLoad = useCallback((target: number, image: HTMLImageElement) => {
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+    if (!width || !height) return;
+    const ratio = width / height;
+    const key = String(target);
+    const current = ratiosRef.current[key];
+    if (current && Math.abs(current - ratio) < 0.0001) return;
+    // 占位比例换成真实比例会改变整列高度;先记住当前页的位置,渲染后补回滚动量
+    const anchorPage = pageRef.current || 1;
+    const anchorOffset = offsetsRef.current[anchorPage - 1];
+    if (anchorOffset != null) {
+      scrollAnchorRef.current = { page: anchorPage, offset: anchorOffset };
+    }
+    setRatios((prev) =>
+      Math.abs((prev[key] || 0) - ratio) < 0.0001 ? prev : { ...prev, [key]: ratio },
+    );
+  }, []);
 
   const failScrollPage = useCallback((target: number) => {
     const currentSource = sourceRef.current;
@@ -639,6 +646,23 @@ export default function ComicReaderPage() {
     const raf = requestAnimationFrame(() => recalcRef.current());
     return () => cancelAnimationFrame(raf);
   }, [mode, numPages, recalcOffsets]);
+
+  // 图片真实高度替换占位高度后，把当前页重新钉在原来的位置
+  useLayoutEffect(() => {
+    if (mode !== 'scroll') return;
+    const anchor = scrollAnchorRef.current;
+    if (!anchor) return;
+    scrollAnchorRef.current = null;
+    const stage = stageRef.current;
+    if (!stage) return;
+    recalcRef.current();
+    const next = offsetsRef.current[anchor.page - 1];
+    if (next != null && Math.abs(next - anchor.offset) > 0.5) {
+      stage.scrollTop += next - anchor.offset;
+      lastScrollTopRef.current = stage.scrollTop;
+      programmaticAtRef.current = Date.now();
+    }
+  }, [mode, ratios]);
 
   useEffect(() => {
     if (mode !== 'scroll') return;
@@ -900,7 +924,7 @@ export default function ComicReaderPage() {
           type="button"
           className="icon-btn"
           aria-label="下一页"
-          disabled={numPages > 0 && page >= numPages}
+          disabled={numPages <= 0 || page >= numPages}
           onClick={() => goPage(page + 1)}
         >
           <ChevronRight size={26} />

@@ -382,6 +382,24 @@ export async function checkServer(server: ServerEntry): Promise<boolean> {
   }
 }
 
+export interface ServerDownloadRequest {
+  url: string;
+  headers: Record<string, string>;
+  /** 当前服务器是否使用自签 HTTPS（原生下载要装对应的 CA） */
+  pinned: boolean;
+}
+
+/** 原生后台下载只需要地址和头，请求本身交给 Android 前台服务。 */
+export function downloadRequest(path: string, query?: Query): ServerDownloadRequest | null {
+  const server = getActiveServer();
+  if (!server || server.transport === 'wrtc') return null;
+  return {
+    url: resolveUrl(path + buildQuery(query), server),
+    headers: server.token ? { Authorization: `Bearer ${server.token}` } : {},
+    pinned: Boolean(server.pin),
+  };
+}
+
 /**
  * 取一个二进制附件(整本离线包),按已收字节回报进度。
  * 电脑打包时先用小 body 回 JSON 错误,所以这里要按 content-type 分流。

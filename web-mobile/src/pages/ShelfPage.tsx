@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import BookCover from '../components/BookCover';
 import { DownloadButton, LocalChip } from '../components/OfflineControls';
+import SkeletonList from '../components/SkeletonList';
 import { getActiveServer } from '../lib/connection';
 import { refreshServerStatus, useServerStatus } from '../lib/serverStatus';
 import { deleteLocalBook, localBookHref, localReaderHref } from '../lib/content';
@@ -23,6 +24,7 @@ import { errorMessage, formatDate, formatSize } from '../lib/format';
 import { continuousPercent } from '../lib/reading-progress';
 import { importLocalFiles } from '../lib/offline/localImport';
 import { fetchCatalog, isOutdated } from '../lib/offline/transfer';
+import { useScrollMemory } from '../lib/useScrollMemory';
 import {
   dirtyRecords,
   progressLabel,
@@ -56,6 +58,7 @@ export default function ShelfPage() {
   const [filter, setFilter] = useState<ShelfFilter>(
     params.get('kind') === 'comic' ? 'comic' : 'all',
   );
+  useScrollMemory(`shelf:${filter}`, !library.loading);
   const [outdated, setOutdated] = useState<Record<string, boolean>>({});
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState('');
@@ -106,6 +109,16 @@ export default function ShelfPage() {
    * 漫画历史数据是按话导入的(`comic:书名/第1话.pdf`),直接铺开会变成十几本同名书;
    * 这里以书名分组,整本包(`__all__`)优先作为打开入口。
    */
+  const counts = useMemo(() => {
+    const comics = new Set<string>();
+    let novels = 0;
+    for (const book of library.books) {
+      if (book.kind === 'comic') comics.add(book.title);
+      else novels += 1;
+    }
+    return { all: comics.size + novels, novel: novels, comic: comics.size };
+  }, [library.books]);
+
   const groups = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     const map = new Map<string, ShelfGroup>();
@@ -257,7 +270,7 @@ export default function ShelfPage() {
             )}
           </div>
           <h1>本地书架</h1>
-          <p>{library.loading ? '正在读取…' : `${library.books.length} 本 · 占用 ${formatSize(library.bytes)}`}</p>
+          <p>{library.loading ? '正在读取…' : `${counts.all} 本 · 占用 ${formatSize(library.bytes)}`}</p>
         </div>
         <div className="shelf-header__actions">
           <button
@@ -359,8 +372,10 @@ export default function ShelfPage() {
               {Icon && <Icon size={17} />} {item.label}
               <em>
                 {item.id === 'all'
-                  ? library.books.length
-                  : library.books.filter((book) => book.kind === item.id).length}
+                  ? counts.all
+                  : item.id === 'comic'
+                    ? counts.comic
+                    : counts.novel}
               </em>
             </button>
           );
@@ -368,10 +383,7 @@ export default function ShelfPage() {
       </div>
 
       {library.loading ? (
-        <div className="library-loading">
-          <Loader2 size={26} className="spin" />
-          <span>正在读取本地书库…</span>
-        </div>
+        <SkeletonList rows={6} />
       ) : groups.length === 0 ? (
         <div className="empty-state">
           <LibraryBig size={34} />

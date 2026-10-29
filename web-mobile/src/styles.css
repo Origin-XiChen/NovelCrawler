@@ -9,6 +9,9 @@
   --line-strong: #cfc8bc;
   --text: #17181a;
   --muted: #55595e;
+  /* 二级/三级文字:历史样式引用了这两个变量,补上别让层级丢失 */
+  --text-2: #55595e;
+  --text-3: #7a7e82;
   --accent: #2c6e63;
   --accent-strong: #235a51;
   --accent-soft: #eaf2ef;
@@ -35,6 +38,8 @@
     --line-strong: #4b5054;
     --text: #f2f0ec;
     --muted: #b9b6b0;
+    --text-2: #b9b6b0;
+    --text-3: #8f8d88;
     --accent: #5fb39f;
     --accent-strong: #7cc7b4;
     --accent-soft: rgba(95, 179, 159, 0.16);
@@ -177,10 +182,10 @@ img {
 }
 
 .btn--sm {
-  min-height: 34px;
-  padding: 7px 11px;
+  min-height: 40px;
+  padding: 8px 13px;
   border-radius: 10px;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
 }
 
@@ -218,6 +223,8 @@ img {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-height: 28px;
+  padding: 3px 4px;
   color: var(--accent);
   font-size: 12px;
   font-weight: 600;
@@ -294,8 +301,8 @@ img {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   border: 0;
   border-radius: 9px;
@@ -417,7 +424,8 @@ img {
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: 15px;
+  /* iOS Safari 对 <16px 的输入框会自动放大页面 */
+  font-size: 16px;
   outline: none;
 }
 
@@ -432,7 +440,7 @@ img {
 }
 
 .search-row--compact input {
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .status-dot {
@@ -473,6 +481,21 @@ img {
 
 .empty-state--compact {
   padding: 26px 18px;
+}
+
+.empty-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.toc-more {
+  margin: 8px 2px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .section-heading {
@@ -535,6 +558,17 @@ img {
 .connect-alerts .banner {
   margin: 0;
   box-shadow: 0 8px 24px rgba(20, 22, 24, 0.12);
+}
+
+.settings-notice {
+  position: sticky;
+  top: calc(6px + var(--safe-top));
+  z-index: 12;
+  box-shadow: 0 8px 24px rgba(20, 22, 24, 0.12);
+}
+
+.settings-add-server {
+  margin: 10px 12px 12px;
 }
 
 .brand {
@@ -1051,6 +1085,11 @@ img {
   gap: 12px;
 }
 
+.library-header > div {
+  flex: 1;
+  min-width: 0;
+}
+
 .library-header__eyebrow {
   display: flex;
   align-items: center;
@@ -1072,8 +1111,11 @@ img {
 
 .library-header p {
   margin: 0;
+  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .library-page > .search-row {
@@ -2880,10 +2922,16 @@ img {
   gap: 12px;
 }
 
+.home-header > div {
+  min-width: 0;
+}
+
 .home-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
+  overflow: hidden;
   padding: 5px 10px 5px 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -2892,14 +2940,18 @@ img {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .home-status .status-dot {
+  flex: 0 0 auto;
   width: 6px;
   height: 6px;
 }
 
 .home-status > svg {
+  flex: 0 0 auto;
   opacity: 0.55;
 }
 
@@ -3333,8 +3385,8 @@ img {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-height: 30px;
-  padding: 6px 11px;
+  min-height: 36px;
+  padding: 7px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: var(--surface);
@@ -3351,10 +3403,29 @@ img {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  max-width: 120px;
+  max-width: min(46vw, 190px);
+  min-width: 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.4;
+}
+
+.offline-status--failed {
+  max-width: min(64vw, 250px);
+}
+
+.offline-status__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.offline-status .text-btn {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 2px;
+  font-size: 11px;
 }
 
 .offline-status--done {
@@ -3378,6 +3449,7 @@ img {
   display: block;
   height: 100%;
   border-radius: 999px;
+  transition: width 0.35s cubic-bezier(0.32, 0.72, 0, 1);
   background: var(--accent);
 }
 
@@ -3416,6 +3488,24 @@ img {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+  }
+
+  /* 入场动画在减弱动效下直接关闭，别让带 delay 的列表先隐身 */
+  .home-page,
+  .library-page,
+  .shelf-page,
+  .settings-page,
+  .sync-page,
+  .detail-page,
+  .connect-page,
+  .shelf-row,
+  .sync-row,
+  .novel-row,
+  .library-row,
+  .home-section,
+  .settings-section {
+    animation: none !important;
   }
 }
 
@@ -3434,7 +3524,9 @@ img {
 .sync-summary b.is-warn{color:#c0392b}
 .sync-summary span{font-size:11.5px;color:var(--text-2)}
 .sync-actions{display:flex;gap:8px;margin-bottom:10px}
-.sync-notice{padding:8px 10px;margin-bottom:10px;border-radius:10px;background:var(--surface);font-size:12.5px;color:var(--text-2)}
+.sync-notice{position:sticky;top:calc(6px + var(--safe-top));z-index:8;padding:10px 12px;
+  margin:0 0 10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);
+  box-shadow:0 6px 18px rgba(0,0,0,.08);font-size:12.5px;line-height:1.5;color:var(--text)}
 .sync-list{display:flex;flex-direction:column;gap:8px}
 .sync-row{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
 .sync-row__main{flex:1;min-width:0}
@@ -3483,6 +3575,85 @@ img {
 }
 
 /* ==================== 动效：轻、短、可关闭 ==================== */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 12px;
+}
+
+.skeleton-list--compact {
+  gap: 6px;
+}
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.skeleton-row__cover {
+  flex: 0 0 auto;
+  width: 54px;
+  height: 72px;
+  border-radius: 9px;
+}
+
+.skeleton-row__body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.skeleton-line {
+  height: 10px;
+  border-radius: 5px;
+}
+
+.skeleton-line--short {
+  width: 52%;
+}
+
+.skeleton-line--tiny {
+  width: 32%;
+}
+
+/* 封面在解码完成后再淡入，避免书架一格格闪白 */
+.comic-cover img,
+.novel-cover img,
+.detail-cover img {
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+
+.comic-cover img.is-loaded,
+.novel-cover img.is-loaded,
+.detail-cover img.is-loaded {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comic-cover img,
+  .novel-cover img,
+  .detail-cover img {
+    opacity: 1;
+    transition: none;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   @keyframes page-in {
     from { opacity: 0; transform: translateY(6px); }
@@ -3492,24 +3663,61 @@ img {
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: none; }
   }
+  @keyframes skeleton-wave {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+  }
+
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--surface) 65%, transparent),
+      transparent
+    );
+    animation: skeleton-wave 1.25s ease-in-out infinite;
+  }
+
   /* 页面进入：只动 6px，别做花哨的整屏位移 */
-  .page { animation: page-in 0.22s ease-out both; }
+  .home-page,
+  .library-page,
+  .shelf-page,
+  .settings-page,
+  .sync-page,
+  .detail-page,
+  .connect-page {
+    animation: page-in 0.22s ease-out both;
+  }
+
   /* 列表项依次入场（最多前 8 项，避免长列表延迟） */
-  .shelf-row, .sync-row, .novel-row, .library-row {
+  .shelf-row,
+  .sync-row,
+  .novel-row,
+  .library-row,
+  .home-section,
+  .settings-section {
     animation: row-in 0.24s ease-out both;
   }
-  .shelf-row:nth-child(2), .sync-row:nth-child(2) { animation-delay: 0.02s; }
-  .shelf-row:nth-child(3), .sync-row:nth-child(3) { animation-delay: 0.04s; }
-  .shelf-row:nth-child(4), .sync-row:nth-child(4) { animation-delay: 0.06s; }
-  .shelf-row:nth-child(5), .sync-row:nth-child(5) { animation-delay: 0.08s; }
+
+  .shelf-row:nth-child(2), .sync-row:nth-child(2), .novel-row:nth-child(2), .library-row:nth-child(2) { animation-delay: 0.02s; }
+  .shelf-row:nth-child(3), .sync-row:nth-child(3), .novel-row:nth-child(3), .library-row:nth-child(3) { animation-delay: 0.04s; }
+  .shelf-row:nth-child(4), .sync-row:nth-child(4), .novel-row:nth-child(4), .library-row:nth-child(4) { animation-delay: 0.06s; }
+  .shelf-row:nth-child(5), .sync-row:nth-child(5), .novel-row:nth-child(5), .library-row:nth-child(5) { animation-delay: 0.08s; }
+  .shelf-row:nth-child(6), .sync-row:nth-child(6), .novel-row:nth-child(6), .library-row:nth-child(6) { animation-delay: 0.10s; }
+  .shelf-row:nth-child(7), .sync-row:nth-child(7), .novel-row:nth-child(7), .library-row:nth-child(7) { animation-delay: 0.12s; }
+  .shelf-row:nth-child(8), .sync-row:nth-child(8), .novel-row:nth-child(8), .library-row:nth-child(8) { animation-delay: 0.14s; }
 }
 
 /* 按压反馈：所有可点卡片/按钮统一，给手感 */
-.btn, .settings-item, .shelf-row__main, .sync-row, .card, .icon-btn {
+.btn, .settings-item, .shelf-row__main, .card, .icon-btn {
   transition: transform 0.12s ease, opacity 0.12s ease, background 0.16s ease;
 }
 .btn:active, .settings-item:active, .shelf-row__main:active,
-.sync-row:active, .card:active, .icon-btn:active {
+.card:active, .icon-btn:active {
   transform: scale(0.985);
   opacity: 0.92;
 }
@@ -3555,7 +3763,7 @@ img {
 .shelf-row.is-checked{background:var(--surface)}
 .shelf-row__flag{margin-left:6px;padding:0 5px;border-radius:4px;font-size:10px;font-style:normal;
   background:#fdf0e6;color:#a8531f}
-.shelf-bulk{position:sticky;bottom:12px;z-index:10;display:flex;align-items:center;gap:10px;
+.shelf-bulk{position:sticky;bottom:calc(66px + var(--safe-bottom));z-index:10;display:flex;align-items:center;gap:10px;
   margin-top:14px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);
   background:var(--surface);box-shadow:0 6px 20px rgba(0,0,0,.08)}
 .shelf-bulk__count{flex:1;font-size:12.5px;color:var(--text-2)}

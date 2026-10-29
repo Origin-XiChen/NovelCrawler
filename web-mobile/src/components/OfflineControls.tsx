@@ -50,7 +50,6 @@ export function DownloadButton({ target, local, outdated, compact, label }: Prop
     } catch (cause) {
       setBusy(null);
       setError(errorMessage(cause));
-      window.setTimeout(() => setError(''), 5000);
     } finally {
       busyRef.current = false;
     }
@@ -61,7 +60,9 @@ export function DownloadButton({ target, local, outdated, compact, label }: Prop
     return (
       <span className="offline-status offline-status--working">
         <Loader2 size={14} className="spin" />
-        {busy.detail}
+        <span className="offline-status__text" title={busy.detail}>
+          {busy.detail}
+        </span>
         {busy.stage === 'downloading' && busy.total > 0 && (
           <i className="offline-bar">
             <b style={{ width: `${percent}%` }} />
@@ -74,7 +75,12 @@ export function DownloadButton({ target, local, outdated, compact, label }: Prop
     return (
       <span className="offline-status offline-status--failed">
         <WifiOff size={14} />
-        {error}
+        <span className="offline-status__text" title={error}>
+          {error}
+        </span>
+        <button type="button" className="text-btn" onClick={(event) => void start(event)}>
+          重试
+        </button>
       </span>
     );
   }

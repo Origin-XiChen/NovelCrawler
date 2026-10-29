@@ -3,9 +3,18 @@
  * 只有这一步需要联网;之后断网照读。
  */
 import JSZip from 'jszip';
-import { apiDownload, apiGet } from '../api';
+import { apiDownload, apiGet, downloadRequest } from '../api';
+import {
+  BACKGROUND_DOWNLOAD_AVAILABLE,
+  downloadInBackground,
+  hasActiveBackgroundDownload,
+  listBackgroundDownloads,
+  readBackgroundDownload,
+  removeBackgroundDownload,
+} from '../background-download';
 import { getActiveServer } from '../connection';
 import { getBook, putBook, releaseZip, saveChunk, type ChapterRef, type LocalBook } from './db';
+import { announceLibraryChange } from './useLibrary';
 
 const SUPPORTED_BUNDLE_VERSION = 2;
 
@@ -145,9 +154,61 @@ function watchPacking(onStage?: (p: ImportProgress) => void): () => void {
   };
 }
 
+/** 把已经下载到内存的离线包写进本地书库；下载方式（前台/后台）与这里无关。 */
+async function importBundleBlob(
+  blob: Blob,
+  target?: ImportTarget,
+  onStage?: (p: ImportProgress) => void,
+): Promise<LocalBook> {
+  onStage?.({ stage: 'unpacking', done: blob.size, total: blob.size, ratio: 1, detail: stageText('unpacking', 0, 0) });
+  const zip = await JSZip.loadAsync(blob);
+  const manifestFile = zip.file('manifest.json');
+  if (!manifestFile) throw new Error('离线包缺少 manifest,请让电脑重新打包');
+  const manifest = JSON.parse(await manifestFile.async('string')) as BundleManifest;
+  if ((manifest.bundle_version || 0) > SUPPORTED_BUNDLE_VERSION) {
+    throw new Error(
+      `离线包版本过新（包 v${manifest.bundle_version}，App 支持 v${SUPPORTED_BUNDLE_VERSION}）：` +
+        '请把手机 App 升级到最新版后再试',
+    );
+  }
+
+  const server = getActiveServer();
+  const comic = manifest.kind === 'comic';
+  const id = comic ? `comic:${manifest.title}/${manifest.file}` : `novel:${manifest.file}`;
+  const previous = await getBook(id);
+  if (previous) releaseZip(id); // 换包后旧的解包结果和它的 blob URL 都不能再用
+  const book: LocalBook = {
+    id,
+    kind: comic ? 'comic' : 'novel',
+    format: manifest.kind,
+    title:
+      manifest.title ||
+      (comic ? target?.title || '' : manifest.file.replace(/\.[^.]+$/, '')),
+    file: manifest.file,
+    total: manifest.total || (comic ? manifest.num_pages || 0 : (manifest.chapters || []).length),
+    chapters: manifest.chapters || [],
+    assets: manifest.assets || {},
+    coverArc: manifest.cover || '',
+    size: blob.size,
+    srcMtime: Math.round(manifest.src_mtime || 0),
+    srcSize: manifest.src_size || 0,
+    importedAt: Date.now(),
+    serverId: server?.id || '',
+    serverName: server?.name || '',
+    origin: 'download',
+  };
+  await saveChunk(id, blob);
+  await putBook(book);
+  onStage?.({ stage: 'done', done: blob.size, total: blob.size, ratio: 1, detail: stageText('done', 0, 0) });
+  return book;
+}
+
 /**
  * 导出一本书到本地。onStage 会先收到电脑端的打包进度(可能持续几十秒,
  * 大书是电脑在解 EPUB/PDF,不是手机在下载),再收到传输进度。
+ *
+ * 原生 App 优先走 Android 前台服务下载:切后台/锁屏时 WebView 会被冻结,
+ * 但原生下载不停;完成后把落盘文件读回来再解包导入。
  */
 export async function importBook(
   target: ImportTarget,
@@ -167,57 +228,84 @@ export async function importBook(
   const stopPackingWatch = watchPacking(onStage);
   let blob: Blob;
   try {
-    blob = await apiDownload('/api/mobile/bundle', query, (received, total) => {
-      onStage?.({
-        stage: 'downloading',
-        done: received,
-        total,
-        ratio: total ? Math.min(1, received / total) : 0,
-        detail: stageText('downloading', received, total),
+    const request = downloadRequest('/api/mobile/bundle', query);
+    if (request && BACKGROUND_DOWNLOAD_AVAILABLE) {
+      try {
+        const result = await downloadInBackground(
+          {
+            url: request.url,
+            fileName: `bundle-${Date.now()}.zip`,
+            title: target.kind === 'comic' ? target.title || target.file : target.file,
+            headers: request.headers,
+            pinned: request.pinned,
+          },
+          (progress) => {
+            const total = progress.total > 0 ? progress.total : 0;
+            const received = progress.received;
+            onStage?.({
+              stage: 'downloading',
+              done: received,
+              total,
+              ratio: total ? Math.min(1, received / total) : 0,
+              detail: stageText('downloading', received, total),
+            });
+          },
+        );
+        blob = result.blob;
+      } catch (nativeCause) {
+        // 证书/系统限制等情况下退回页面 fetch,保证功能不丢
+        console.warn('[download] 后台下载失败,回退前台下载', nativeCause);
+        blob = await apiDownload('/api/mobile/bundle', query, (received, total) => {
+          onStage?.({
+            stage: 'downloading',
+            done: received,
+            total,
+            ratio: total ? Math.min(1, received / total) : 0,
+            detail: stageText('downloading', received, total),
+          });
+        });
+      }
+    } else {
+      blob = await apiDownload('/api/mobile/bundle', query, (received, total) => {
+        onStage?.({
+          stage: 'downloading',
+          done: received,
+          total,
+          ratio: total ? Math.min(1, received / total) : 0,
+          detail: stageText('downloading', received, total),
+        });
       });
-    });
+    }
   } finally {
     stopPackingWatch();
   }
 
-  onStage?.({ stage: 'unpacking', done: blob.size, total: blob.size, ratio: 1, detail: stageText('unpacking', 0, 0) });
-  const zip = await JSZip.loadAsync(blob);
-  const manifestFile = zip.file('manifest.json');
-  if (!manifestFile) throw new Error('离线包缺少 manifest,请让电脑重新打包');
-  const manifest = JSON.parse(await manifestFile.async('string')) as BundleManifest;
-  if ((manifest.bundle_version || 0) > SUPPORTED_BUNDLE_VERSION) {
-    throw new Error(
-      `离线包版本过新（包 v${manifest.bundle_version}，App 支持 v${SUPPORTED_BUNDLE_VERSION}）：` +
-        '请把手机 App 升级到最新版后再试',
-    );
-  }
+  return importBundleBlob(blob, target, onStage);
+}
 
-  const comic = manifest.kind === 'comic';
-  const id = comic ? `comic:${manifest.title}/${manifest.file}` : `novel:${manifest.file}`;
-  const previous = await getBook(id);
-  if (previous) releaseZip(id); // 换包后旧的解包结果和它的 blob URL 都不能再用
-  const book: LocalBook = {
-    id,
-    kind: comic ? 'comic' : 'novel',
-    format: manifest.kind,
-    title: manifest.title || (comic ? target.title || '' : manifest.file.replace(/\.[^.]+$/, '')),
-    file: manifest.file,
-    total: manifest.total || (comic ? manifest.num_pages || 0 : (manifest.chapters || []).length),
-    chapters: manifest.chapters || [],
-    assets: manifest.assets || {},
-    coverArc: manifest.cover || '',
-    size: blob.size,
-    srcMtime: Math.round(manifest.src_mtime || 0),
-    srcSize: manifest.src_size || 0,
-    importedAt: Date.now(),
-    serverId: server.id,
-    serverName: server.name,
-    origin: 'download',
-  };
-  await saveChunk(id, blob);
-  await putBook(book);
-  onStage?.({ stage: 'done', done: blob.size, total: blob.size, ratio: 1, detail: stageText('done', 0, 0) });
-  return book;
+/**
+ * App 启动时恢复后台已经下完、但还没导入书库的离线包。
+ * 进程被杀/用户切走后再回来都能接上,不用重新下一遍。
+ */
+export async function recoverFinishedDownloads(): Promise<number> {
+  if (!BACKGROUND_DOWNLOAD_AVAILABLE || hasActiveBackgroundDownload()) return 0;
+  const items = await listBackgroundDownloads();
+  let imported = 0;
+  for (const item of items) {
+    if (item.state === 'running') continue;
+    if (item.state === 'done' && item.path) {
+      try {
+        const blob = await readBackgroundDownload(item.path);
+        await importBundleBlob(blob);
+        imported += 1;
+      } catch (cause) {
+        console.warn('[download] 恢复离线包失败', cause);
+      }
+    }
+    await removeBackgroundDownload(item.id);
+  }
+  if (imported) announceLibraryChange();
+  return imported;
 }
 
 /** 重新拉一次离线包(电脑上这本书更新过时用)。 */

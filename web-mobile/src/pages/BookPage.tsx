@@ -10,6 +10,7 @@ import {
 } from '../lib/reading-progress';
 import BookCover from '../components/BookCover';
 import { DownloadButton, LocalChip } from '../components/OfflineControls';
+import SkeletonList from '../components/SkeletonList';
 import {
   localComicSource,
   localNovelSource,
@@ -39,11 +40,18 @@ function Loading({ text }: { text: string }) {
 
 function DetailCover({ title, epub, src }: { title: string; epub: boolean; src?: string }) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const image = src && !failed ? src : '';
   return (
     <div className="detail-cover" style={image ? undefined : { background: gradientFor(title) }}>
       {image ? (
-        <img src={image} alt="" onError={() => setFailed(true)} />
+        <img
+          src={image}
+          alt=""
+          className={loaded ? 'is-loaded' : ''}
+          onLoad={() => setLoaded(true)}
+          onError={() => setFailed(true)}
+        />
       ) : (
         <>
           <span>{initialOf(title)}</span>
@@ -75,16 +83,37 @@ function Shell({ label, onBack, children }: { label: string; onBack: () => void;
   );
 }
 
-function Notice({ title, text, onBack }: { title: string; text: string; onBack: () => void }) {
+function Notice({
+  title,
+  text,
+  onBack,
+  onRetry,
+}: {
+  title: string;
+  text: string;
+  onBack: () => void;
+  onRetry?: () => void;
+}) {
   return (
     <Shell label="内容详情" onBack={onBack}>
       <div className="empty-state">
         <BookOpen size={34} />
         <h3>{title}</h3>
         <p>{text}</p>
-        <button type="button" className="btn btn--primary" onClick={onBack}>
-          返回
-        </button>
+        <div className="empty-state__actions">
+          {onRetry && (
+            <button type="button" className="btn btn--primary" onClick={onRetry}>
+              重试
+            </button>
+          )}
+          <button
+            type="button"
+            className={onRetry ? 'btn btn--ghost' : 'btn btn--primary'}
+            onClick={onBack}
+          >
+            返回
+          </button>
+        </div>
       </div>
     </Shell>
   );
@@ -108,6 +137,7 @@ function NovelDetail({
   const [chapterMap, setChapterMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
   const [query, setQuery] = useState('');
   const [limit, setLimit] = useState(200);
 
@@ -136,7 +166,7 @@ function NovelDetail({
     return () => {
       cancelled = true;
     };
-  }, [source]);
+  }, [reloadToken, source]);
 
   const chapters = meta?.chapters || [];
   const filtered = useMemo(() => {
@@ -185,7 +215,18 @@ function NovelDetail({
         </div>
       </section>
 
-      {error && <div className="banner banner--error">{error}</div>}
+      {error && (
+        <div className="banner banner--error">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="text-btn"
+            onClick={() => setReloadToken((value) => value + 1)}
+          >
+            重试
+          </button>
+        </div>
+      )}
 
       <div className="detail-section-heading">
         <h2>目录</h2>
@@ -206,7 +247,7 @@ function NovelDetail({
       </div>
 
       {loading ? (
-        <Loading text="正在读取目录…" />
+        <SkeletonList rows={7} cover={false} compact />
       ) : visible.length === 0 ? (
         <div className="empty-state empty-state--compact">
           <BookOpen size={28} />
@@ -268,6 +309,7 @@ function ComicDetail({
   const [totalMap, setTotalMap] = useState<Record<string, number>>({});
   const [chapterMaps, setChapterMaps] = useState<Record<string, Record<string, number>>>({});
   const [loading, setLoading] = useState(true);
+  const [reloadToken, setReloadToken] = useState(0);
 
   const files = source.files;
 
@@ -303,7 +345,7 @@ function ComicDetail({
     return () => {
       cancelled = true;
     };
-  }, [files, source]);
+  }, [files, reloadToken, source]);
 
   const stored = useMemo(() => {
     const map: Record<string, LocalBook> = {};
@@ -332,20 +374,33 @@ function ComicDetail({
             <span>{loading ? '正在读取…' : `${files.length} 个 PDF`}</span>
             {local && <LocalChip />}
           </p>
-          {recentPage > 0 && (
+          {files.length > 0 && (
             <button
               type="button"
               className="btn btn--primary detail-read-btn"
-              onClick={() => navigate(source.readerHref(recentFile || files[0], recentPage))}
+              onClick={() =>
+                navigate(source.readerHref(recentFile || files[0], recentPage || 1))
+              }
             >
               <Play size={17} />
-              继续阅读 第 {recentPage} 页
+              {recentPage > 0 ? `继续阅读 第 ${recentPage} 页` : '开始阅读'}
             </button>
           )}
         </div>
       </section>
 
-      {error && <div className="banner banner--error">{error}</div>}
+      {error && (
+        <div className="banner banner--error">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="text-btn"
+            onClick={() => setReloadToken((value) => value + 1)}
+          >
+            重试
+          </button>
+        </div>
+      )}
 
       <div className="detail-section-heading">
         <h2>阅读顺序</h2>
@@ -405,6 +460,7 @@ export default function BookPage() {
     source: null,
     error: '',
   });
+  const [comicReload, setComicReload] = useState(0);
 
   const comicTitle = kind === 'comic' && !id ? file : '';
   useEffect(() => {
@@ -427,7 +483,7 @@ export default function BookPage() {
     return () => {
       cancelled = true;
     };
-  }, [comicTitle]);
+  }, [comicReload, comicTitle]);
 
   // 源对象必须稳定:详情页取数以它为依赖,每次渲染都新建会无限重读
   const localSource = useMemo(() => {
@@ -481,7 +537,14 @@ export default function BookPage() {
 
   if (kind === 'comic') {
     if (onlineComic.error) {
-      return <Notice title="打不开这本漫画" text={onlineComic.error} onBack={goBack} />;
+      return (
+        <Notice
+          title="打不开这本漫画"
+          text={onlineComic.error}
+          onBack={goBack}
+          onRetry={() => setComicReload((value) => value + 1)}
+        />
+      );
     }
     if (!onlineComic.source) {
       return (

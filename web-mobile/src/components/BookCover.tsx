@@ -10,11 +10,13 @@ import type { LocalBook } from '../lib/offline/db';
 export default function BookCover({ book }: { book: LocalBook }) {
   const [url, setUrl] = useState('');
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setUrl('');
     setFailed(false);
+    setLoaded(false);
     if (!book.coverArc) return undefined;
     localCoverUrl(book)
       .then((value) => {
@@ -33,14 +35,32 @@ export default function BookCover({ book }: { book: LocalBook }) {
   if (comic) {
     return (
       <div className="comic-cover" style={showImage ? undefined : { background: gradientFor(book.title) }}>
-        {showImage ? <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} /> : <span>{initialOf(book.title)}</span>}
+        {showImage ? (
+          <img
+            src={url}
+            alt=""
+            loading="lazy"
+            className={loaded ? 'is-loaded' : ''}
+            onLoad={() => setLoaded(true)}
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <span>{initialOf(book.title)}</span>
+        )}
       </div>
     );
   }
   return (
     <div className="novel-cover" style={showImage ? undefined : { background: gradientFor(book.title) }}>
       {showImage ? (
-        <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} />
+        <img
+          src={url}
+          alt=""
+          loading="lazy"
+          className={loaded ? 'is-loaded' : ''}
+          onLoad={() => setLoaded(true)}
+          onError={() => setFailed(true)}
+        />
       ) : (
         <>
           <span className="novel-cover__char">{initialOf(book.title)}</span>

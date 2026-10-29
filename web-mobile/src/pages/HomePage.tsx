@@ -82,9 +82,11 @@ export default function HomePage() {
 
   const recent = lastReadBook(library);
   const dirty = dirtyRecords(library);
-  const shelfCount = library.books.length;
   const novelCount = library.books.filter((book) => book.kind === 'novel').length;
-  const comicCount = shelfCount - novelCount;
+  const comicCount = new Set(
+    library.books.filter((book) => book.kind === 'comic').map((book) => book.title),
+  ).size;
+  const shelfCount = novelCount + comicCount;
 
   return (
     <div className="home-page">
@@ -208,11 +210,11 @@ export default function HomePage() {
           <b>{comicCount}</b>
           <span>本离线漫画</span>
         </button>
-        <div className="home-stat">
+        <button type="button" className="home-stat" onClick={() => navigate('/settings')}>
           <HardDrive size={18} />
           <b>{formatSize(library.bytes)}</b>
           <span>离线占用</span>
-        </div>
+        </button>
       </section>
 
       {quota && (

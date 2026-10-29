@@ -27,8 +27,10 @@ import {
   type SharedProgressRecord,
 } from '../lib/reading-progress';
 import { DownloadButton } from '../components/OfflineControls';
+import SkeletonList from '../components/SkeletonList';
 import { syncProgress } from '../lib/offline/sync';
 import { isOutdated } from '../lib/offline/transfer';
+import { useScrollMemory } from '../lib/useScrollMemory';
 import { useLocalLibrary } from '../lib/offline/useLibrary';
 import type { LocalBook } from '../lib/offline/db';
 import type { ComicFileGroup, FileEntry } from '../lib/types';
@@ -99,6 +101,7 @@ export default function LibraryPage() {
   const [error, setError] = useState('');
   const [progressMap, setProgressMap] = useState<Record<string, SharedProgressRecord>>({});
   const library = useLocalLibrary();
+  useScrollMemory(`library:${tab}`, !loading);
   const stored = useMemo(() => {
     const map: Record<string, LocalBook> = {};
     for (const book of library.books) map[book.id] = book;
@@ -245,10 +248,7 @@ export default function LibraryPage() {
       )}
 
       {loading ? (
-        <div className="library-loading">
-          <Loader2 size={26} className="spin" />
-          <span>正在读取书库…</span>
-        </div>
+        <SkeletonList rows={6} />
       ) : offline ? (
         <div className="library-offline">
           <WifiOff size={30} />

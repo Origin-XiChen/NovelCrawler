@@ -1,6 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import {
+  HashRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
+import AppUpdateBanner from './components/AppUpdateBanner';
 import BottomNav from './components/BottomNav';
 import NativeBackButton from './components/NativeBackButton';
 import BookPage from './pages/BookPage';
@@ -16,11 +24,13 @@ import { apiGet } from './lib/api';
 import { loadedBuildId } from './lib/build';
 import { getActiveServer } from './lib/connection';
 import { IS_NATIVE } from './lib/native';
+import { recoverFinishedDownloads } from './lib/offline/transfer';
 import { syncImportedBooks } from './lib/offline/upload';
 import type { PingResult } from './lib/types';
 
 function PresenceWatcher() {
   const [updateReady, setUpdateReady] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
     if (IS_NATIVE) return;
@@ -49,6 +59,8 @@ function PresenceWatcher() {
   }, []);
 
   if (!updateReady) return null;
+  // 只在四个主页面提示，阅读器/连接页/书籍详情有各自的顶部操作
+  if (!/^\/(home|library|shelf|settings)(\/|$)/.test(location.pathname)) return null;
   return (
     <div className="update-banner" role="status">
       <span>
@@ -64,6 +76,28 @@ function PresenceWatcher() {
       </button>
     </div>
   );
+}
+
+/** 后台下载完成但还没导入的离线包：启动/回前台时自动补导入 */
+function BackgroundDownloadRecovery() {
+  useEffect(() => {
+    if (!IS_NATIVE) return;
+    const run = () => {
+      if (document.visibilityState === 'visible') {
+        void recoverFinishedDownloads().catch(() => {
+          // 单个包损坏时不打扰用户，文件会按状态清理
+        });
+      }
+    };
+    run();
+    const timer = window.setInterval(run, 8000);
+    document.addEventListener('visibilitychange', run);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', run);
+    };
+  }, []);
+  return null;
 }
 
 /** 电脑点了「同步手机本地」后,App 在后台把待传的书送过去 */
@@ -125,6 +159,8 @@ export default function App() {
     <HashRouter>
       <NativeBackButton />
       <PresenceWatcher />
+      <AppUpdateBanner />
+      <BackgroundDownloadRecovery />
       <LocalSyncWatcher />
       <UnauthorizedBridge />
       <Routes>

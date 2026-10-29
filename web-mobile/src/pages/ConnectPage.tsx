@@ -111,7 +111,14 @@ export default function ConnectPage() {
   const doPairRef = useRef<
     (base: string, pairCode: string, pin?: string, password?: string) => Promise<void>
   >(async () => undefined);
+  const formRef = useRef<HTMLFormElement>(null);
   const expired = searchParams.get('expired') === '1';
+
+  const focusForm = () => {
+    window.setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  };
 
   // 手动重新探测:换网/隧道重启后,不用重新扫码也能把地址切到通的那个
   const reprobe = async (server: ServerEntry) => {
@@ -286,6 +293,7 @@ export default function ConnectPage() {
     setMode('manual');
     if (sshNeedsPassword) {
       setInfo('二维码带了内建 SSH 通道：填密码后点「连接电脑」走加密隧道；留空则明文直连。');
+      focusForm();
       return;
     }
     setInfo('已识别配对二维码，正在连接电脑…');
@@ -428,6 +436,7 @@ export default function ConnectPage() {
       setMode('manual');
       if (sshNeedsPassword) {
         setInfo('二维码带了内建 SSH 通道：填密码后点「连接电脑」走加密隧道；留空则明文直连。');
+        focusForm();
         return;
       }
       setInfo('已识别配对二维码，正在连接电脑…');
@@ -464,6 +473,7 @@ export default function ConnectPage() {
           '局域网 HTTP 下浏览器不能调用摄像头：请直接用手机系统相机扫描电脑上的二维码，会自动打开本页完成配对；也可以手动输入地址和配对码。',
         );
         setMode('manual');
+        focusForm();
       }
       return;
     }
@@ -550,7 +560,11 @@ export default function ConnectPage() {
               <button
                 type="button"
                 className="btn btn--ghost btn--sm"
-                onClick={() => setMode(mode === 'manual' && method === 'lan' ? 'choose' : 'manual')}
+                onClick={() => {
+                  const next = !(mode === 'manual' && method === 'lan');
+                  setMode(next ? 'manual' : 'choose');
+                  if (next) focusForm();
+                }}
               >
                 <Smartphone size={15} />
                 手动输入
@@ -686,6 +700,7 @@ export default function ConnectPage() {
 
       {showForm && (
         <form
+          ref={formRef}
           className="panel connect-form"
           onSubmit={(event) => {
             event.preventDefault();

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { App } from '@capacitor/app';
 import { Download, X } from 'lucide-react';
 import { fetchLatestApk, IS_NATIVE, openApkDownload, type ApkUpdate } from '../lib/native';
@@ -24,6 +25,7 @@ function markSkipped(version: string): void {
 }
 
 export default function AppUpdateBanner() {
+  const location = useLocation();
   const [update, setUpdate] = useState<ApkUpdate | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [opening, setOpening] = useState(false);
@@ -65,6 +67,8 @@ export default function AppUpdateBanner() {
   }, []);
 
   if (!update || dismissed) return null;
+  // 只挡主页面；阅读器/连接页/详情页的顶栏要留给返回和翻页
+  if (!/^\/(home|library|shelf|settings)(\/|$)/.test(location.pathname)) return null;
 
   const openDownload = async () => {
     setOpening(true);

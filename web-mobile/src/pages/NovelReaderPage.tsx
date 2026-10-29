@@ -433,7 +433,7 @@ export default function NovelReaderPage() {
         <button
           type="button"
           className="icon-btn"
-          aria-label="返回目录"
+          aria-label="返回详情"
           onClick={() => {
             persist();
             navigate(backHref);
@@ -593,6 +593,9 @@ export default function NovelReaderPage() {
               })
             )}
           </div>
+          {(meta?.chapters?.length || 0) > 500 && (
+            <p className="toc-more">章节较多，仅显示前 500 章；用搜索可缩小范围</p>
+          )}
         </div>
       )}
 
