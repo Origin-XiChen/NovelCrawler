@@ -6,7 +6,7 @@ export const IS_NATIVE = Capacitor.isNativePlatform();
 
 const RELEASE_API = 'https://api.github.com/repos/Origin-XiChen/NovelCrawler/releases/latest';
 /** Dev 通道:列全部 release,允许预发布(prerelease)版本 */
-const RELEASES_API = 'https://api.github.com/repos/Origin-XiChen/NovelCrawler/releases?per_page=20';
+const RELEASES_API = 'https://api.github.com/repos/Origin-XiChen/NovelCrawler/releases?per_page=100';
 const APK_PATTERN = /\.apk$/i;
 
 export interface ApkUpdate {
@@ -75,8 +75,12 @@ export async function currentAppVersion(): Promise<string> {
 
 /**
  * 查最新 APK。
- * includePrerelease=true 时走 Dev 通道:列出全部 release 并允许预发布版本,
- * 取第一个「带 Mobile APK」的版本 —— 这样 Dev 版也能推给手机测试。
+ *
+ * includePrerelease=true 时走 Dev 通道:列出全部 release 并允许预发布版本。
+ *
+ * ⚠️ **不能按列表顺序取第一条**：GitHub 的 /releases 返回顺序并不是按时间
+ * （实测 v1.7.10-dev.11 被排到第 9 位，前面全是 dev.9/dev.8…），
+ * 按顺序取会一直停在旧版本上。这里统一按版本号降序排，取版本最高的那个。
  */
 export async function fetchLatestApk(includePrerelease = false): Promise<ApkUpdate | null> {
   if (!IS_NATIVE) return null;
@@ -91,15 +95,21 @@ export async function fetchLatestApk(includePrerelease = false): Promise<ApkUpda
     });
     if (!res.ok) throw new Error(`更新接口返回 ${res.status}`);
     const payload = (await res.json()) as ReleaseInfo | ReleaseInfo[];
-    const list = (Array.isArray(payload) ? payload : [payload])
+    const ranked = (Array.isArray(payload) ? payload : [payload])
       .filter((item) => item && !item.draft)
-      .filter((item) => includePrerelease || !item.prerelease);
-    const release = list.find((item) =>
-      (item.assets || []).some((asset) => APK_PATTERN.test(asset.name || '') && /mobile/i.test(asset.name || '')),
-    ) || list[0];
-    if (!release) return null;
-    const version = String(release.tag_name || '').replace(/^v/i, '');
-    if (!version) return null;
+      .filter((item) => includePrerelease || !item.prerelease)
+      .map((item) => ({ item, version: String(item.tag_name || '').replace(/^v/i, '') }))
+      .filter((entry) => entry.version)
+      .sort((a, b) => compareVersions(b.version, a.version));
+    // 只认带手机安装包的那条，且必须是版本最高的：GitHub 顺序不可信（见上）
+    const picked = ranked.find((entry) =>
+      (entry.item.assets || []).some(
+        (asset) => APK_PATTERN.test(asset.name || '') && /mobile/i.test(asset.name || ''),
+      ),
+    );
+    if (!picked) return null;
+    const release = picked.item;
+    const version = picked.version;
     const local = await currentAppVersion();
     if (compareVersions(version, local) <= 0) return null;
     const asset = (release.assets || []).find(
