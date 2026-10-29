@@ -350,6 +350,22 @@ a {
   color: var(--text-3);
 }
 
+/* 更新卡片里的并排按钮（下载 / 发布页） */
+.update-card__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.update-card__actions .btn {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 下载中的体积/速度：等宽数字，跳动时不抖 */
+.update-card__meta--nums {
+  font-variant-numeric: tabular-nums;
+}
+
 .update-card__bar {
   height: 4px;
   border-radius: 999px;
@@ -1074,6 +1090,36 @@ a {
 .settings-row__title {
   font-size: var(--fs-body2);
   font-weight: 600;
+}
+
+/* 设置页内嵌的更新进度（真实百分比 + 已下载/总大小 + 速度） */
+.settings-update {
+  margin-top: 10px;
+  max-width: 320px;
+}
+
+.settings-update__bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.settings-update__bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 0.18s linear;
+}
+
+.settings-update__meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-row__desc {

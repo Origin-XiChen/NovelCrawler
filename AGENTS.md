@@ -152,7 +152,7 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 3. **漏同步 `package-lock.json`**：五处 package.json 改了，锁文件还是旧版本。
 4. **把 `sshd/host_rsa` 提交进公开仓库**：主机私钥泄露，只能 `filter-branch` 重写历史 + 重新生成。
 5. **本机跑 `electron-builder` 打包 NSIS**：稳定报 `Exit code: 2`，产物只有 0.4MB。**这是已知现象，不要在本机排查**，交给 CI。
-6. **不要恢复应用内下载/静默安装**：electron-updater 的 `download-progress` 在分段续传重试时会从 0 重报（界面"下满又归零"），`quitAndInstall` 被取消或文件占用时静默失败（"重启还是旧版"）。更新只做「检查 + 打开发布页」，下载安装交给浏览器。
+6. **不要再用 electron-updater 下载/安装**：它的 `download-progress` 在分段续传重试时会从 0 重报（"下满又归零"），`quitAndInstall` 被取消或文件占用时静默失败（"重启还是旧版"）。桌面端现用自己的 `desktop/updates.js`（HTTPS + Range 续传 + sha256 校验 + 调系统安装器）。
 7. **`/api/mobile/ping` 崩溃会让手机显示"这个地址没有响应"**：TCP 能连上但服务端一个字节不回（`ERR_EMPTY_RESPONSE`）。排查时先看服务端日志有没有 traceback，别一头扎进网络/防火墙。
 7. **在真实数据目录跑冒烟**：污染 `config.json` / 书架。一律 `NOVEL_DATA_DIR` 隔离。
 7. **本机 `electron-builder --win nsis` 必失败**（makensis 成功，随后运行安装包生成卸载器时报
@@ -164,6 +164,14 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 ## §9 版本进度
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
+
+### 1.7.10-dev.11 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 新增：**自建应用内更新下载器**（`desktop/updates.js`）——GitHub Releases API 自己查最新版（支持 Dev 预发布），HTTPS 直下 + `Range` 断点续传，进度按"已落盘字节"计算**只增不减**；下载完按 GitHub `digest`(sha256) 校验，再调系统 NSIS 安装向导并退出应用让文件解锁
+- 修复：进度归零/装不上的根因（electron-updater 续传重报 + `quitAndInstall` 静默失败）不再适用——桌面端已完全不依赖 `autoUpdater` 的下载/安装链路
+- 其他：侧栏 `UpdateCard` 与设置页共用同一状态机（available → downloading → downloaded），显示已下载/总大小与实时速度；下载中 200ms 节流 + 每 1MB 补报
+- 验证：本地 HTTP 桩测试 8MB 包在 2.5MB 处断流 → 自动续传、进度 0 次倒退、sha256 通过；重复下载直接复用；digest 不符时报错并删除 `.part`
+- 风险遗留：漫画「同步后看不了」仍待复现
 
 ### 1.7.10-dev.10 — 2026-10-29
 - 状态：已发布（Dev 预发布）

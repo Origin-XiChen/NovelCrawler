@@ -1,6 +1,6 @@
 {
   "name": "@novelcrawler/web",
-  "version": "1.7.10-dev.10",
+  "version": "1.7.10-dev.11",
   "private": true,
   "type": "module",
   "scripts": {

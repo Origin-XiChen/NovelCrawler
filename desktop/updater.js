@@ -1,11 +1,27 @@
 const { app, ipcMain } = require('electron');
-const { autoUpdater } = require('electron-updater');
 const log = require('./logger');
+const updates = require('./updates');
+
+/**
+ * 桌面端更新：检查 → 应用内下载（自建下载器，进度只增不减）→ 调系统安装器。
+ *
+ * 曾经用过 electron-updater 的 downloadUpdate + quitAndInstall，真机上是这样坏的：
+ *   · 分段/差分下载遇到重试，`download-progress` 会从 0 重新报一遍 → 界面「下满又归零」
+ *   · `quitAndInstall` 在安装器被取消或文件被占用时静默失败 → 重启还是旧版本
+ * 现在检查与下载都自己实现（见 `updates.js`），下载完用系统 NSIS 向导安装。
+ */
 
 let getWindow = () => null;
 let started = false;
-// 当前已下载/待安装的版本,用于记录"这次安装装的是哪个版本"
-let pendingVersion = '';
+// 当前候选版本（check 得到，download 使用）
+let pending = null;
+// 已下好、等待安装的安装包路径
+let installer = '';
+// 同一时刻只允许一个下载任务
+let downloadPromise = null;
+
+// 启动时不自动检查：更新完全由用户手动触发
+const AUTO_CHECK = false;
 
 function send(status) {
   const win = getWindow();
@@ -14,7 +30,7 @@ function send(status) {
   }
 }
 
-/** Dev 通道开关与安装状态:落在 userData/updater.json,重启后仍然生效 */
+/** Dev 通道开关与安装状态：落在 userData/updater.json，重启后仍生效 */
 function settingsFile() {
   return require('path').join(app.getPath('userData'), 'updater.json');
 }
@@ -28,7 +44,7 @@ function readSettings() {
   }
 }
 
-/** 合并写入:只覆盖传入的字段,别把 allowPrerelease 之类的旧值冲掉 */
+/** 合并写入：只覆盖传入字段，别把 allowPrerelease 冲掉 */
 function writeSettings(patch) {
   try {
     require('fs').writeFileSync(
@@ -45,174 +61,130 @@ function readPrerelease() {
   return Boolean(readSettings().allowPrerelease);
 }
 
-function writePrerelease(flag) {
-  writeSettings({ allowPrerelease: Boolean(flag) });
-}
-
-/** 语义化比较:1.7.9-dev.2 < 1.7.9-dev.10 < 1.7.9（与手机端同一套规则） */
-function compareVersion(a, b) {
-  const split = (v) => {
-    const text = String(v || '').replace(/^v/i, '');
-    const [core, pre] = text.split('-');
-    const nums = core.split('.').map((n) => Number.parseInt(n, 10) || 0);
-    // 没有预发布标记就是正式版。semver 里正式版大于同号的所有预发布,
-    // 所以这里必须用 null 表示「比任何 dev 号都大」,不能用 -1 ——
-    // 用 -1 会让 1.7.10 小于 1.7.10-dev.5,Dev 通道用户永远升不到正式版。
-    const dev = pre ? Number.parseInt(pre.replace(/^dev\.?/i, ''), 10) || 0 : null;
-    return { nums, dev };
-  };
-  const left = split(a);
-  const right = split(b);
-  for (let i = 0; i < 3; i += 1) {
-    const diff = (left.nums[i] || 0) - (right.nums[i] || 0);
-    if (diff !== 0) return diff;
-  }
-  // 主版本号相同,再比预发布:正式版 > 预发布 > 更小的 dev 号
-  if (left.dev === null && right.dev === null) return 0;
-  if (left.dev === null) return 1;
-  if (right.dev === null) return -1;
-  return left.dev - right.dev;
-}
-
-/** 切换是否接收预发布版本;立即作用于下一次检查 */
+/** 切换是否接收预发布版本；立即作用于下一次检查 */
 function setPrerelease(flag) {
   const value = Boolean(flag);
-  autoUpdater.allowPrerelease = value;
-  writePrerelease(value);
+  writeSettings({ allowPrerelease: value });
   send({ type: 'channel', prerelease: value });
   return value;
 }
 
-function init(options) {
-  getWindow = options.getWindow;
-
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowPrerelease = readPrerelease();
-
-  // 启动时自检:当前版本已经追上(或超过)上次尝试安装的版本 → 说明装成功了,
-  // 把标记清掉,免得下次同版本再来时被误判成"安装未生效"。
-  const bootState = readSettings();
-  if (bootState.installAttempted
-      && compareVersion(app.getVersion(), bootState.installAttempted) >= 0) {
+/** 上次安装没生效的版本号（装完版本没变时，避免反复提示同一个包） */
+function takeFailedInstall() {
+  const attempted = String(readSettings().installAttempted || '');
+  if (!attempted) return '';
+  // 已经升上去了就把标记清掉，别让它永久拦着
+  if (updates.compareVersion(app.getVersion(), attempted) >= 0) {
     writeSettings({ installAttempted: '' });
+    return '';
   }
+  return attempted;
+}
 
-  autoUpdater.logger = {
-    info: (...args) => log.info('[updater]', ...args),
-    warn: (...args) => log.warn('[updater]', ...args),
-    error: (...args) => log.error('[updater]', ...args),
-    debug: (...args) => log.info('[updater]', ...args),
-  };
-
-  autoUpdater.on('checking-for-update', () => send({ type: 'checking' }));
-  autoUpdater.on('update-available', (info) => {
-    // 死循环防线:feed 里给的版本如果没有比当前版本更新(同号重发、或 prerelease
-    // 通道读到同版本),直接判"已是最新",否则用户会陷入"装完还提示更新"的循环。
-    const current = app.getVersion();
-    if (info.version && compareVersion(info.version, current) <= 0) {
-      log.warn('[updater] 忽略非更新的版本提示', { offered: info.version, current });
-      send({ type: 'not-available', version: current });
+async function check() {
+  if (!app.isPackaged) {
+    send({ type: 'dev' });
+    return;
+  }
+  send({ type: 'checking' });
+  try {
+    const found = await updates.checkUpdate(readPrerelease());
+    if (!found) {
+      pending = null;
+      send({ type: 'not-available', version: app.getVersion() });
       return;
     }
-    // 第二条防线:上一轮已经对这个版本执行过安装,重启后当前版本却没变 ——
-    // 说明安装没落地(文件被占用 / 安装器被取消)。此时再提示"可更新"只会让
-    // 用户无限重复装同一个包,直接报错并给出可执行的出路。
-    const attempted = IN_APP_UPDATE ? String(readSettings().installAttempted || '') : '';
-    if (info.version && attempted && compareVersion(info.version, attempted) === 0) {
-      log.warn('[updater] 上次安装未生效', { offered: info.version, current });
+    const failed = takeFailedInstall();
+    if (failed && updates.compareVersion(found.version, failed) === 0) {
+      log.warn('[updater] 上次安装未生效', { offered: found.version, current: app.getVersion() });
       send({
         type: 'error',
-        message: `上次安装 v${info.version} 没有生效(安装可能被取消或文件被占用),请到 GitHub Releases 手动下载安装包`,
+        message: `上次安装 v${found.version} 没有生效（安装可能被取消），请重新下载安装或到发布页手动安装`,
       });
       return;
     }
+    pending = found;
+    installer = '';
     send({
       type: 'available',
-      version: info.version,
-      releaseName: info.releaseName || undefined,
-      releaseNotes:
-        typeof info.releaseNotes === 'string' ? info.releaseNotes.slice(0, 2000) : undefined,
+      version: found.version,
+      releaseName: `v${found.version}`,
+      releaseNotes: found.notes || undefined,
+      size: found.size || undefined,
     });
-  });
-  autoUpdater.on('update-not-available', (info) =>
-    send({ type: 'not-available', version: info.version }),
-  );
-  autoUpdater.on('download-progress', (progress) =>
-    send({
-      type: 'progress',
-      percent: progress.percent,
-      transferred: progress.transferred,
-      total: progress.total,
-    }),
-  );
-  autoUpdater.on('update-downloaded', (info) => {
-    pendingVersion = info.version || pendingVersion;
-    send({ type: 'downloaded', version: info.version });
-  });
-  autoUpdater.on('error', (error) => {
-    log.error('[updater]', error);
+  } catch (error) {
     send({ type: 'error', message: error?.message || String(error) });
-  });
-
-  ipcMain.handle('updater:check', async () => {
-    if (!app.isPackaged) {
-      send({ type: 'dev' });
-      return;
-    }
-    try {
-      await autoUpdater.checkForUpdates();
-    } catch (error) {
-      send({ type: 'error', message: error?.message || String(error) });
-    }
-  });
-
-  ipcMain.handle('updater:download', async () => {
-    if (!app.isPackaged) return;
-    if (!IN_APP_UPDATE) {
-      // 手动更新模式:不再在应用内下载(进度会归零、安装常失败)
-      log.info('[updater] 已改为手动下载,忽略应用内下载请求');
-      return;
-    }
-    try {
-      await autoUpdater.downloadUpdate();
-    } catch (error) {
-      send({ type: 'error', message: error?.message || String(error) });
-    }
-  });
-
-  ipcMain.handle('updater:install', () => {
-    if (!app.isPackaged) return;
-    if (!IN_APP_UPDATE) {
-      log.info('[updater] 已改为手动下载,忽略应用内安装请求');
-      return;
-    }
-    // 先记下"这次要装哪个版本":重启后若当前版本仍是旧的,update-available
-    // 会据此判定安装未生效,改为报错而不是继续提示同一个包。
-    if (pendingVersion) writeSettings({ installAttempted: pendingVersion });
-    // isSilent 必须为 true:nsis 配置是 oneClick:false(带向导的安装器),
-    // 非静默调用会把「欢迎 → 选择目录 → 安装 → 完成」整套向导弹出来,
-    // 用户一取消就前功尽弃,下次启动又提示同一个版本 —— 表现为「更新提示关不掉」。
-    // 静默安装给安装器传 /S,装完由 --force-run 自动拉起新版本。
-    setImmediate(() => autoUpdater.quitAndInstall(true, true));
-  });
+  }
 }
 
-// 更新一律手动(用户要求 2026-10-29)。
-// 自动下载/静默安装曾在真机上反复失败:electron-updater 用 range 请求续传,
-// 遇到断点重试会把 download-progress 从 0 重新报一遍,界面就是"下满了又归零";
-// 而 quitAndInstall 一旦失败,重启后还是旧版本 —— 表现为"更新装了没效果"。
-// 现在两件事都交给用户:检查只负责"有没有新版",下载安装走浏览器 + 安装包。
-const AUTO_CHECK = false;
-const IN_APP_UPDATE = false;
+function download() {
+  if (!app.isPackaged) return Promise.resolve();
+  if (!pending) {
+    send({ type: 'error', message: '请先检查更新' });
+    return Promise.resolve();
+  }
+  if (downloadPromise) return downloadPromise;
 
-function scheduleStartupCheck(delayMs = 8000) {
-  if (!AUTO_CHECK) return;
-  if (started || !app.isPackaged) return;
+  let lastEmit = 0;
+  downloadPromise = (async () => {
+    try {
+      const file = await updates.download(pending, (progress) => {
+        // 200ms 节流，避免 IPC 刷爆渲染进程
+        const now = Date.now();
+        if (progress.percent < 100 && now - lastEmit < 200) return;
+        lastEmit = now;
+        send({
+          type: 'progress',
+          percent: progress.percent,
+          transferred: progress.transferred,
+          total: progress.total,
+          bytesPerSecond: progress.bytesPerSecond,
+        });
+      });
+      installer = file;
+      send({ type: 'downloaded', version: pending.version });
+    } catch (error) {
+      log.error('[updater] 下载失败', error);
+      send({ type: 'error', message: error?.message || String(error) });
+    } finally {
+      downloadPromise = null;
+    }
+  })();
+  return downloadPromise;
+}
+
+/** 调系统安装器：先记下"这次装哪个版本"，再拉起安装包并退出应用 */
+function install() {
+  if (!app.isPackaged) return false;
+  if (!installer) {
+    send({ type: 'error', message: '安装包还没下载好' });
+    return false;
+  }
+  try {
+    if (pending?.version) writeSettings({ installAttempted: pending.version });
+    updates.install(installer);
+    return true;
+  } catch (error) {
+    send({ type: 'error', message: error?.message || String(error) });
+    return false;
+  }
+}
+
+function init(options) {
+  getWindow = options.getWindow;
+  if (started) return;
   started = true;
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((error) => log.warn('[updater] 启动检查失败', error));
-  }, delayMs);
+
+  ipcMain.handle('updater:set-prerelease', (_event, flag) => setPrerelease(flag));
+  ipcMain.handle('updater:get-prerelease', () => readPrerelease());
+  ipcMain.handle('updater:check', () => check());
+  ipcMain.handle('updater:download', () => download());
+  ipcMain.handle('updater:install', () => install());
+}
+
+/** 保留调用点：启动自动检查已关闭（用户要求手动更新） */
+function scheduleStartupCheck() {
+  if (!AUTO_CHECK) return;
 }
 
 module.exports = { init, scheduleStartupCheck, setPrerelease, readPrerelease };

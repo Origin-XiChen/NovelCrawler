@@ -19,6 +19,7 @@ import {
 import { apiDelete, apiGet, apiPost } from '../lib/api';
 import { Modal } from '../components/Modal';
 import { useTheme, type ThemeMode } from '../lib/theme';
+import { formatBytes } from '../lib/format';
 import { useUpdate } from '../lib/updater';
 import { openExternal } from '../lib/desktop';
 import { useToast } from '../lib/toast';
@@ -119,7 +120,7 @@ function dateStamp() {
 
 export function SettingsPage() {
   const { mode, setMode } = useTheme();
-  const { state, appVersion, bridgeAvailable, check, openDownloadPage } = useUpdate();
+  const { state, appVersion, bridgeAvailable, check, download, install, openDownloadPage } = useUpdate();
   // Dev 通道:与手机端一致,开启后检查预发布版本
   // 同步管理:电脑侧的逐章进度(手机回传 + 本机阅读都记在这里)
   const [syncRecords, setSyncRecords] = useState<{
@@ -699,34 +700,71 @@ export function SettingsPage() {
             </div>
 
             <div className="settings-row">
-              <div>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div className="settings-row__title">版本更新</div>
                 <div className="settings-row__desc">
                   当前 v{appVersion}
                   {!bridgeAvailable
                     ? ' · 浏览器模式不支持检查更新'
-                    : state.phase === 'available' || state.phase === 'downloaded'
-                      ? ` · 发现 v${state.version}，需手动下载安装`
-                      : state.phase === 'error'
-                        ? ` · ${state.message ?? '检查失败'}`
-                        : ' · 手动更新（GitHub Releases）'}
+                    : state.phase === 'available'
+                      ? ` · 发现 v${state.version}${state.size ? `（${formatBytes(state.size)}）` : ''}`
+                      : state.phase === 'downloaded'
+                        ? ` · 新版 v${state.version} 已下载，等待安装`
+                        : state.phase === 'downloading'
+                          ? ` · 正在下载 v${state.version}`
+                          : state.phase === 'error'
+                            ? ` · ${state.message ?? '检查失败'}`
+                            : ' · GitHub Releases 通道'}
                 </div>
+                {(state.phase === 'downloading' || state.phase === 'downloaded') && (
+                  <div className="settings-update">
+                    <div className="settings-update__bar">
+                      <i style={{ width: `${Math.min(100, state.percent ?? 0)}%` }} />
+                    </div>
+                    <div className="settings-update__meta">
+                      <span>
+                        {state.phase === 'downloaded'
+                          ? '下载完成 · 校验通过'
+                          : `${formatBytes(state.transferred)} / ${formatBytes(state.total)}`}
+                      </span>
+                      <span>
+                        {state.phase === 'downloading'
+                          ? `${(state.percent ?? 0).toFixed(1)}%${state.bytesPerSecond ? ` · ${formatBytes(state.bytesPerSecond)}/s` : ''}`
+                          : '100%'}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {state.phase === 'available' || state.phase === 'downloaded' ? (
-                  <button type="button" className="btn" onClick={openDownloadPage}>
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                {state.phase === 'available' ? (
+                  <>
+                    <button type="button" className="btn" onClick={download}>
+                      <Download size={15} />
+                      下载更新
+                    </button>
+                    <button type="button" className="btn btn--ghost" onClick={openDownloadPage}>
+                      发布页
+                    </button>
+                  </>
+                ) : state.phase === 'downloaded' ? (
+                  <button type="button" className="btn" onClick={install}>
                     <Download size={15} />
-                    打开发布页
+                    安装并重启
                   </button>
                 ) : (
                   <button
                     type="button"
                     className="btn btn--ghost"
                     onClick={check}
-                    disabled={!bridgeAvailable || state.phase === 'checking'}
+                    disabled={!bridgeAvailable || state.phase === 'checking' || state.phase === 'downloading'}
                   >
                     <RefreshCw size={15} />
-                    {state.phase === 'checking' ? '检查中…' : '检查更新'}
+                    {state.phase === 'checking'
+                      ? '检查中…'
+                      : state.phase === 'downloading'
+                        ? '下载中…'
+                        : '检查更新'}
                   </button>
                 )}
               </div>

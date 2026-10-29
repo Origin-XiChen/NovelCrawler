@@ -1,6 +1,6 @@
 {
   "name": "@novelcrawler/desktop",
-  "version": "1.7.10-dev.10",
+  "version": "1.7.10-dev.11",
   "private": true,
   "description": "NovelCrawler Electron 桌面壳",
   "main": "main.js",
@@ -33,6 +33,7 @@
       "preload.js",
       "backend.js",
       "updater.js",
+      "updates.js",
       "window-state.js",
       "logger.js",
       "splash.html",

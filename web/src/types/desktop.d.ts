@@ -30,9 +30,9 @@ export interface DesktopBridge {
 
 export type UpdaterStatus =
   | { type: 'checking' }
-  | { type: 'available'; version: string; releaseName?: string; releaseNotes?: string }
+  | { type: 'available'; version: string; releaseName?: string; releaseNotes?: string; size?: number }
   | { type: 'not-available'; version: string }
-  | { type: 'progress'; percent: number; transferred: number; total: number }
+  | { type: 'progress'; percent: number; transferred: number; total: number; bytesPerSecond?: number }
   | { type: 'downloaded'; version: string }
   | { type: 'error'; message: string }
   | { type: 'dev' };

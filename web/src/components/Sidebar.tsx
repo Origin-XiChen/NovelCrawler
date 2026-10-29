@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
+import { formatBytes } from '../lib/format';
 import { useUpdate } from '../lib/updater';
 
 const NAV = [
@@ -30,7 +31,7 @@ const NAV = [
 ];
 
 function UpdateCard() {
-  const { state, check, openDownloadPage, appVersion } = useUpdate();
+  const { state, check, download, install, openDownloadPage, appVersion } = useUpdate();
 
   if (state.phase === 'dev') {
     return (
@@ -44,20 +45,64 @@ function UpdateCard() {
     );
   }
 
-  // 有新版本:只提示 + 给一个发布页入口。
-  // 原来的「下载更新 / 进度条 / 重启安装」已撤掉 —— 应用内下载是分段续传,
-  // 遇到重试会把进度从 0 重报(看起来像"下满又归零"),安装失败还会重启回旧版。
-  if (state.phase === 'available' || state.phase === 'downloaded') {
+  // 有新版本：应用内下载（自建下载器，进度只增不减），下完再调系统安装器
+  if (state.phase === 'available') {
     return (
       <div className="update-card">
         <div className="update-card__title">
           <Download size={14} />
           发现 v{state.version}
         </div>
-        <div className="update-card__meta">手动更新：下载安装包后双击安装</div>
-        <button type="button" className="btn btn--sm" onClick={openDownloadPage}>
-          打开发布页
-        </button>
+        <div className="update-card__meta">
+          {state.size ? `${formatBytes(state.size)} · 支持断点续传` : '下载完成后会启动安装程序'}
+        </div>
+        <div className="update-card__actions">
+          <button type="button" className="btn btn--sm" onClick={download}>
+            下载更新
+          </button>
+          <button type="button" className="btn btn--sm btn--ghost" onClick={openDownloadPage}>
+            发布页
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.phase === 'downloading') {
+    const percent = Math.min(100, state.percent ?? 0);
+    return (
+      <div className="update-card">
+        <div className="update-card__title">
+          <Download size={14} />
+          正在下载 {percent.toFixed(1)}%
+        </div>
+        <div className="update-card__bar">
+          <i style={{ width: `${percent}%` }} />
+        </div>
+        <div className="update-card__meta update-card__meta--nums">
+          {formatBytes(state.transferred)} / {formatBytes(state.total)}
+          {state.bytesPerSecond ? ` · ${formatBytes(state.bytesPerSecond)}/s` : ''}
+        </div>
+      </div>
+    );
+  }
+
+  if (state.phase === 'downloaded') {
+    return (
+      <div className="update-card">
+        <div className="update-card__title">
+          <Download size={14} />
+          v{state.version} 已下载
+        </div>
+        <div className="update-card__meta">将关闭应用并启动安装向导</div>
+        <div className="update-card__actions">
+          <button type="button" className="btn btn--sm" onClick={install}>
+            安装并重启
+          </button>
+          <button type="button" className="btn btn--sm btn--ghost" onClick={openDownloadPage}>
+            发布页
+          </button>
+        </div>
       </div>
     );
   }

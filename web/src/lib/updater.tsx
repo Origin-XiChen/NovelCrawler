@@ -22,7 +22,13 @@ export type UpdatePhase =
 export interface UpdateState {
   phase: UpdatePhase;
   version?: string;
+  /** 下载进度 0-100（保留一位小数，界面再取整） */
   percent?: number;
+  transferred?: number;
+  total?: number;
+  bytesPerSecond?: number;
+  /** 安装包体积（check 阶段就有，用于"212 MB"这类提示） */
+  size?: number;
   message?: string;
 }
 
@@ -31,13 +37,11 @@ interface UpdateContextValue {
   appVersion: string;
   bridgeAvailable: boolean;
   check: () => void;
-  /**
-   * 打开发布页(手动更新)。
-   *
-   * 应用内下载/静默安装已停用:electron-updater 遇到断点重试会把进度
-   * 从 0 重新报一遍(表现为"下满了又归零"),quitAndInstall 失败又会
-   * 让"重启还是旧版本"。现在只负责告知有没有新版,下载安装交给浏览器。
-   */
+  /** 应用内下载安装包（自建下载器，支持续传，进度只增不减） */
+  download: () => void;
+  /** 调系统安装器：会退出应用再启动 NSIS 向导 */
+  install: () => void;
+  /** 兜底：直接在浏览器里打开发布页 */
   openDownloadPage: () => void;
 }
 
@@ -51,13 +55,25 @@ function reduce(current: UpdateState, event: UpdaterStatus): UpdateState {
     case 'checking':
       return { ...current, phase: 'checking', message: undefined };
     case 'available':
-      return { phase: 'available', version: event.version, message: event.releaseName };
+      return {
+        phase: 'available',
+        version: event.version,
+        message: event.releaseName,
+        size: event.size,
+      };
     case 'not-available':
       return { phase: 'not-available', version: event.version };
     case 'progress':
-      return { ...current, phase: 'downloading', percent: Math.round(event.percent) };
+      return {
+        ...current,
+        phase: 'downloading',
+        percent: event.percent,
+        transferred: event.transferred,
+        total: event.total || current.size,
+        bytesPerSecond: event.bytesPerSecond,
+      };
     case 'downloaded':
-      return { phase: 'downloaded', version: event.version, percent: 100 };
+      return { ...current, phase: 'downloaded', version: event.version, percent: 100 };
     case 'error':
       return { ...current, phase: 'error', message: event.message };
     case 'dev':
@@ -89,6 +105,16 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     void bridge.check();
   }, [bridge]);
 
+  const download = useCallback(() => {
+    if (!bridge) return;
+    void bridge.download();
+  }, [bridge]);
+
+  const install = useCallback(() => {
+    if (!bridge) return;
+    void bridge.install();
+  }, [bridge]);
+
   const openDownloadPage = useCallback(() => {
     const open = window.desktop?.openExternal;
     if (open) void open(RELEASES_URL);
@@ -101,9 +127,11 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       appVersion: window.desktop?.version ?? 'dev',
       bridgeAvailable: Boolean(bridge),
       check,
+      download,
+      install,
       openDownloadPage,
     }),
-    [state, bridge, check, openDownloadPage],
+    [state, bridge, check, download, install, openDownloadPage],
   );
 
   return <UpdateContext.Provider value={value}>{children}</UpdateContext.Provider>;
