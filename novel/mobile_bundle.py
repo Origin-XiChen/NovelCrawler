@@ -22,7 +22,7 @@ import time
 import zipfile
 from urllib.parse import unquote
 
-BUNDLE_VERSION = 1
+BUNDLE_VERSION = 2
 
 # extract_html() 重写出来的资源地址(path 参数已 URL 编码)
 _ASSET_RE = re.compile(r"""/api/epub_asset\?[^"'()\s]*?[&?]path=([^"'()\s]+)""")
@@ -244,6 +244,78 @@ def comic_bundle(src: str, out_path: str, meta: dict | None = None,
             "cover": "pages/0001.jpg" if total else "",
             "src_size": size,
             "src_mtime": mtime,
+            "generated": int(time.time()),
+        }
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
+    return manifest
+
+
+def comic_bundle_all(book_dir: str, title: str, pdfs: list[str], out_path: str,
+                     meta: dict | None = None, on_stage=None) -> dict:
+    """把一本漫画的**全部话**打成同一个离线包(手机一次下载整本)。
+
+    与 comic_bundle 的差别:页按话顺序连续编号,并额外写 chapters:[{label, from, pages}],
+    手机端据此能显示目录、按话跳转;不用为每一话单独下载一次。
+    """
+    from pypdf import PdfReader
+    from .comic import page_image
+
+    total_pages = 0
+    chapters: list[dict] = []
+    newest = 0.0
+    total_size = 0
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 先统计总页数,便于上报进度(读页树不解码图片,很快)
+        counts: list[tuple[str, int]] = []
+        for fname in pdfs:
+            path = os.path.join(book_dir, fname)
+            if not os.path.isfile(path):
+                continue
+            try:
+                count = len(PdfReader(path).pages)
+            except Exception:  # noqa: BLE001
+                continue
+            counts.append((fname, count))
+            total_pages += count
+            try:
+                stat = os.stat(path)
+                newest = max(newest, stat.st_mtime)
+                total_size += stat.st_size
+            except OSError:
+                pass
+
+        done = 0
+        for fname, count in counts:
+            label = os.path.splitext(fname)[0]
+            start = done + 1
+            try:
+                reader = PdfReader(os.path.join(book_dir, fname))
+            except Exception:  # noqa: BLE001
+                continue
+            for page in reader.pages:
+                done += 1
+                try:
+                    zf.writestr(f"pages/{done:04d}.jpg", page_image(page),
+                                compress_type=zipfile.ZIP_STORED)
+                except Exception:  # noqa: BLE001
+                    continue
+                _report(on_stage, done, total_pages)
+            chapters.append({"label": label, "from": start, "pages": count})
+
+        manifest = {
+            "bundle_version": BUNDLE_VERSION,
+            "kind": "comic",
+            "id": f"comic:{title}/__all__",
+            "title": title,
+            "file": "__all__",
+            "chapters": chapters,
+            "total": done,
+            "num_pages": done,
+            "meta": meta or None,
+            "assets": {},
+            "cover": "pages/0001.jpg" if done else "",
+            "src_size": total_size,
+            "src_mtime": newest,
             "generated": int(time.time()),
         }
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))

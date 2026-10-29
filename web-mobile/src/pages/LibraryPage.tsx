@@ -366,8 +366,6 @@ export default function LibraryPage() {
             const localCount = pdfs.filter(
               (pdf) => stored[`comic:${item.title}/${pdf}`],
             ).length;
-            const pending =
-              pdfs.find((pdf) => !stored[`comic:${item.title}/${pdf}`]) || pdfs[0] || '';
             return (
               <div className="comic-card" key={item.title}>
                 <button
@@ -381,15 +379,17 @@ export default function LibraryPage() {
                     {item.files} 个文件 · {formatSize(item.size)}
                   </span>
                 </button>
-                {pending && (
+                {(
                   <div className="comic-card__foot">
                     {localCount > 0 && (
-                      <span className="comic-card__stored">手机 {localCount}/{pdfs.length}</span>
+                      <span className="comic-card__stored">逐话 {localCount}/{pdfs.length}</span>
                     )}
+                    {/* 整本下载:一次把这本书所有话打包,不用逐话点 */}
                     <DownloadButton
                       compact
-                      local={stored[`comic:${item.title}/${pending}`]}
-                      target={{ kind: 'comic', file: pending, title: item.title }}
+                      local={stored[`comic:${item.title}/__all__`]}
+                      label={`整本 (${pdfs.length} 话)`}
+                      target={{ kind: 'comic', file: '', title: item.title, all: true }}
                     />
                   </div>
                 )}

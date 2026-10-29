@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
+  Check,
   ChevronRight,
   Images,
   LibraryBig,
@@ -16,7 +17,7 @@ import {
 import BookCover from '../components/BookCover';
 import { DownloadButton, LocalChip } from '../components/OfflineControls';
 import { getActiveServer } from '../lib/connection';
-import { deleteLocalBook, localBookHref } from '../lib/content';
+import { deleteLocalBook, localBookHref, localReaderHref } from '../lib/content';
 import { errorMessage, formatDate, formatSize } from '../lib/format';
 import { continuousPercent } from '../lib/reading-progress';
 import { importLocalFiles } from '../lib/offline/localImport';
@@ -31,6 +32,19 @@ import type { LocalBook } from '../lib/offline/db';
 
 type ShelfFilter = 'all' | 'novel' | 'comic';
 
+/** 书架上的一行 = 一本"书";漫画的多话在这里被合并 */
+interface ShelfGroup {
+  key: string;
+  kind: 'novel' | 'comic';
+  title: string;
+  book: LocalBook;
+  books: LocalBook[];
+  chapters: number;
+  pages: number;
+  size: number;
+  all?: LocalBook;
+}
+
 export default function ShelfPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -44,6 +58,9 @@ export default function ShelfPage() {
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState('');
   const [removing, setRemoving] = useState('');
+  // 批量删除:选择模式 + 已选的书(key)
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [importing, setImporting] = useState('');
   const [importNotice, setImportNotice] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
@@ -82,12 +99,44 @@ export default function ShelfPage() {
     }
   };
 
-  const books = useMemo(() => {
+  /**
+   * 书架按「书」聚合,不按话。
+   * 漫画历史数据是按话导入的(`comic:书名/第1话.pdf`),直接铺开会变成十几本同名书;
+   * 这里以书名分组,整本包(`__all__`)优先作为打开入口。
+   */
+  const groups = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return library.books.filter((book) => {
-      if (filter !== 'all' && book.kind !== filter) return false;
-      return !keyword || book.title.toLowerCase().includes(keyword) || book.file.toLowerCase().includes(keyword);
-    });
+    const map = new Map<string, ShelfGroup>();
+    for (const book of library.books) {
+      if (filter !== 'all' && book.kind !== filter) continue;
+      if (keyword && !book.title.toLowerCase().includes(keyword) && !book.file.toLowerCase().includes(keyword)) {
+        continue;
+      }
+      const key = book.kind === 'comic' ? `comic:${book.title}` : book.id;
+      const found = map.get(key);
+      if (!found) {
+        map.set(key, {
+          key,
+          kind: book.kind,
+          title: book.title,
+          book,
+          books: [book],
+          chapters: book.kind === 'comic' ? 1 : 0,
+          pages: book.kind === 'comic' ? book.total : 0,
+          size: book.size,
+          all: book.file === '__all__' ? book : undefined,
+        });
+        continue;
+      }
+      found.books.push(book);
+      found.size += book.size;
+      if (book.kind === 'comic') {
+        found.pages += book.total;
+        found.chapters += 1;
+        if (book.file === '__all__') found.all = book;
+      }
+    }
+    return Array.from(map.values());
   }, [filter, library.books, query]);
 
   const checkUpdates = async () => {
@@ -123,21 +172,63 @@ export default function ShelfPage() {
     }
   };
 
-  const remove = async (book: LocalBook) => {
+  const toggleSelect = (key: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  /** 删一台手机上的「一本书」= 删掉它名下的所有本地包(漫画多话会一起清) */
+  const removeGroup = async (group: ShelfGroup) => {
     const detail =
-      book.kind === 'comic' ? `${book.total} 页` : `${book.total} 章`;
+      group.kind === 'comic'
+        ? `${group.chapters} 话 · ${group.pages} 页`
+        : `${group.book.total} 章`;
+    const extra = group.chapters > 1 ? `（共 ${group.chapters} 个离线包）` : '';
     if (
       !window.confirm(
-        `从手机删除《${book.title}》？\n离线包（${formatSize(book.size)} · ${detail}）会一起清掉，电脑上的原书不受影响。`,
+        `从手机删除《${group.title}》？\n占用 ${formatSize(group.size)} · ${detail}${extra}\n电脑上的原书不受影响。`,
       )
     ) {
       return;
     }
-    setRemoving(book.id);
+    setRemoving(group.key);
     try {
-      await deleteLocalBook(book);
+      for (const book of group.books) await deleteLocalBook(book);
       announceLibraryChange();
-      setNotice(`已从手机删除《${book.title}》。`);
+      setNotice(`已从手机删除《${group.title}》。`);
+    } catch (cause) {
+      setNotice(errorMessage(cause));
+    } finally {
+      setRemoving('');
+    }
+  };
+
+  /** 批量删除:一次清掉选中的书,省得一本本点 */
+  const removeSelected = async () => {
+    const targets = groups.filter((group) => selected.has(group.key));
+    if (!targets.length) return;
+    const books = targets.reduce((sum, group) => sum + group.books.length, 0);
+    const bytes = targets.reduce((sum, group) => sum + group.size, 0);
+    if (
+      !window.confirm(
+        `删除选中的 ${targets.length} 本（共 ${books} 个离线包，${formatSize(bytes)}）？\n删除后需重新从电脑下载，电脑上的原书不受影响。`,
+      )
+    ) {
+      return;
+    }
+    setRemoving('__bulk__');
+    try {
+      for (const group of targets) {
+        for (const book of group.books) await deleteLocalBook(book);
+      }
+      announceLibraryChange();
+      setNotice(`已删除 ${targets.length} 本，释放 ${formatSize(bytes)}。`);
+      setSelected(new Set());
+      setSelecting(false);
     } catch (cause) {
       setNotice(errorMessage(cause));
     } finally {
@@ -156,6 +247,16 @@ export default function ShelfPage() {
           <p>{library.loading ? '正在读取…' : `${library.books.length} 本 · 占用 ${formatSize(library.bytes)}`}</p>
         </div>
         <div className="shelf-header__actions">
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => {
+              setSelecting((prev) => !prev);
+              setSelected(new Set());
+            }}
+          >
+            {selecting ? '取消' : '选择'}
+          </button>
           <button
             type="button"
             className="btn btn--ghost btn--sm"
@@ -258,7 +359,7 @@ export default function ShelfPage() {
           <Loader2 size={26} className="spin" />
           <span>正在读取本地书库…</span>
         </div>
-      ) : books.length === 0 ? (
+      ) : groups.length === 0 ? (
         <div className="empty-state">
           <LibraryBig size={34} />
           <h3>{query || filter !== 'all' ? '没有匹配的书' : '手机里还没有书'}</h3>
@@ -285,34 +386,64 @@ export default function ShelfPage() {
         </div>
       ) : (
         <div className="shelf-list">
-          {books.map((book) => {
-            const record = library.progress[book.id];
+          {groups.map((group) => {
+            const opened = group.all || group.book;
+            const record = group.books
+              .map((item) => library.progress[item.id])
+              .filter(Boolean)
+              .sort((a, b) => (b!.ts || 0) - (a!.ts || 0))[0];
             const scale = record ? continuousPercent(record) : 0;
             const dirty = Boolean(record?.dirty);
+            const hasOutdated = group.books.some((item) => outdated[item.id]);
+            const checked = selected.has(group.key);
             return (
-              <div className="shelf-row" key={book.id}>
+              <div className={checked ? 'shelf-row is-checked' : 'shelf-row'} key={group.key}>
+                {selecting && (
+                  <button
+                    type="button"
+                    className={checked ? 'shelf-check is-on' : 'shelf-check'}
+                    aria-label={checked ? '取消选择' : '选择'}
+                    onClick={() => toggleSelect(group.key)}
+                  >
+                    {checked && <Check size={14} />}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="shelf-row__main"
-                  onClick={() => navigate(localBookHref(book))}
+                  onClick={() => {
+                    if (selecting) {
+                      toggleSelect(group.key);
+                      return;
+                    }
+                    // 整本包直接进阅读器;只有逐话数据时进详情页(可继续下载整本)
+                    if (group.kind === 'comic' && group.all) {
+                      navigate(localReaderHref(group.all));
+                      return;
+                    }
+                    navigate(localBookHref(opened));
+                  }}
                 >
-                  <BookCover book={book} />
+                  <BookCover book={opened} />
                   <div className="shelf-row__info">
                     <div className="shelf-row__title">
-                      <strong>{book.title}</strong>
+                      <strong>{group.title}</strong>
+                      {group.kind === 'comic' && group.chapters > 1 && !group.all && (
+                        <em className="shelf-row__flag">逐话导入</em>
+                      )}
                     </div>
                     <span className="shelf-row__meta">
-                      {book.kind === 'comic'
-                        ? `${book.total} 页 · ${formatSize(book.size)}`
-                        : `${book.total} 章 · ${formatSize(book.size)}`}
-                      {` · ${formatDate(book.importedAt)} 导入`}
-                      {book.origin === 'import' &&
-                        ` · ${book.syncState === 'pending' ? '本地文件·待传电脑' : '本地文件'}`}
+                      {group.kind === 'comic'
+                        ? `${group.chapters} 话 · ${group.pages} 页 · ${formatSize(group.size)}`
+                        : `${opened.total} 章 · ${formatSize(group.size)}`}
+                      {` · ${formatDate(opened.importedAt)} 导入`}
+                      {opened.origin === 'import' &&
+                        ` · ${opened.syncState === 'pending' ? '本地文件·待传电脑' : '本地文件'}`}
                       {dirty && <LocalChip dirty />}
                     </span>
                     {record && (
                       <span className="novel-row__progress">
-                        {progressLabel(book, record)} · 总进度 {scale}%
+                        {progressLabel(opened, record)} · 总进度 {scale}%
                         <i style={{ width: `${scale}%` }} />
                       </span>
                     )}
@@ -322,40 +453,68 @@ export default function ShelfPage() {
                   </div>
                   <ChevronRight size={18} className="muted" />
                 </button>
-                <div className="shelf-row__actions">
-                  {outdated[book.id] && (
-                    <DownloadButton
-                      compact
-                      outdated
-                      local={book}
-                      target={
-                        book.kind === 'comic'
-                          ? { kind: 'comic', file: book.file, title: book.title }
-                          : { kind: 'novel', file: book.file }
-                      }
-                    />
-                  )}
-                  <button
-                    type="button"
-                    className="icon-btn icon-btn--danger"
-                    aria-label={`从手机删除 ${book.title}`}
-                    disabled={removing === book.id}
-                    onClick={() => void remove(book)}
-                  >
-                    {removing === book.id ? (
-                      <Loader2 size={16} className="spin" />
-                    ) : (
-                      <Trash2 size={16} />
+                {!selecting && (
+                  <div className="shelf-row__actions">
+                    {hasOutdated && (
+                      <DownloadButton
+                        compact
+                        outdated
+                        local={opened}
+                        target={
+                          group.kind === 'comic'
+                            ? { kind: 'comic', file: '', title: group.title, all: true }
+                            : { kind: 'novel', file: opened.file }
+                        }
+                      />
                     )}
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      className="icon-btn icon-btn--danger"
+                      aria-label={`从手机删除 ${group.title}`}
+                      disabled={removing === group.key}
+                      onClick={() => void removeGroup(group)}
+                    >
+                      {removing === group.key ? (
+                        <Loader2 size={16} className="spin" />
+                      ) : (
+                        <Trash2 size={16} />
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {!library.loading && books.length > 0 && (
+      {selecting && (
+        <div className="shelf-bulk">
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() =>
+              setSelected(
+                selected.size === groups.length ? new Set() : new Set(groups.map((group) => group.key)),
+              )
+            }
+          >
+            {selected.size === groups.length ? '取消全选' : '全选'}
+          </button>
+          <span className="shelf-bulk__count">已选 {selected.size} / {groups.length}</span>
+          <button
+            type="button"
+            className="btn btn--sm shelf-bulk__danger"
+            disabled={selected.size === 0 || removing === '__bulk__'}
+            onClick={() => void removeSelected()}
+          >
+            {removing === '__bulk__' ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+            删除所选
+          </button>
+        </div>
+      )}
+
+      {!library.loading && groups.length > 0 && (
         <button
           type="button"
           className="shelf-more"
@@ -367,7 +526,7 @@ export default function ShelfPage() {
         </button>
       )}
 
-      {server && !library.loading && books.length > 0 && (
+      {server && !library.loading && groups.length > 0 && (
         <button type="button" className="shelf-more" onClick={() => navigate('/library')}>
           <Plus size={16} />
           去电脑书库下载新书

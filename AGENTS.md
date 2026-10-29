@@ -161,6 +161,13 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
 
+### 1.7.10-dev.7 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 新增：**漫画整本下载**——`/api/mobile/bundle?kind=comic&title=X&all=1` 一次把该书全部话按序打进同一个包（`pages/` 连续编号 + `chapters[{label,from,pages}]`），电脑书库漫画卡片改为「整本 (N 话)」一键下载
+- 新增：**书架按「书」聚合 + 批量删除**——同一漫画的多话合并为一行（显示 `N 话 · M 页`，整本包优先作为打开入口，旧数据标「逐话导入」）；顶部「选择」进入多选，底部工具条支持全选/删除所选，删一本会清掉它名下所有离线包
+- 修复：小说离线封面——`novel_bundle` 走 `covers.ensure_cover`（缓存→EPUB 内嵌→来源→**本地生成**），纯 TXT 也有封面；`BUNDLE_VERSION` 1→2 让旧缓存失效、重新打包
+- 风险遗留：漫画「同步后看不了」仍待复现（整本下载可绕开逐话包）
+
 ### 1.7.10-dev.6 — 2026-10-29
 - 状态：已发布（Dev 预发布）
 - 修复：**安装向导关不掉 / 装完仍是旧版**——`updater:install` 调 `quitAndInstall(false, true)`，第一个参数是 `isSilent`；本项目 `nsis.oneClick=false`，非静默调用会弹出「欢迎→选目录→安装→完成」整套向导，用户一取消就前功尽弃，下次启动又提示同一版本。改为 `quitAndInstall(true, true)`（安装器收到 `/S` 静默安装，装完 `--force-run` 自动拉起）

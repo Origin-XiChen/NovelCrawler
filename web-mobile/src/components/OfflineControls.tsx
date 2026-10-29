@@ -12,6 +12,8 @@ interface Props {
   /** 电脑上的版本比本地新 */
   outdated?: boolean;
   compact?: boolean;
+  /** 自定义按钮文案(如漫画的「整本 (12 话)」) */
+  label?: string;
 }
 
 interface Busy {
@@ -25,7 +27,7 @@ interface Busy {
  * "下载到手机"按钮:一次导入=请求整本离线包 + 写本地书库。
  * 电脑打包大书会有几十秒静默期,所以进度文案来自 transfer 的打包轮询。
  */
-export function DownloadButton({ target, local, outdated, compact }: Props) {
+export function DownloadButton({ target, local, outdated, compact, label }: Props) {
   const [busy, setBusy] = useState<Busy | null>(null);
   const [error, setError] = useState('');
   const busyRef = useRef(false);
@@ -87,7 +89,7 @@ export function DownloadButton({ target, local, outdated, compact }: Props) {
   return (
     <button type="button" className={compact ? 'chip-btn' : 'btn btn--ghost btn--sm'} onClick={start}>
       {local ? <RefreshCw size={compact ? 14 : 16} /> : <Download size={compact ? 14 : 16} />}
-      {local ? '更新到手机' : compact ? '下载' : '下载到手机'}
+      {local ? '更新到手机' : label || (compact ? '下载' : '下载到手机')}
     </button>
   );
 }

@@ -1725,19 +1725,45 @@ class Handler(BaseHTTPRequestHandler):
         sid = (qs.get("sid") or [""])[0].strip()[:64]
         rules = load_settings().get("clean_rules") or []
         if kind == "comic":
-            src = self._resolve_comic_pdf(qs)
-            if not src:
-                return self._send_json({"error": "漫画文件不存在"}, 404)
             title = (qs.get("title") or [""])[0].strip()
-            meta = None
-            try:
-                with open(os.path.join(os.path.dirname(src), "meta.json"), encoding="utf-8") as f:
-                    meta = json.load(f)
-            except (OSError, ValueError):
+            # all=1 → 整本下载:一次把该书所有话打进同一个包,手机不用逐话点
+            want_all = (qs.get("all") or [""])[0].strip() in ("1", "true", "yes")
+            if want_all:
+                if not title or ".." in title or "/" in title or "\\" in title:
+                    return self._send_json({"error": "非法漫画标题"}, 400)
+                book_dir = os.path.join(COMIC_OUT_DIR, os.path.basename(title))
+                try:
+                    pdfs = sorted(f for f in os.listdir(book_dir) if f.lower().endswith(".pdf"))
+                except OSError:
+                    pdfs = []
+                if not pdfs:
+                    return self._send_json({"error": "这本漫画没有可打包的文件"}, 404)
+                # 用一个虚拟源路径参与缓存键:取书目录 + 最晚 mtime,新增话会自动失效
+                src = os.path.join(book_dir, "__all__")
                 meta = None
-            def build(out_path, on_stage=None):
-                return mobile_bundle.comic_bundle(src, out_path, meta, title,
-                                                  on_stage=on_stage)
+                try:
+                    with open(os.path.join(book_dir, "meta.json"), encoding="utf-8") as f:
+                        meta = json.load(f)
+                except (OSError, ValueError):
+                    meta = None
+
+                def build(out_path, on_stage=None):
+                    return mobile_bundle.comic_bundle_all(book_dir, title, pdfs, out_path,
+                                                          meta, on_stage=on_stage)
+            else:
+                src = self._resolve_comic_pdf(qs)
+                if not src:
+                    return self._send_json({"error": "漫画文件不存在"}, 404)
+                meta = None
+                try:
+                    with open(os.path.join(os.path.dirname(src), "meta.json"), encoding="utf-8") as f:
+                        meta = json.load(f)
+                except (OSError, ValueError):
+                    meta = None
+
+                def build(out_path, on_stage=None):
+                    return mobile_bundle.comic_bundle(src, out_path, meta, title,
+                                                      on_stage=on_stage)
         else:
             fname = (qs.get("file") or [""])[0].strip()
             if not fname or ".." in fname or "/" in fname or "\\" in fname:
@@ -1748,12 +1774,27 @@ class Handler(BaseHTTPRequestHandler):
             def build(out_path, on_stage=None):
                 return mobile_bundle.novel_bundle(src, out_path, rules,
                                                   on_stage=on_stage)
-        try:
-            st = os.stat(src)
-        except OSError:
-            return self._send_json({"error": "文件不存在"}, 404)
+        if not os.path.exists(src):
+            # 整本模式的虚拟路径:用书目录里最晚的 mtime 当版本戳
+            newest = 0.0
+            try:
+                for name in os.listdir(os.path.dirname(src)):
+                    if name.lower().endswith(".pdf"):
+                        newest = max(newest, os.path.getmtime(os.path.join(os.path.dirname(src), name)))
+            except OSError:
+                newest = 0.0
+            class _Stat:  # noqa: D401 - 只用于下面取 mtime_ns/size
+                st_mtime_ns = int(newest * 1_000_000_000)
+                st_size = len(os.path.dirname(src))
+            st = _Stat()
+        else:
+            try:
+                st = os.stat(src)
+            except OSError:
+                return self._send_json({"error": "文件不存在"}, 404)
         stem = os.path.splitext(os.path.basename(src))[0]
-        task = f"{stem}(离线包)"
+        task_name = title if (kind == "comic" and want_all and title) else stem
+        task = f"{task_name}(离线包)"
         rules_key = json.dumps(rules, ensure_ascii=False, sort_keys=True)
         key = _hl.sha1(
             f"{kind}|{os.path.abspath(src)}|{st.st_mtime_ns}|{st.st_size}|{rules_key}".encode("utf-8")

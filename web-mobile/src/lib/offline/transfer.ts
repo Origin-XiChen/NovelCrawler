@@ -70,6 +70,8 @@ export interface ImportTarget {
   file: string;
   /** 漫画目录名(小说忽略) */
   title?: string;
+  /** 漫画整本下载:一次打包该书全部话(忽略 file) */
+  all?: boolean;
 }
 
 export type ImportStage = 'packing' | 'downloading' | 'unpacking' | 'done';
@@ -151,7 +153,8 @@ export async function importBook(
   const query: Record<string, string> = { kind: target.kind, sid: syncSid() };
   if (target.kind === 'comic') {
     query.title = target.title || '';
-    query.file = target.file;
+    if (target.all) query.all = '1';
+    else query.file = target.file;
   } else {
     query.file = target.file;
   }
