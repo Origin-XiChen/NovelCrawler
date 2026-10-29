@@ -119,7 +119,7 @@ function dateStamp() {
 
 export function SettingsPage() {
   const { mode, setMode } = useTheme();
-  const { state, appVersion, bridgeAvailable, check } = useUpdate();
+  const { state, appVersion, bridgeAvailable, check, openDownloadPage } = useUpdate();
   // Dev 通道:与手机端一致,开启后检查预发布版本
   // 同步管理:电脑侧的逐章进度(手机回传 + 本机阅读都记在这里)
   const [syncRecords, setSyncRecords] = useState<{
@@ -704,34 +704,19 @@ export function SettingsPage() {
                 <div className="settings-row__desc">
                   当前 v{appVersion}
                   {!bridgeAvailable
-                    ? ' · 浏览器模式不支持自动更新'
-                    : state.phase === 'available'
-                      ? ` · 发现 v${state.version}`
-                      : state.phase === 'downloaded'
-                        ? ` · v${state.version} 已下载，等待安装`
-                        : state.phase === 'error'
-                          ? ` · ${state.message ?? '检查失败'}`
-                          : ' · GitHub Releases 通道'}
+                    ? ' · 浏览器模式不支持检查更新'
+                    : state.phase === 'available' || state.phase === 'downloaded'
+                      ? ` · 发现 v${state.version}，需手动下载安装`
+                      : state.phase === 'error'
+                        ? ` · ${state.message ?? '检查失败'}`
+                        : ' · 手动更新（GitHub Releases）'}
                 </div>
-                {state.phase === 'downloading' ? (
-                  <div className="update-card__bar" style={{ marginTop: 10, maxWidth: 260 }}>
-                    <i style={{ width: `${state.percent ?? 0}%` }} />
-                  </div>
-                ) : null}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                {state.phase === 'available' ? (
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() =>
-                      void window.desktop?.openExternal?.(
-                        'https://github.com/Origin-XiChen/NovelCrawler/releases/latest',
-                      )
-                    }
-                  >
+                {state.phase === 'available' || state.phase === 'downloaded' ? (
+                  <button type="button" className="btn" onClick={openDownloadPage}>
                     <Download size={15} />
-                    去下载
+                    打开发布页
                   </button>
                 ) : (
                   <button

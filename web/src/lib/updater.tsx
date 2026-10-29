@@ -31,9 +31,18 @@ interface UpdateContextValue {
   appVersion: string;
   bridgeAvailable: boolean;
   check: () => void;
-  download: () => void;
-  install: () => void;
+  /**
+   * 打开发布页(手动更新)。
+   *
+   * 应用内下载/静默安装已停用:electron-updater 遇到断点重试会把进度
+   * 从 0 重新报一遍(表现为"下满了又归零"),quitAndInstall 失败又会
+   * 让"重启还是旧版本"。现在只负责告知有没有新版,下载安装交给浏览器。
+   */
+  openDownloadPage: () => void;
 }
+
+/** 发布页地址:手动下载安装包 */
+export const RELEASES_URL = 'https://github.com/Origin-XiChen/NovelCrawler/releases';
 
 const UpdateContext = createContext<UpdateContextValue | null>(null);
 
@@ -80,15 +89,11 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     void bridge.check();
   }, [bridge]);
 
-  const download = useCallback(() => {
-    if (!bridge) return;
-    void bridge.download();
-  }, [bridge]);
-
-  const install = useCallback(() => {
-    if (!bridge) return;
-    void bridge.install();
-  }, [bridge]);
+  const openDownloadPage = useCallback(() => {
+    const open = window.desktop?.openExternal;
+    if (open) void open(RELEASES_URL);
+    else window.open(RELEASES_URL, '_blank', 'noopener,noreferrer');
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -96,10 +101,9 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       appVersion: window.desktop?.version ?? 'dev',
       bridgeAvailable: Boolean(bridge),
       check,
-      download,
-      install,
+      openDownloadPage,
     }),
-    [state, bridge, check, download, install],
+    [state, bridge, check, openDownloadPage],
   );
 
   return <UpdateContext.Provider value={value}>{children}</UpdateContext.Provider>;

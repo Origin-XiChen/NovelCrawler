@@ -152,7 +152,8 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 3. **漏同步 `package-lock.json`**：五处 package.json 改了，锁文件还是旧版本。
 4. **把 `sshd/host_rsa` 提交进公开仓库**：主机私钥泄露，只能 `filter-branch` 重写历史 + 重新生成。
 5. **本机跑 `electron-builder` 打包 NSIS**：稳定报 `Exit code: 2`，产物只有 0.4MB。**这是已知现象，不要在本机排查**，交给 CI。
-6. **`/api/mobile/ping` 崩溃会让手机显示"这个地址没有响应"**：TCP 能连上但服务端一个字节不回（`ERR_EMPTY_RESPONSE`）。排查时先看服务端日志有没有 traceback，别一头扎进网络/防火墙。
+6. **不要恢复应用内下载/静默安装**：electron-updater 的 `download-progress` 在分段续传重试时会从 0 重报（界面"下满又归零"），`quitAndInstall` 被取消或文件占用时静默失败（"重启还是旧版"）。更新只做「检查 + 打开发布页」，下载安装交给浏览器。
+7. **`/api/mobile/ping` 崩溃会让手机显示"这个地址没有响应"**：TCP 能连上但服务端一个字节不回（`ERR_EMPTY_RESPONSE`）。排查时先看服务端日志有没有 traceback，别一头扎进网络/防火墙。
 7. **在真实数据目录跑冒烟**：污染 `config.json` / 书架。一律 `NOVEL_DATA_DIR` 隔离。
 7. **本机 `electron-builder --win nsis` 必失败**（makensis 成功，随后运行安装包生成卸载器时报
    「Error writing temporary file」）。本机自测改用 `npx electron-builder --win --dir`，
@@ -163,6 +164,13 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 ## §9 版本进度
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
+
+### 1.7.10-dev.10 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 修复：**电脑端更新进度条与实际不符**——应用内下载（electron-updater `downloadUpdate` + `quitAndInstall`）在真机上表现为「下满 100% 又归零」「重启还是旧版本」。原因是分段续传遇到重试会把 `download-progress` 从 0 重报，安装器被取消/文件占用时 `quitAndInstall` 静默失败。现**统一改为手动更新**：只检查是否有新版，点「打开发布页」去浏览器下载安装包
+- 修复：**两套更新入口不一致**——dev.8 只改了设置页（去下载），侧栏 `UpdateCard` 仍保留「下载更新 / 进度条 / 重启安装」，用户看到的仍是旧流程。现侧栏、设置页、`updater.js` 三处统一：`IN_APP_UPDATE=false`，`updater:download` / `updater:install` 置为空操作
+- 其他：`installAttempted`（上次安装未生效拦截）仅在应用内安装模式下生效，避免历史残留值把「发现新版本」永久变成报错
+- 风险遗留：漫画「同步后看不了」仍待复现
 
 ### 1.7.10-dev.9 — 2026-10-29
 - 状态：已发布（Dev 预发布）

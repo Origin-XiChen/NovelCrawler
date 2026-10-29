@@ -118,7 +118,7 @@ function init(options) {
     // 第二条防线:上一轮已经对这个版本执行过安装,重启后当前版本却没变 ——
     // 说明安装没落地(文件被占用 / 安装器被取消)。此时再提示"可更新"只会让
     // 用户无限重复装同一个包,直接报错并给出可执行的出路。
-    const attempted = String(readSettings().installAttempted || '');
+    const attempted = IN_APP_UPDATE ? String(readSettings().installAttempted || '') : '';
     if (info.version && attempted && compareVersion(info.version, attempted) === 0) {
       log.warn('[updater] 上次安装未生效', { offered: info.version, current });
       send({
@@ -169,6 +169,11 @@ function init(options) {
 
   ipcMain.handle('updater:download', async () => {
     if (!app.isPackaged) return;
+    if (!IN_APP_UPDATE) {
+      // 手动更新模式:不再在应用内下载(进度会归零、安装常失败)
+      log.info('[updater] 已改为手动下载,忽略应用内下载请求');
+      return;
+    }
     try {
       await autoUpdater.downloadUpdate();
     } catch (error) {
@@ -178,6 +183,10 @@ function init(options) {
 
   ipcMain.handle('updater:install', () => {
     if (!app.isPackaged) return;
+    if (!IN_APP_UPDATE) {
+      log.info('[updater] 已改为手动下载,忽略应用内安装请求');
+      return;
+    }
     // 先记下"这次要装哪个版本":重启后若当前版本仍是旧的,update-available
     // 会据此判定安装未生效,改为报错而不是继续提示同一个包。
     if (pendingVersion) writeSettings({ installAttempted: pendingVersion });
@@ -189,9 +198,13 @@ function init(options) {
   });
 }
 
-// 更新一律手动:启动不再自动检查(用户要求 2026-10-29)。
-// 自动下载/静默安装曾在真机上反复失败,留下一堆"下载到 100% 又归零"的体验问题。
+// 更新一律手动(用户要求 2026-10-29)。
+// 自动下载/静默安装曾在真机上反复失败:electron-updater 用 range 请求续传,
+// 遇到断点重试会把 download-progress 从 0 重新报一遍,界面就是"下满了又归零";
+// 而 quitAndInstall 一旦失败,重启后还是旧版本 —— 表现为"更新装了没效果"。
+// 现在两件事都交给用户:检查只负责"有没有新版",下载安装走浏览器 + 安装包。
 const AUTO_CHECK = false;
+const IN_APP_UPDATE = false;
 
 function scheduleStartupCheck(delayMs = 8000) {
   if (!AUTO_CHECK) return;

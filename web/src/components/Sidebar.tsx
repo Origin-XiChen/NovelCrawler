@@ -30,7 +30,7 @@ const NAV = [
 ];
 
 function UpdateCard() {
-  const { state, check, download, install, appVersion } = useUpdate();
+  const { state, check, openDownloadPage, appVersion } = useUpdate();
 
   if (state.phase === 'dev') {
     return (
@@ -44,45 +44,19 @@ function UpdateCard() {
     );
   }
 
-  if (state.phase === 'available') {
+  // 有新版本:只提示 + 给一个发布页入口。
+  // 原来的「下载更新 / 进度条 / 重启安装」已撤掉 —— 应用内下载是分段续传,
+  // 遇到重试会把进度从 0 重报(看起来像"下满又归零"),安装失败还会重启回旧版。
+  if (state.phase === 'available' || state.phase === 'downloaded') {
     return (
       <div className="update-card">
         <div className="update-card__title">
           <Download size={14} />
           发现 v{state.version}
         </div>
-        <div className="update-card__meta">已就绪，可后台下载更新包</div>
-        <button type="button" className="btn btn--sm" onClick={download}>
-          下载更新
-        </button>
-      </div>
-    );
-  }
-
-  if (state.phase === 'downloading') {
-    return (
-      <div className="update-card">
-        <div className="update-card__title">
-          <Download size={14} />
-          正在下载 {state.percent ?? 0}%
-        </div>
-        <div className="update-card__bar">
-          <i style={{ width: `${state.percent ?? 0}%` }} />
-        </div>
-      </div>
-    );
-  }
-
-  if (state.phase === 'downloaded') {
-    return (
-      <div className="update-card">
-        <div className="update-card__title">
-          <Download size={14} />
-          v{state.version} 已就绪
-        </div>
-        <div className="update-card__meta">退出时自动安装，也可以立即重启</div>
-        <button type="button" className="btn btn--sm" onClick={install}>
-          重启安装
+        <div className="update-card__meta">手动更新：下载安装包后双击安装</div>
+        <button type="button" className="btn btn--sm" onClick={openDownloadPage}>
+          打开发布页
         </button>
       </div>
     );
