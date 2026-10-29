@@ -161,6 +161,14 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
 
+### 1.7.10-dev.6 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 修复：**安装向导关不掉 / 装完仍是旧版**——`updater:install` 调 `quitAndInstall(false, true)`，第一个参数是 `isSilent`；本项目 `nsis.oneClick=false`，非静默调用会弹出「欢迎→选目录→安装→完成」整套向导，用户一取消就前功尽弃，下次启动又提示同一版本。改为 `quitAndInstall(true, true)`（安装器收到 `/S` 静默安装，装完 `--force-run` 自动拉起）
+- 修复：`compareVersion` 把「无预发布标记」当成 `-1`，导致正式版 `1.7.10` 被判定**小于** `1.7.10-dev.5`，Dev 通道用户永远升不到对应正式版；改为 `null` 表示「比任何 dev 号都大」，与手机端 `compareVersions` 规则对齐
+- 新增：安装结果校验——`updater:install` 前把待装版本写入 `userData/updater.json` 的 `installAttempted`；重启后若当前版本仍低于该值，`update-available` 改为报「上次安装未生效」并提示手动下载，不再无声循环。启动时若版本已追上则自动清除标记
+- 其他：`updater.json` 改为合并写入（`readSettings`/`writeSettings`），避免写 `installAttempted` 时把 `allowPrerelease` 冲掉
+- 风险遗留：漫画「同步后看不了」仍待复现
+
 ### 1.7.10-dev.5 — 2026-10-29
 - 状态：已发布（Dev 预发布）
 - 修复：**更新死循环**——桌面端 `update-available` 未校验版本，feed 给的版本等于/低于当前版本时仍提示更新（装完还提示）；现改为 `compareVersion` 比较，非更新直接回 `not-available`
