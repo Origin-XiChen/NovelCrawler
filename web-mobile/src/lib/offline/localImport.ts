@@ -6,7 +6,7 @@
 import JSZip from 'jszip';
 import { putBook, releaseZip, saveChunk, saveSource, type ChapterRef, type LocalBook } from './db';
 
-const BUNDLE_VERSION = 1;
+const BUNDLE_VERSION = 2;
 
 /** 与 reading.ts 的 ASSET_RE 同一条规则 */
 const ASSET_RE = /\/api\/epub_asset\?[^"'()\s]*?[&?]path=([^"'()\s)]+)/g;
@@ -133,7 +133,10 @@ async function importBundleZip(file: File): Promise<LocalBook> {
     return imported[0];
   }
   if ((manifest.bundle_version || 0) > BUNDLE_VERSION) {
-    throw new Error('离线包版本过新,请先把手机 App 升级到最新版');
+    throw new Error(
+      `离线包版本过新（包 v${manifest.bundle_version}，App 支持 v${BUNDLE_VERSION}）：` +
+        '请把手机 App 升级到最新版后再导入',
+    );
   }
   if (!manifest.kind || !manifest.file) throw new Error('manifest.json 缺少必要字段');
 

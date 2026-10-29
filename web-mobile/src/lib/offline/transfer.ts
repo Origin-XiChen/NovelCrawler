@@ -7,7 +7,7 @@ import { apiDownload, apiGet } from '../api';
 import { getActiveServer } from '../connection';
 import { getBook, putBook, releaseZip, saveChunk, type ChapterRef, type LocalBook } from './db';
 
-const SUPPORTED_BUNDLE_VERSION = 1;
+const SUPPORTED_BUNDLE_VERSION = 2;
 
 /** 手机这次连接电脑的会话号:电脑"手机连接"页据此显示打包/传输进度 */
 let sessionSid = '';
@@ -186,7 +186,10 @@ export async function importBook(
   if (!manifestFile) throw new Error('离线包缺少 manifest,请让电脑重新打包');
   const manifest = JSON.parse(await manifestFile.async('string')) as BundleManifest;
   if ((manifest.bundle_version || 0) > SUPPORTED_BUNDLE_VERSION) {
-    throw new Error('离线包版本过新,请把电脑端升级到最新版后重试');
+    throw new Error(
+      `离线包版本过新（包 v${manifest.bundle_version}，App 支持 v${SUPPORTED_BUNDLE_VERSION}）：` +
+        '请把手机 App 升级到最新版后再试',
+    );
   }
 
   const comic = manifest.kind === 'comic';

@@ -1810,8 +1810,11 @@ class Handler(BaseHTTPRequestHandler):
         task_name = title if (kind == "comic" and want_all and title) else stem
         task = f"{task_name}(离线包)"
         rules_key = json.dumps(rules, ensure_ascii=False, sort_keys=True)
+        # 协议版本进缓存键:改了 BUNDLE_VERSION(例如加封面)必须重打,
+        # 否则旧缓存命中 → 手机拿到的还是老包,改了等于没改。
+        _bundle_ver = getattr(mobile_bundle, "BUNDLE_VERSION", 0)
         key = _hl.sha1(
-            f"{kind}|{os.path.abspath(src)}|{st.st_mtime_ns}|{st.st_size}|{rules_key}".encode("utf-8")
+            f"{kind}|v{_bundle_ver}|{os.path.abspath(src)}|{st.st_mtime_ns}|{st.st_size}|{rules_key}".encode("utf-8")
         ).hexdigest()[:24]
         cache_dir = os.path.join(APP_DATA_DIR, "mobile_bundles")
         try:

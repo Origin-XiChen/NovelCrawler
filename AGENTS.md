@@ -95,6 +95,9 @@ gh release upload vX.Y.Z <apk>#NovelCrawler-Mobile-X.Y.Z.apk --clobber
 - **Dev 预发布**：CI 默认建正式 release；要发 Dev 版，CI 成功后执行
   `gh release edit vX.Y.Z --prerelease`。此时 `/releases/latest` 与桌面 `allowPrerelease=false`
   都看不到它，只有开了 Dev 通道的客户端能收到。
+- **`BUNDLE_VERSION` 是协议版本，两端必须同步**：改后端就得同步 `web-mobile/src/lib/offline/transfer.ts` 的
+  `SUPPORTED_BUNDLE_VERSION` 与 `localImport.ts` 的 `BUNDLE_VERSION`，否则手机会报"离线包版本过新"拒绝导入；
+  同时它已进后端缓存键，改它才会真正重打缓存。
 - **APK 版本必须等于 tag**：上传前核对文件名里的版本（手机端会校验，不一致直接不提示更新）。
   历史事故：tag 升到 dev.5 但资产仍挂着 dev.4 的 APK，用户装完版本没变 → 反复提示更新，像死循环。
 - **转正**：`gh release edit vX.Y.Z --prerelease=false`（必要时 `gh release edit vX.Y.Z --latest`）。
@@ -160,6 +163,13 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 ## §9 版本进度
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
+
+### 1.7.10-dev.9 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 修复：**手机提示「离线包版本过新」无法导入**——dev.1 为让封面生效把后端 `BUNDLE_VERSION` 提到 2，但手机端 `SUPPORTED_BUNDLE_VERSION` 仍是 1，包被判"太新"。现两端统一为 2（`transfer.ts` 与 `localImport.ts`）
+- 修复：后端离线包**缓存键没带协议版本**，改 `BUNDLE_VERSION` 不会失效旧缓存（封面改了也拿不到）——缓存键现在包含 `v{BUNDLE_VERSION}`
+- 其他：版本不匹配的报错改为带具体版本（「包 v2，App 支持 v1」），并明确指出该升哪一端
+- 风险遗留：漫画「同步后看不了」仍待复现
 
 ### 1.7.10-dev.8 — 2026-10-29
 - 状态：已发布（Dev 预发布）
