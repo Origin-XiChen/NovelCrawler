@@ -80,8 +80,8 @@ export default function SyncPage() {
   };
 
   return (
-    <div className="page">
-      <div className="page-head">
+    <div className="sync-page">
+      <header className="sync-page__head">
         <button type="button" className="icon-btn" aria-label="返回" onClick={() => navigate(-1)}>
           <ArrowLeft size={20} />
         </button>
@@ -89,7 +89,7 @@ export default function SyncPage() {
         <button type="button" className="icon-btn" aria-label="刷新" onClick={() => void load()}>
           <RefreshCw size={18} />
         </button>
-      </div>
+      </header>
 
       <div className="sync-summary">
         <div>

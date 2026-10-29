@@ -159,6 +159,12 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
 
+### 1.7.10-dev.3 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 修复：同步管理页元素贴边——该页用了根本不存在的 `.page/.page-head` 类，等于没有内边距；改为 `.sync-page`（与 library/settings 同套 `max-width + 16px 内边距 + 安全区`）
+- 其他：手机端名称全部英文化——`strings.xml` 的 `app_name`/`title_activity_main` 与 `manifest.webmanifest` 的 `name`/`short_name` 由「小说管家」改为 `NovelCrawler`（`capacitor.config.ts` 早已是英文）
+- 风险遗留：漫画「同步后看不了」仍待复现
+
 ### 1.7.10-dev.2 — 2026-10-29
 - 状态：已发布（Dev 预发布）
 - 修复：设置页版本号与通道混显示（切换 Dev 开关会让"版本"看起来变了）——版本号原样显示，另用独立 `开发版` 标签；「接收 Dev 版本」改为「更新通道」，右侧加 `稳定/Dev` 胶囊；装了 dev 构建但通道为稳定时给出说明

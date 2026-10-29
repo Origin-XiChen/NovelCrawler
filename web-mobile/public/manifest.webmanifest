@@ -1,6 +1,6 @@
 {
-  "name": "小说管家 · 手机书库",
-  "short_name": "小说管家",
+  "name": "NovelCrawler",
+  "short_name": "NovelCrawler",
   "description": "连接电脑上的 NovelCrawler，在手机上继续阅读小说和漫画",
   "start_url": "./",
   "scope": "./",
