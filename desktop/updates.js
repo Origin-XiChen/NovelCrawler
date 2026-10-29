@@ -74,6 +74,7 @@ function openStream(url, extraHeaders = {}, redirects = 0) {
   if (electronNet) {
     return new Promise((resolve, reject) => {
       let request;
+      let settled = false;
       try {
         request = electronNet.request({
           method: 'GET',
@@ -85,7 +86,29 @@ function openStream(url, extraHeaders = {}, redirects = 0) {
         reject(new Error(`请求发送失败：${error.message}`));
         return;
       }
+      /**
+       * redirect: 'manual' 时 Electron 不会把 3xx 当普通 response 交出来，
+       * 而是发 'redirect' 事件；不处理（或不调 followRedirect）就会以
+       * “Redirect was cancelled” 结束。GitHub 的资产地址恰恰会 302 到
+       * objects.githubusercontent.com，所以这里必须自己接住并重新发请求，
+       * 同时把 Range 头原样带下去，断点续传才不会失效。
+       */
+      request.on('redirect', (statusCode, method, redirectUrl) => {
+        if (settled) return;
+        settled = true;
+        try {
+          request.abort();
+        } catch {
+          // 已经进入重定向，abort 只用于释放原请求
+        }
+        const next = new URL(redirectUrl, url).toString();
+        resolve(openStream(next, extraHeaders, redirects + 1));
+      });
       request.on('response', (response) => {
+        if (settled) {
+          response.resume?.();
+          return;
+        }
         const status = response.statusCode || 0;
         const header = (name) => {
           const value = response.headers[name.toLowerCase()];
@@ -95,11 +118,18 @@ function openStream(url, extraHeaders = {}, redirects = 0) {
           const next = new URL(header('location'), url).toString();
           response.on('data', () => {});
           response.on('end', () => {
+            if (settled) return;
+            settled = true;
             resolve(openStream(next, extraHeaders, redirects + 1));
           });
-          response.on('error', () => resolve(openStream(next, extraHeaders, redirects + 1)));
+          response.on('error', () => {
+            if (settled) return;
+            settled = true;
+            resolve(openStream(next, extraHeaders, redirects + 1));
+          });
           return;
         }
+        settled = true;
         resolve({
           statusCode: status,
           headers: {
@@ -109,7 +139,11 @@ function openStream(url, extraHeaders = {}, redirects = 0) {
           stream: response,
         });
       });
-      request.on('error', (error) => reject(new Error(`网络错误：${error.message}`)));
+      request.on('error', (error) => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`网络错误：${error.message}`));
+      });
       request.setTimeout?.(30000, () => request.abort());
       request.end();
     });

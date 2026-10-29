@@ -752,6 +752,16 @@ export function SettingsPage() {
                     <Download size={15} />
                     安装并重启
                   </button>
+                ) : state.phase === 'error' ? (
+                  <>
+                    <button type="button" className="btn btn--ghost" onClick={openDownloadPage}>
+                      发布页
+                    </button>
+                    <button type="button" className="btn btn--ghost" onClick={check}>
+                      <RefreshCw size={15} />
+                      重试
+                    </button>
+                  </>
                 ) : (
                   <button
                     type="button"

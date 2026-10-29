@@ -108,18 +108,24 @@ function UpdateCard() {
   }
 
   if (state.phase === 'error') {
+    const downloadFailed = Boolean(state.message?.includes('下载安装包'));
     return (
       <div className="update-card">
         <div className="update-card__title">
           <RefreshCw size={14} />
-          检查更新失败
+          {downloadFailed ? '下载更新失败' : '检查更新失败'}
         </div>
         <div className="update-card__meta" title={state.message}>
           {state.message ? state.message.slice(0, 80) : `当前 v${appVersion}`}
         </div>
-        <button type="button" className="btn btn--sm btn--ghost" onClick={check}>
-          重试
-        </button>
+        <div className="update-card__actions">
+          <button type="button" className="btn btn--sm btn--ghost" onClick={check}>
+            重试
+          </button>
+          <button type="button" className="btn btn--sm btn--ghost" onClick={openDownloadPage}>
+            发布页
+          </button>
+        </div>
       </div>
     );
   }
