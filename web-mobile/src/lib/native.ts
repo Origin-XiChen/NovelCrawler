@@ -108,6 +108,14 @@ export async function fetchLatestApk(includePrerelease = false): Promise<ApkUpda
     if (!asset?.browser_download_url) {
       throw new Error('最新版本尚未提供 Android 安装包');
     }
+    // 死循环防线:release 的 tag 与包内实际版本必须一致。
+    // 如果 tag 是 dev.5 但挂的仍是 dev.4 的 APK,用户会"装完还提示更新",
+    // 一路循环下去 —— 这种情况宁可先不提示,也不要发一个装不掉的包。
+    const assetVersion = (asset.name || '').match(/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\.apk$/i)?.[1] || '';
+    if (assetVersion && compareVersions(assetVersion, version) !== 0) {
+      console.warn('[update] 安装包版本与发布不一致,已跳过', { tag: version, asset: assetVersion });
+      return null;
+    }
     return { version, url: asset.browser_download_url, notes: release.body };
   } finally {
     window.clearTimeout(timeout);

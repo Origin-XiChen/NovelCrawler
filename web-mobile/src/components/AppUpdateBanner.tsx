@@ -4,6 +4,24 @@ import { Download, X } from 'lucide-react';
 import { fetchLatestApk, IS_NATIVE, openApkDownload, type ApkUpdate } from '../lib/native';
 
 const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+/** 「稍后再说」记到本地：同一版本不再反复弹，避免看起来像更新死循环 */
+const skipKey = (version: string) => `nc.update.skip.${version}`;
+
+function isSkipped(version: string): boolean {
+  try {
+    return localStorage.getItem(skipKey(version)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markSkipped(version: string): void {
+  try {
+    localStorage.setItem(skipKey(version), '1');
+  } catch {
+    // 隐私模式忽略
+  }
+}
 
 export default function AppUpdateBanner() {
   const [update, setUpdate] = useState<ApkUpdate | null>(null);
@@ -24,7 +42,7 @@ export default function AppUpdateBanner() {
       lastCheck.current = Date.now();
       try {
         const found = await fetchLatestApk();
-        if (alive.current && found) setUpdate(found);
+        if (alive.current && found && !isSkipped(found.version)) setUpdate(found);
       } catch {
         // GitHub 不可达时保持安静，设置页仍可手动检查
       } finally {
@@ -77,7 +95,10 @@ export default function AppUpdateBanner() {
         type="button"
         className="update-banner__close"
         aria-label="稍后再说"
-        onClick={() => setDismissed(true)}
+        onClick={() => {
+          if (update) markSkipped(update.version);
+          setDismissed(true);
+        }}
       >
         <X size={16} />
       </button>

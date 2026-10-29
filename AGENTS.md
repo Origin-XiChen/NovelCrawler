@@ -95,6 +95,8 @@ gh release upload vX.Y.Z <apk>#NovelCrawler-Mobile-X.Y.Z.apk --clobber
 - **Dev 预发布**：CI 默认建正式 release；要发 Dev 版，CI 成功后执行
   `gh release edit vX.Y.Z --prerelease`。此时 `/releases/latest` 与桌面 `allowPrerelease=false`
   都看不到它，只有开了 Dev 通道的客户端能收到。
+- **APK 版本必须等于 tag**：上传前核对文件名里的版本（手机端会校验，不一致直接不提示更新）。
+  历史事故：tag 升到 dev.5 但资产仍挂着 dev.4 的 APK，用户装完版本没变 → 反复提示更新，像死循环。
 - **转正**：`gh release edit vX.Y.Z --prerelease=false`（必要时 `gh release edit vX.Y.Z --latest`）。
 
 ---
@@ -158,6 +160,13 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 ## §9 版本进度
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
+
+### 1.7.10-dev.5 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 修复：**更新死循环**——桌面端 `update-available` 未校验版本，feed 给的版本等于/低于当前版本时仍提示更新（装完还提示）；现改为 `compareVersion` 比较，非更新直接回 `not-available`
+- 修复：手机端 release 的 tag 与 APK 实际版本不一致时（例如 tag 升了但挂的是旧 APK）会无限提示；现校验资产文件名里的版本，不一致就跳过并不提示
+- 其他：手机更新横幅「稍后再说」记到 `localStorage`，同一版本不再反复弹
+- 风险遗留：漫画「同步后看不了」仍待复现
 
 ### 1.7.10-dev.4 — 2026-10-29
 - 状态：已发布（Dev 预发布）

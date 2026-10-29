@@ -33,6 +33,25 @@ function writePrerelease(flag) {
   }
 }
 
+/** 语义化比较:1.7.9-dev.2 < 1.7.9-dev.10 < 1.7.9（与手机端同一套规则） */
+function compareVersion(a, b) {
+  const split = (v) => {
+    const text = String(v || '').replace(/^v/i, '');
+    const [core, pre] = text.split('-');
+    const nums = core.split('.').map((n) => Number.parseInt(n, 10) || 0);
+    const dev = pre ? pre.replace(/^dev\.?/i, '') : '';
+    return { nums, dev: dev ? Number.parseInt(dev, 10) || 0 : -1 };
+  };
+  const left = split(a);
+  const right = split(b);
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (left.nums[i] || 0) - (right.nums[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return left.dev - right.dev;
+}
+
+
 /** 切换是否接收预发布版本;立即作用于下一次检查 */
 function setPrerelease(flag) {
   const value = Boolean(flag);
@@ -56,15 +75,23 @@ function init(options) {
   };
 
   autoUpdater.on('checking-for-update', () => send({ type: 'checking' }));
-  autoUpdater.on('update-available', (info) =>
+  autoUpdater.on('update-available', (info) => {
+    // 死循环防线:feed 里给的版本如果没有比当前版本更新(同号重发、或 prerelease
+    // 通道读到同版本),直接判"已是最新",否则用户会陷入"装完还提示更新"的循环。
+    const current = app.getVersion();
+    if (info.version && compareVersion(info.version, current) <= 0) {
+      log.warn('[updater] 忽略非更新的版本提示', { offered: info.version, current });
+      send({ type: 'not-available', version: current });
+      return;
+    }
     send({
       type: 'available',
       version: info.version,
       releaseName: info.releaseName || undefined,
       releaseNotes:
         typeof info.releaseNotes === 'string' ? info.releaseNotes.slice(0, 2000) : undefined,
-    }),
-  );
+    });
+  });
   autoUpdater.on('update-not-available', (info) =>
     send({ type: 'not-available', version: info.version }),
   );
