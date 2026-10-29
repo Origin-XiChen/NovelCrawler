@@ -29,6 +29,9 @@ export interface CatalogNovel {
   size: number;
   mtime: number;
   chapters: number;
+  /** 电脑上封面的 mtime,用于判断手机端封面是否过期 */
+  cover_mtime?: number;
+  has_cover?: boolean;
 }
 
 export interface CatalogComic {
@@ -39,6 +42,8 @@ export interface CatalogComic {
   size: number;
   mtime: number;
   pages: number;
+  cover_mtime?: number;
+  has_cover?: boolean;
 }
 
 export interface CatalogResult {

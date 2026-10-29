@@ -189,7 +189,12 @@ function init(options) {
   });
 }
 
+// 更新一律手动:启动不再自动检查(用户要求 2026-10-29)。
+// 自动下载/静默安装曾在真机上反复失败,留下一堆"下载到 100% 又归零"的体验问题。
+const AUTO_CHECK = false;
+
 function scheduleStartupCheck(delayMs = 8000) {
+  if (!AUTO_CHECK) return;
   if (started || !app.isPackaged) return;
   started = true;
   setTimeout(() => {

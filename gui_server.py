@@ -1663,11 +1663,23 @@ class Handler(BaseHTTPRequestHandler):
                 if not os.path.isfile(fp):
                     continue
                 seen.add(fn)
+                # 封面版本:手机用它判断"封面是否过期"(电脑换了封面要能同步下来)
+                _cover = ""
+                try:
+                    from novel.covers import ensure_cover as _ec2
+                    _cover = _ec2(fp) or ""
+                except Exception:  # noqa: BLE001
+                    _cover = ""
+                try:
+                    _cover_mtime = int(os.path.getmtime(_cover)) if _cover else 0
+                except OSError:
+                    _cover_mtime = 0
                 novels.append({
                     "id": f"novel:{fn}", "file": fn, "kind": kind,
                     "title": os.path.splitext(fn)[0],
                     "size": st.st_size, "mtime": int(st.st_mtime),
                     "chapters": counter(fp),
+                    "cover_mtime": _cover_mtime, "has_cover": bool(_cover),
                 })
         comics = []
         try:
@@ -1690,6 +1702,8 @@ class Handler(BaseHTTPRequestHandler):
                     "id": f"comic:{name}/{pdf}", "file": pdf, "title": name,
                     "kind": "comic", "size": st.st_size, "mtime": int(st.st_mtime),
                     "pages": mobile_bundle.pdf_page_count(fp),
+                    # 漫画封面就是首页图,跟着 PDF mtime 走
+                    "cover_mtime": int(st.st_mtime), "has_cover": True,
                 })
         return self._send_json({"ok": True, "novels": novels, "comics": comics,
                                 "generated": int(time.time())})

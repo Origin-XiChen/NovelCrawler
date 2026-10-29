@@ -119,7 +119,7 @@ function dateStamp() {
 
 export function SettingsPage() {
   const { mode, setMode } = useTheme();
-  const { state, appVersion, bridgeAvailable, check, download, install } = useUpdate();
+  const { state, appVersion, bridgeAvailable, check } = useUpdate();
   // Dev 通道:与手机端一致,开启后检查预发布版本
   // 同步管理:电脑侧的逐章进度(手机回传 + 本机阅读都记在这里)
   const [syncRecords, setSyncRecords] = useState<{
@@ -721,14 +721,17 @@ export function SettingsPage() {
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {state.phase === 'available' ? (
-                  <button type="button" className="btn" onClick={download}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() =>
+                      void window.desktop?.openExternal?.(
+                        'https://github.com/Origin-XiChen/NovelCrawler/releases/latest',
+                      )
+                    }
+                  >
                     <Download size={15} />
-                    下载更新
-                  </button>
-                ) : state.phase === 'downloaded' ? (
-                  <button type="button" className="btn" onClick={install}>
-                    <Download size={15} />
-                    重启安装
+                    去下载
                   </button>
                 ) : (
                   <button

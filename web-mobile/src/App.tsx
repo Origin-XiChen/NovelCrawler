@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
-import AppUpdateBanner from './components/AppUpdateBanner';
 import BottomNav from './components/BottomNav';
 import NativeBackButton from './components/NativeBackButton';
 import BookPage from './pages/BookPage';
@@ -127,7 +126,6 @@ export default function App() {
       <NativeBackButton />
       <PresenceWatcher />
       <LocalSyncWatcher />
-      <AppUpdateBanner />
       <UnauthorizedBridge />
       <Routes>
         <Route path="/" element={<RootRedirect />} />

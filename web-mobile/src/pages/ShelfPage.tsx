@@ -17,6 +17,7 @@ import {
 import BookCover from '../components/BookCover';
 import { DownloadButton, LocalChip } from '../components/OfflineControls';
 import { getActiveServer } from '../lib/connection';
+import { refreshServerStatus, useServerStatus } from '../lib/serverStatus';
 import { deleteLocalBook, localBookHref, localReaderHref } from '../lib/content';
 import { errorMessage, formatDate, formatSize } from '../lib/format';
 import { continuousPercent } from '../lib/reading-progress';
@@ -49,6 +50,7 @@ export default function ShelfPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const server = getActiveServer();
+  const link = useServerStatus();
   const library = useLocalLibrary();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ShelfFilter>(
@@ -142,6 +144,7 @@ export default function ShelfPage() {
   const checkUpdates = async () => {
     setChecking(true);
     setNotice('');
+    await refreshServerStatus();
     try {
       const data = await fetchCatalog();
       const entries = new Map<string, { mtime: number; size: number }>([
@@ -241,7 +244,17 @@ export default function ShelfPage() {
       <header className="shelf-header">
         <div>
           <div className="library-header__eyebrow">
-            <WifiOff size={13} /> 不联网可读
+            {server ? (
+              link === 'online' ? (
+                <><span className="status-dot" /> 电脑在线</>
+              ) : link === 'checking' ? (
+                <><span className="status-dot is-wait" /> 正在连接电脑…</>
+              ) : (
+                <><WifiOff size={13} /> 电脑离线 · 本地内容可读</>
+              )
+            ) : (
+              <><WifiOff size={13} /> 未连接电脑</>
+            )}
           </div>
           <h1>本地书架</h1>
           <p>{library.loading ? '正在读取…' : `${library.books.length} 本 · 占用 ${formatSize(library.bytes)}`}</p>
