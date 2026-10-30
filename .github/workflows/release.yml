@@ -28,17 +28,20 @@ jobs:
         shell: bash
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          IS_STABLE: ${{ contains(github.ref_name, '-') == false }}
         run: |
           if [ -n "$RELEASE_TOKEN" ]; then
-            echo "已配置 RELEASE_TOKEN，Release 作者将是令牌所属账号"
+            echo "已配置 RELEASE_TOKEN：Release 作者将是令牌所属账号"
             exit 0
           fi
-          if [ "$IS_STABLE" = "true" ]; then
-            echo "::warning::未配置 RELEASE_TOKEN：本次正式版将以 github-actions[bot] 发布（正文署名不受影响）。需要作者显示为本人时，在仓库 Secrets 添加 RELEASE_TOKEN（PAT，需 repo 权限）"
-          else
-            echo "::warning::未配置 RELEASE_TOKEN：本次 Dev 版将以 github-actions[bot] 发布（正文署名不受影响）"
-          fi
+          # 用 tag 名里有没有 "-" 判断稳定/预发布，避免依赖表达式求值
+          case "$GITHUB_REF_NAME" in
+            *-*)
+              echo "::warning::未配置 RELEASE_TOKEN：本次 Dev 版以 github-actions[bot] 发布（正文署名为 Origin-XiChen）"
+              ;;
+            *)
+              echo "::warning::未配置 RELEASE_TOKEN：本次正式版以 github-actions[bot] 发布（正文署名为 Origin-XiChen）。需要作者显示为本人时，在仓库 Secrets 添加 RELEASE_TOKEN（PAT，需 repo 权限）"
+              ;;
+          esac
 
       - uses: actions/setup-node@v4
         with:
