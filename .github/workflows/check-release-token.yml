@@ -25,19 +25,25 @@ jobs:
           LOGIN=$(gh api user --jq .login)
           echo "token 对应账号：$LOGIN"
 
-          # 有效但权限不足时，这一步会直接 401/403，等于把问题提前暴露
-          PUSH=$(gh api "repos/$REPO" --jq '.permissions.push')
-          ADMIN=$(gh api "repos/$REPO" --jq '.permissions.admin')
-          echo "写权限 push=$PUSH admin=$ADMIN"
-
-          # 顺带确认能读到 releases（发布动作依赖它）
-          gh api "repos/$REPO/releases?per_page=1" --jq '.[0].tag_name' >/dev/null
+          # ⚠️ `repos/{repo}.permissions` 反映的是**账号角色**，不是令牌授权范围：
+          # fine-grained PAT 只有 read 权限时它照样返回 push=true（踩过）。
+          # 所以这里直接拿"发布那一步会调用的同一个接口"做一次真实写入：
+          # 建一个草稿 release（草稿不公开、不建 tag），成功即删掉。
+          echo "尝试创建草稿 release（真实写入测试）…"
+          DRAFT_ID=$(gh api -X POST "repos/$REPO/releases" \
+            -f tag_name=v0.0.0-token-check \
+            -f name="token check" \
+            -f body="automated check, will be deleted" \
+            -F draft=true --jq .id 2>/tmp/err) || {
+              echo "::error::令牌无法创建 release：$(cat /tmp/err)"
+              echo "::error::fine-grained PAT 需要 Repository permissions → Contents: Read and write"
+              exit 1
+            }
+          echo "草稿创建成功 id=$DRAFT_ID，清理中…"
+          gh api -X DELETE "repos/$REPO/releases/$DRAFT_ID" >/dev/null
+          echo "草稿已删除"
 
           if [ "$LOGIN" != "Origin-XiChen" ]; then
             echo "::warning::token 属于 $LOGIN（不是 Origin-XiChen），发布作者会显示为该账号"
           fi
-          if [ "$PUSH" != "true" ] && [ "$ADMIN" != "true" ]; then
-            echo "::error::token 对该仓库没有写权限：fine-grained PAT 需要 Contents: Read and write"
-            exit 1
-          fi
-          echo "✅ RELEASE_TOKEN 可用，发布时作者会是 $LOGIN"
+          echo "✅ RELEASE_TOKEN 可创建 release，发布时作者会是 $LOGIN"
