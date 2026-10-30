@@ -105,6 +105,9 @@ gh release upload vX.Y.Z <apk>#NovelCrawler-Mobile-X.Y.Z.apk --clobber
   任何"取第一条"的写法都会卡在旧版本上，必须按版本号排序或全量比大小。`releases.atom` 的顺序是正常的。
 - **APK 版本必须等于 tag**：上传前核对文件名里的版本（手机端会校验，不一致直接不提示更新）。
   历史事故：tag 升到 dev.5 但资产仍挂着 dev.4 的 APK，用户装完版本没变 → 反复提示更新，像死循环。
+- **发布署名**：Release 作者由令牌决定。仓库配了 `RELEASE_TOKEN`（Origin-XiChen 的 PAT，需 `repo` 权限）时
+  作者显示为本人，否则回退 `GITHUB_TOKEN`（作者是 `github-actions[bot]`，正文仍有「发布：Origin-XiChen」署名）。
+  **门禁只警告不阻断**——曾把它写成正式版硬失败，而仓库 secrets 为空，等于把整条发布链路卡死。
 - **转正**：`gh release edit vX.Y.Z --prerelease=false`（必要时 `gh release edit vX.Y.Z --latest`）。
 
 ---
@@ -159,8 +162,8 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 5. **本机跑 `electron-builder` 打包 NSIS**：稳定报 `Exit code: 2`，产物只有 0.4MB。**这是已知现象，不要在本机排查**，交给 CI。
 6. **不要再用 electron-updater 下载/安装**：它的 `download-progress` 在分段续传重试时会从 0 重报（"下满又归零"），`quitAndInstall` 被取消或文件占用时静默失败（"重启还是旧版"）。桌面端现用自己的 `desktop/updates.js`（HTTPS + Range 续传 + sha256 校验 + 调系统安装器）。
 7. **`/api/mobile/ping` 崩溃会让手机显示"这个地址没有响应"**：TCP 能连上但服务端一个字节不回（`ERR_EMPTY_RESPONSE`）。排查时先看服务端日志有没有 traceback，别一头扎进网络/防火墙。
-7. **在真实数据目录跑冒烟**：污染 `config.json` / 书架。一律 `NOVEL_DATA_DIR` 隔离。
-7. **本机 `electron-builder --win nsis` 必失败**（makensis 成功，随后运行安装包生成卸载器时报
+8. **在真实数据目录跑冒烟**：污染 `config.json` / 书架。一律 `NOVEL_DATA_DIR` 隔离。
+9. **本机 `electron-builder --win nsis` 必失败**（makensis 成功，随后运行安装包生成卸载器时报
    「Error writing temporary file」）。本机自测改用 `npx electron-builder --win --dir`，
    产出 `release/win-unpacked/NovelCrawler.exe` 直接运行；正式安装包一律交给 CI。
 
@@ -169,6 +172,23 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 ## §9 版本进度
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
+
+### 1.7.11-dev.3 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 修复：**桌面更新下载报 `Redirect was cancelled`**——Electron `net` 在 `redirect:'manual'` 下必须自己听 `redirect` 事件；GitHub 资产 302 到 `objects.githubusercontent.com` 时请求会被取消。现在手动跟随跳转并原样保留 `Range` 头，断点续传不受影响
+- 其他：更新失败卡片与设置页补「发布页」入口，内置更新器出错时仍可手动下载安装包
+
+### 1.7.11-dev.2 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 新增：**Android 前台下载服务 + `BackgroundDownload` 插件**——离线包切后台/锁屏继续下载，通知栏显示进度，回前台自动导入；重启后恢复已下完的包；原生层失败自动回退到页面内下载
+- 其他：手机端连接页 SSH/候选地址/超时修复与就近提示；书库/书架/详情骨架屏 + 滚动记忆；批量删除条避开底部导航；更新提示只在主页面出现；错误可就地重试
+- 其他：动效层（页面淡入、列表错峰、封面淡入、进度缓动、骨架微光），全部遵守「减弱动效」
+
+### 1.7.11-dev.1 — 2026-10-29
+- 状态：已发布（Dev 预发布）
+- 新增：手机漫画阅读器**翻页/连续滚动双模式**，滚动模式按可视页记进度；补上缺失的底栏定位
+- 修复：手机连接页候选地址探测失效、`ping`/`pair` 请求无超时、SSH 密码闭包取到旧值
+- 其他：连接页提示条吸顶、已配对电脑卡片操作区整理；电脑端「手机连接」安全通道默认收起并后置，页签吸顶且切换时复位滚动
 
 ### 1.7.10 — 2026-10-29
 - 状态：已发布（正式版）。经 dev.1…dev.13 十三轮真机验证后转正

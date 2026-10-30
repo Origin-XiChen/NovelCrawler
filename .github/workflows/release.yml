@@ -20,27 +20,24 @@ jobs:
       - uses: actions/checkout@v4
 
       # Release 的创建者由令牌决定：默认 GITHUB_TOKEN 会把作者显示为
-      # github-actions[bot]。正式版强制使用 Origin-XiChen 的 PAT（RELEASE_TOKEN），
-      # Dev 版允许回退到 GITHUB_TOKEN，但会在日志里警告。
-      - name: Require release token for stable releases
-        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+      # github-actions[bot]；配置 RELEASE_TOKEN（Origin-XiChen 的 PAT）后作者就是本人。
+      # 这里**只警告不阻断**：缺令牌时仍用 GITHUB_TOKEN 正常发布，正文保留「发布：Origin-XiChen」署名。
+      # （曾把正式版写成硬失败，结果 secrets 为空时整条发布链路直接死掉，见 AGENTS §8）
+      - name: Check release token (non-blocking)
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          IS_STABLE: ${{ contains(github.ref_name, '-') == false }}
         run: |
-          if [ -z "$RELEASE_TOKEN" ]; then
-            echo "::error::正式版 Release 必须配置 RELEASE_TOKEN（Origin-XiChen 的 PAT），否则会以 github-actions[bot] 发布"
-            exit 1
+          if [ -n "$RELEASE_TOKEN" ]; then
+            echo "已配置 RELEASE_TOKEN，Release 作者将是令牌所属账号"
+            exit 0
           fi
-
-      - name: Warn when dev release uses the bot identity
-        if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-')
-        shell: bash
-        env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          if [ -z "$RELEASE_TOKEN" ]; then
-            echo "::warning::未配置 RELEASE_TOKEN，本次 Dev Release 由 github-actions[bot] 创建（正文仍会带署名）"
+          if [ "$IS_STABLE" = "true" ]; then
+            echo "::warning::未配置 RELEASE_TOKEN：本次正式版将以 github-actions[bot] 发布（正文署名不受影响）。需要作者显示为本人时，在仓库 Secrets 添加 RELEASE_TOKEN（PAT，需 repo 权限）"
+          else
+            echo "::warning::未配置 RELEASE_TOKEN：本次 Dev 版将以 github-actions[bot] 发布（正文署名不受影响）"
           fi
 
       - uses: actions/setup-node@v4
