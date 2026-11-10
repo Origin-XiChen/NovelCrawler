@@ -174,10 +174,11 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
 
 ### 1.7.12 — 2026-11-10
-- 状态：已发布（正式版）。桌面依赖安全升级，修复 Dependabot 告警
+- 状态：已发布（正式版）。桌面依赖安全升级，修复 Dependabot 告警；四个产物齐全（`latest.yml` + Setup + blockmap + Mobile APK），Release 作者 `Origin-XiChen`，`isLatest=true`
 - 新增：无
 - 修复：Electron 33.4.11 → 42.11.16、electron-builder 25.1.8 → 26.18.1，`tar`/`extract-zip`/`builder-util-runtime`/`app-builder-lib` 告警随之消除；移除未使用的 `electron-updater`（更新下载仍走自建 `desktop/updates.js`）
-- 风险遗留：本机 Electron 45 无法启动（stock 二进制 exit 3），暂锁 42.11.16；真实更新下载（302 + Range 续传）与 NSIS 安装流程需发布后真机确认
+- 其他：**CI 发布改为「`npm run dist` 只构建 + `gh release create/upload` 显式发布」**——electron-builder 26 的 GitHub publisher 会对同一 release 并发创建两次，其中一个必然 422 `already_exists`（连续两次发布失败均由此引起）；`setup-android` 固定 `packages: platform-tools`（新 runner 的 cmdline-tools 16 已无旧 `tools` 包）；本版 APK 因该 action 故障按 §4 本机构建补传；`gh release upload file#label` 只设标签、不改资产名，上传前须先把文件改名为 `NovelCrawler-Mobile-X.Y.Z.apk`
+- 风险遗留：本机 Electron 45 无法启动（stock 二进制 exit 3），暂锁 42.11.16；真实更新下载（302 + Range 续传）与 NSIS 安装流程需真机确认；剩余 1 条 development 范围 `minimatch` 告警（electron-builder/capacitor 工具链，不进安装包，待上游升级）
 
 ### 1.7.11 — 2026-10-30
 - 状态：已发布（正式版）。经 dev.1/dev.2/dev.3 三轮真机验证后转正；Release 作者改为 `Origin-XiChen`（仓库配置 `RELEASE_TOKEN`）
