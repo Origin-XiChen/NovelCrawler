@@ -173,6 +173,12 @@ export NODE_OPTIONS="" CODEBUDDY_SAFE_DELETE_ENABLED=0
 
 > 只记录**已发布的事实**，不写计划。每条四行：状态（含发布证据）/ 新增 / 修复 / 风险遗留。
 
+### 1.7.12 — 2026-11-10
+- 状态：已发布（正式版）。桌面依赖安全升级，修复 Dependabot 告警
+- 新增：无
+- 修复：Electron 33.4.11 → 42.11.16、electron-builder 25.1.8 → 26.18.1，`tar`/`extract-zip`/`builder-util-runtime`/`app-builder-lib` 告警随之消除；移除未使用的 `electron-updater`（更新下载仍走自建 `desktop/updates.js`）
+- 风险遗留：本机 Electron 45 无法启动（stock 二进制 exit 3），暂锁 42.11.16；真实更新下载（302 + Range 续传）与 NSIS 安装流程需发布后真机确认
+
 ### 1.7.11 — 2026-10-30
 - 状态：已发布（正式版）。经 dev.1/dev.2/dev.3 三轮真机验证后转正；Release 作者改为 `Origin-XiChen`（仓库配置 `RELEASE_TOKEN`）
 - 新增：手机漫画阅读器**翻页 / 连续滚动双模式**（滚动模式按可视页记进度）；**Android 前台下载服务 + `BackgroundDownload` 插件**——离线包切后台/锁屏继续下载、通知栏显示进度、回前台自动导入、重启后恢复已下完的包、原生层失败自动回退页面下载（**此前「漫画同步后看不了」的根因就是下载被打断、包不完整**，切后台/锁屏后下载中断即复现，新服务下已验证正常）

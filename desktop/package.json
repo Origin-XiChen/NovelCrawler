@@ -1,6 +1,6 @@
 {
   "name": "@novelcrawler/desktop",
-  "version": "1.7.11",
+  "version": "1.7.12",
   "private": true,
   "description": "NovelCrawler Electron 桌面壳",
   "main": "main.js",
@@ -11,17 +11,14 @@
     "dist": "electron-builder --win nsis --publish never",
     "dist:publish": "electron-builder --win nsis --publish always"
   },
-  "dependencies": {
-    "electron-updater": "^6.3.9"
-  },
   "devDependencies": {
-    "electron": "33.4.11",
-    "electron-builder": "^25.1.8"
+    "electron": "42.11.16",
+    "electron-builder": "^26.18.1"
   },
   "build": {
     "appId": "com.originxichen.novelcrawler",
     "productName": "NovelCrawler",
-    "electronVersion": "33.4.11",
+    "electronVersion": "42.11.16",
     "npmRebuild": false,
     "copyright": "GPL-3.0 · 仅供个人学习与技术研究",
     "directories": {
