@@ -77,11 +77,47 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Build and publish
-        run: npm run dist:publish
+      # 只构建，不发布：electron-builder 26 的 GitHub publisher 会对同一个 release
+      # 并发创建两次（两个 publisher 实例都判定“release 不存在”），其中一个必然 422
+      # already_exists，整条发布链路失败。发布改由下面一步用 gh 显式完成。
+      # `--publish never` 仍会写出 latest.yml（update info 任务与发布开关无关）。
+      - name: Build
+        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Publish release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          ls -lh release/latest.yml \
+            "release/NovelCrawler-Setup-${VERSION}.exe" \
+            "release/NovelCrawler-Setup-${VERSION}.exe.blockmap"
+          # 清理之前失败运行留下的同名 release（不动 tag），否则无法重建
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes
+            for _ in 1 2 3 4 5; do
+              gh release view "$TAG" >/dev/null 2>&1 || break
+              sleep 2
+            done
+          fi
+          : > release-notes-empty.md
+          if [[ "$TAG" == *-* ]]; then
+            gh release create "$TAG" --title "$VERSION" \
+              --notes-file release-notes-empty.md --verify-tag
+          else
+            gh release create "$TAG" --title "$VERSION" \
+              --notes-file release-notes-empty.md --verify-tag --latest
+          fi
+          gh release upload "$TAG" \
+            release/latest.yml \
+            "release/NovelCrawler-Setup-${VERSION}.exe" \
+            "release/NovelCrawler-Setup-${VERSION}.exe.blockmap" \
+            --clobber
 
       - name: Sign release notes
         if: startsWith(github.ref, 'refs/tags/v')
