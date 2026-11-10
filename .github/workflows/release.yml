@@ -171,6 +171,10 @@ jobs:
 
       - uses: android-actions/setup-android@v3
         if: steps.signing.outputs.enabled == 'true'
+        with:
+          # 默认 packages 里的旧 `tools` 包在新 runner（cmdline-tools 16）已不存在，
+          # sdkmanager 会直接失败；其余 SDK 包下一步显式安装。
+          packages: 'platform-tools'
 
       - uses: gradle/actions/setup-gradle@v4
         if: steps.signing.outputs.enabled == 'true'
